@@ -3,4 +3,30 @@ src = "src"
 out = "out"
 libs = ["lib"]
 
-# See more config options https://github.com/foundry-rs/foundry/blob/master/crates/config/README.md#all-options
+remappings = [
+  'ds-test/=lib/forge-std/lib/ds-test/src/',
+  'forge-std/=lib/forge-std/src/',
+  'solmate/=lib/solmate/src/',
+  'solady/=lib/solady/src/',
+  'openzeppelin-contracts/=lib/openzeppelin-contracts/contracts/',
+  'openzeppelin-contracts-upgradeable/=lib/openzeppelin-contracts-upgradeable/contracts/',
+  'ERC-7540/=lib/ERC-7540-Reference/src/'
+]
+
+[rpc_endpoints]
+mainnet = "${ETH_RPC_URL}"
+arbitrum = "${ARBITRUM_RPC_URL}"
+optimism = "${OPTIMISM_RPC_URL}"
+base = "${BASE_RPC_URL}"
+polygon = "${POLYGON_RPC_URL}" 
+avalanche = "${AVALANCHE_RPC_URL}"
+sepolia = "${SEPOLIA_RPC_URL}"
+
+[etherscan]
+mainnet = { key = "${ETH_EXPLORER_KEY}" }
+arbitrum = { key = "${ARBITRUM_EXPLORER_KEY}", url = "https://api.arbiscan.io/api" }
+optimism = { key = "${OPTIMISM_EXPLORER_KEY}", url = "https://api-optimistic.etherscan.io/api" }
+polygon = { key = "${POLYGON_EXPLORER_KEY}", url = "https://api.polygonscan.com/api" }
+base = { key = "${BASE_EXPLORER_KEY}", url = "https://api.basescan.org/api"}
+avalanche = { key = "${AVALANCHE_EXPLORER_KEY}", url = "https://api.snowscan.xyz/api"}
+sepolia = { key = "${ETH_EXPLORER_KEY}", url = ""}
