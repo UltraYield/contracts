@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity ^0.8.28;
 
-import { AsyncVault, Limits, Fees } from "./AsyncVault.sol";
+import { AsyncVault, Fees } from "./AsyncVault.sol";
 import { SafeTransferLib } from "solmate/utils/SafeTransferLib.sol";
 import { FixedPointMathLib } from "solmate/utils/FixedPointMathLib.sol";
 import { IPriceSource } from "src/interfaces/IPriceSource.sol";
@@ -49,7 +49,6 @@ contract UltraVault is AsyncVault {
      * @param _symbol Vault symbol
      * @param _feeRecipient Fee recipient
      * @param _fees Fee on the vault
-     * @param _limits Limits for deposits
      * @param _oracle The oracle to use for pricing
      * @param _fundsHolder The fundsHolder which will manage the assets
      */
@@ -60,10 +59,9 @@ contract UltraVault is AsyncVault {
         string memory _symbol,
         address _feeRecipient,
         Fees memory _fees,
-        Limits memory _limits,
         address _oracle,
         address _fundsHolder
-    ) AsyncVault(_owner, _asset, _name, _symbol, _feeRecipient, _fees, _limits) {
+    ) AsyncVault(_owner, _asset, _name, _symbol, _feeRecipient, _fees) {
         if (_fundsHolder == address(0) || _oracle == address(0))
             revert Misconfigured();
 

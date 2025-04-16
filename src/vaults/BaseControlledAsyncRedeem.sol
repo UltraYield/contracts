@@ -322,7 +322,7 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, IERC7540Redeem {
     }
 
     /*//////////////////////////////////////////////////////////////
-                     DEPOSIT/WITHDRAWAL LIMIT LOGIC
+                     DEPOSIT/WITHDRAWAL LIMITs
     //////////////////////////////////////////////////////////////*/
 
     /**
