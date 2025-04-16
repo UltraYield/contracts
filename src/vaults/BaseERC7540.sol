@@ -10,13 +10,11 @@ import { SafeTransferLib } from "solmate/utils/SafeTransferLib.sol";
 import { ERC20 } from "solmate/tokens/ERC20.sol";
 import { InitializableOwnable } from "src/utils/InitializableOwnable.sol";
 import { Pausable } from "src/utils/Pausable.sol";
-import { ReentrancyGuard } from "solmate/utils/ReentrancyGuard.sol";
 
 abstract contract BaseERC7540 is
     ERC4626,
     InitializableOwnable,
     IERC7540Operator,
-    ReentrancyGuard,
     Pausable
 {
 
