@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0
-pragma solidity ^0.8.28;
+pragma solidity 0.8.28;
 
 import { IERC7540Operator } from "ERC-7540/interfaces/IERC7540.sol";
 // import { IERC7540Operator } from "src/interfaces/IERC7540.sol";

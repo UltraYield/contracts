@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0
-pragma solidity ^0.8.28;
+pragma solidity 0.8.28;
 
 import { BaseControlledAsyncRedeem } from "./BaseControlledAsyncRedeem.sol";
 import { BaseERC7540, ERC20 } from "./BaseERC7540.sol";
