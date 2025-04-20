@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0
-pragma solidity ^0.8.28;
+pragma solidity 0.8.28;
 
 import { IUltraVaultOracle, Price } from "src/interfaces/IUltraVaultOracle.sol";
 import { IPriceSource } from "src/interfaces/IPriceSource.sol";
