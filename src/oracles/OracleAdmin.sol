@@ -113,8 +113,10 @@ contract OracleAdmin is InitializableOwnable {
     //////////////////////////////////////////////////////////////*/
 
     function setAdmin(address _admin) external onlyOwner {
-        emit AdminUpdated(admin, _admin);
-        admin = _admin;
+        if (admin != _admin) {
+            emit AdminUpdated(admin, _admin);
+            admin = _admin;
+        }
     }
 
     function claimOracleOwnership() external onlyOwner {

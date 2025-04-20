@@ -27,13 +27,11 @@ abstract contract AsyncVault is BaseControlledAsyncRedeem {
     using FixedPointMathLib for uint256;
 
     // Events
-    event FeesRecipientUpdated(Fees oldRecipient, Fees newRecipient);
+    event FeesRecipientUpdated(address oldRecipient, address newRecipient);
     event FeesUpdated(Fees oldFees, Fees newFees);
 
     // Errors
-    error ZeroAmount();
     error Misconfigured();
-    error InvalidFee(uint256 fee);
 
     /// @notice Fee recipient address
     address feeRecipient;
@@ -293,9 +291,13 @@ abstract contract AsyncVault is BaseControlledAsyncRedeem {
         if (newFeeRecipient_ == address(0)) 
             revert Misconfigured();
 
-        _collectFees();
+        if (feeRecipient != newFeeRecipient_) {
+            _collectFees();
 
-        feeRecipient = newFeeRecipient_;
+            emit FeesRecipientUpdated(feeRecipient, newFeeRecipient_);
+
+            feeRecipient = newFeeRecipient_;
+        }
     }
 
     /**
