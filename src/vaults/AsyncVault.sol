@@ -102,25 +102,6 @@ abstract contract AsyncVault is BaseControlledAsyncRedeem {
     }
 
     /*//////////////////////////////////////////////////////////////
-                            ACCOUNTING LOGIC
-    //////////////////////////////////////////////////////////////*/
-
-    /**
-     * @notice Convert shares to assets with lower bound
-     * @param shares Amount to convert
-     * @return lowerTotalAssets Lower bound of assets
-     * @dev Used on redeem fulfillment to ensure asset buffer between reported and actual totalAssets
-     */
-    function convertToLowBoundAssets(
-        uint256 shares
-    ) public view returns (uint256) {
-        uint256 supply = totalSupply;
-        uint256 assets = totalAssets();
-
-        return supply == 0 ? shares : shares.mulDivDown(assets, supply);
-    }
-
-    /*//////////////////////////////////////////////////////////////
                         REQUEST REDEEM LOGIC
     //////////////////////////////////////////////////////////////*/
 
@@ -152,9 +133,7 @@ abstract contract AsyncVault is BaseControlledAsyncRedeem {
         // Collect fees accrued to date
         _collectFees();
 
-        // Using the lower bound totalAssets ensures that even with volatile 
-        // strategies and market conditions we will have sufficient assets to cover the redeem
-        assets = convertToLowBoundAssets(shares);
+        assets = convertToAssets(shares);
 
         // Calculate the withdrawal incentive fee from the assets
         Fees memory fees_ = fees;
@@ -195,7 +174,7 @@ abstract contract AsyncVault is BaseControlledAsyncRedeem {
         uint256 totalFees;
 
         for (uint256 i; i < shares.length; i++) {
-            uint256 assets = convertToLowBoundAssets(shares[i]);
+            uint256 assets = convertToAssets(shares[i]);
 
             // Calculate the withdrawal incentive fee from the assets
             uint256 feesToCollect = assets.mulDivDown(
