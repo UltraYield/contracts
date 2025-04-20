@@ -6,7 +6,6 @@ import { IERC7540Operator } from "ERC-7540/interfaces/IERC7540.sol";
 import { IERC7575, IERC165 } from "ERC-7540/interfaces/IERC7575.sol";
 // import { IERC7575, IERC165 } from "src/interfaces/IERC7575.sol";
 import { ERC4626 } from "solmate/tokens/ERC4626.sol";
-import { SafeTransferLib } from "solmate/utils/SafeTransferLib.sol";
 import { ERC20 } from "solmate/tokens/ERC20.sol";
 import { InitializableOwnable } from "src/utils/InitializableOwnable.sol";
 import { Pausable } from "src/utils/Pausable.sol";
@@ -72,9 +71,13 @@ abstract contract BaseERC7540 is
         bool approved
     ) public virtual returns (bool success) {
         require(msg.sender != operator, "ERC7540Vault/cannot-set-self-as-operator");
-        isOperator[msg.sender][operator] = approved;
-        emit OperatorSet(msg.sender, operator, approved);
-        success = true;
+        if (isOperator[msg.sender][operator] != approved) {
+            isOperator[msg.sender][operator] = approved;
+            emit OperatorSet(msg.sender, operator, approved);
+            success = true;
+        } else {
+            success = false;
+        }
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -140,11 +143,15 @@ abstract contract BaseERC7540 is
 
         require(recoveredAddress != address(0) && recoveredAddress == controller, "INVALID_SIGNER");
 
-        isOperator[controller][operator] = approved;
+        if (isOperator[controller][operator] != approved) {
+            isOperator[controller][operator] = approved;
 
-        emit OperatorSet(controller, operator, approved);
+            emit OperatorSet(controller, operator, approved);
 
-        success = true;
+            success = true;
+        } else {
+            success = false;
+        }
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -162,9 +169,11 @@ abstract contract BaseERC7540 is
         address account,
         bool approved
     ) public onlyOwner {
-        hasRole[role][account] = approved;
+        if (hasRole[role][account] != approved) {
+            hasRole[role][account] = approved;
 
-        emit RoleUpdated(role, account, approved);
+            emit RoleUpdated(role, account, approved);
+        }
     }
 
     /**
