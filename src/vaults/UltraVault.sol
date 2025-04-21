@@ -89,8 +89,6 @@ contract UltraVault is AsyncVault {
 
     /// @dev After deposit hook - collect fees and send funds to fundsHolder
     function afterDeposit(uint256 assets, uint256) internal override {
-        _collectFees();
-
         // Funds are sent to holder
         SafeERC20.safeTransfer(IERC20(asset()), fundsHolder, assets);
     }

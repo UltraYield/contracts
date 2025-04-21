@@ -36,6 +36,7 @@ contract VaultPriceManager is InitializableOwnable {
 
     // Events
     event VaultAdded(address vault);
+    event OracleUpdated(address oldOracle, address newOracle);
     event LimitsUpdated(address vault, Limit oldLimit, Limit newLimit);
     event AdminUpdated(address vault, address admin, bool isAdmin);
 
@@ -196,6 +197,23 @@ contract VaultPriceManager is InitializableOwnable {
             }
         } else if (priceUpdate.shareValueInAssets > highwaterMark) {
             highwaterMarks[priceUpdate.vault] = priceUpdate.shareValueInAssets;
+        }
+    }
+
+    /*//////////////////////////////////////////////////////////////
+                            ORACLE UPDATE
+    //////////////////////////////////////////////////////////////*/
+
+    /**
+     * @notice Set oracle address
+     * @param _newOracle new oracle address
+     */
+    function setOracle(
+        address _newOracle
+    ) external onlyOwner {
+        if (address(oracle) != _newOracle) {
+            emit OracleUpdated(address(oracle), _newOracle);
+            oracle = IUltraVaultOracle(_newOracle);
         }
     }
 

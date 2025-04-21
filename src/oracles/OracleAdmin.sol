@@ -16,6 +16,9 @@ contract OracleAdmin is InitializableOwnable {
     /// @notice Address authorized to update prices
     address public admin;
 
+    /// @notice Emitted when oracle is updated
+    event OracleUpdated(address oldOracle, address newOracle);
+
     /// @notice Emitted when admin is updated
     event AdminUpdated(address oldAdmin, address newAdmin);
 
@@ -58,9 +61,9 @@ contract OracleAdmin is InitializableOwnable {
      * @dev Array lengths must match
      */
     function setPrices(
-        address[] memory bases,
-        address[] memory quotes,
-        uint256[] memory prices
+        address[] calldata bases,
+        address[] calldata quotes,
+        uint256[] calldata prices
     ) external onlyAdminOrOwner {
         oracle.setPrices(bases, quotes, prices);
     }
@@ -95,10 +98,10 @@ contract OracleAdmin is InitializableOwnable {
      * @dev Array lengths must match
      */
     function scheduleLinearPricesUpdates(
-        address[] memory bases,
-        address[] memory quotes,
-        uint256[] memory prices,
-        uint256[] memory vestingTimes
+        address[] calldata bases,
+        address[] calldata quotes,
+        uint256[] calldata prices,
+        uint256[] calldata vestingTimes
     ) external onlyAdminOrOwner {
         oracle.scheduleLinearPricesUpdates(
             bases,
@@ -111,6 +114,15 @@ contract OracleAdmin is InitializableOwnable {
     /*//////////////////////////////////////////////////////////////
                             MANAGEMENT LOGIC
     //////////////////////////////////////////////////////////////*/
+
+    function setOracle(
+        address _newOracle
+    ) external onlyOwner {
+        if (address(oracle) != _newOracle) {
+            emit OracleUpdated(address(oracle), _newOracle);
+            oracle = IUltraVaultOracle(_newOracle);
+        }
+    }
 
     function setAdmin(address _admin) external onlyOwner {
         if (admin != _admin) {
