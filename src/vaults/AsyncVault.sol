@@ -33,6 +33,8 @@ abstract contract AsyncVault is BaseControlledAsyncRedeem {
     // Errors
     error Misconfigured();
 
+    bytes32 public constant OPERATOR_ROLE = keccak256("OPERATOR_ROLE");
+
     /// @notice Fee recipient address
     address feeRecipient;
     /// @notice Current fees
@@ -194,6 +196,16 @@ abstract contract AsyncVault is BaseControlledAsyncRedeem {
         collectWithdrawalFee(totalFees);
 
         return total;
+    }
+
+    /// @dev Internal fulfill redeem request logic
+    /// @dev In async vaults it's a priveledged function
+    function _fulfillRedeem(
+        uint256 assets,
+        uint256 shares,
+        address controller
+    ) internal virtual onlyRoleOrOwner(OPERATOR_ROLE) override returns (uint256) {
+        super._fulfillRedeem(assets, shares, controller);
     }
 
     /**
