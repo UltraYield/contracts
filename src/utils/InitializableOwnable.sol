@@ -40,6 +40,7 @@ contract InitializableOwnable {
      * @dev Can only be called once
      */
     function initOwner(address _newOwner) public notInitialized {
+        require(_newOwner != address(0));
         initialized = true;
         owner = _newOwner;
     }
