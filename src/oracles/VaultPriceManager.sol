@@ -78,7 +78,7 @@ contract VaultPriceManager is InitializableOwnable {
      * @dev Must be called before vault receives deposits
      */
     function addVault(address vault) external onlyOwner {
-        if (IERC20Supply(vault).totalSupply() > 1)
+        if (IERC20Supply(vault).totalSupply() > 0)
             revert CanNotAddNonEmptyVault();
 
         highwaterMarks[vault] = 1e18;

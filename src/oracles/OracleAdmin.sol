@@ -70,19 +70,19 @@ contract OracleAdmin is InitializableOwnable {
      * @param base The base asset
      * @param quote The quote asset
      * @param targetPrice The target price of the base in terms of the quote
-     * @param timestampForFullVesting The target timestamp for full vesting
+     * @param vestingTime The time over which vesting would occur
      */
     function scheduleLinearPriceUpdate(
         address base,
         address quote,
         uint256 targetPrice,
-        uint256 timestampForFullVesting
+        uint256 vestingTime
     ) external onlyAdminOrOwner {
         oracle.scheduleLinearPriceUpdate(
             base,
             quote,
             targetPrice,
-            timestampForFullVesting
+            vestingTime
         );
     }
 
@@ -91,20 +91,20 @@ contract OracleAdmin is InitializableOwnable {
      * @param bases The base assets
      * @param quotes The quote assets
      * @param prices The prices of the bases in terms of the quotes
-     * @param timestampForFullVesting The price increases per block
+     * @param vestingTimes Vesting times over which the updates occur
      * @dev Array lengths must match
      */
-    function scheduleLinearPricesUpdate(
+    function scheduleLinearPricesUpdates(
         address[] memory bases,
         address[] memory quotes,
         uint256[] memory prices,
-        uint256[] memory timestampForFullVesting
+        uint256[] memory vestingTimes
     ) external onlyAdminOrOwner {
-        oracle.scheduleLinearPricesUpdate(
+        oracle.scheduleLinearPricesUpdates(
             bases,
             quotes,
             prices,
-            timestampForFullVesting
+            vestingTimes
         );
     }
 
