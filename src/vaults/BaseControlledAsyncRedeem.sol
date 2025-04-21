@@ -55,13 +55,13 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, IERC7540Redeem {
         uint256 assets,
         address receiver
     ) public override whenNotPaused returns (uint256 shares) {
-        // Pre-deposit hook
-        beforeDeposit(assets, shares);
-
         // Rounding down can cause zero shares minted
         shares = previewDeposit(assets);
         if (shares == 0)
             revert EmptyDeposit();
+
+        // Pre-deposit hook
+        beforeDeposit(assets, shares);
 
         // Transfer before mint to avoid reentering
         SafeTransferLib.safeTransferFrom(
@@ -91,13 +91,14 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, IERC7540Redeem {
         uint256 shares,
         address receiver
     ) public override whenNotPaused returns (uint256 assets) {
-        // Pre-deposit hook
-        beforeDeposit(assets, shares);
 
         if (shares == 0)
             revert NothingToMint();
 
         assets = previewMint(shares); 
+
+        // Pre-deposit hook
+        beforeDeposit(assets, shares);
 
         // Need to transfer before minting or ERC777s could reenter
         SafeTransferLib.safeTransferFrom(
