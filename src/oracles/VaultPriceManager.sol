@@ -62,6 +62,7 @@ contract VaultPriceManager is InitializableOwnable {
      * @param _owner Owner address
      */
     constructor(address _oracle, address _owner) {
+        require(_oracle != address(0));
         initOwner(_owner);
         oracle = IUltraVaultOracle(_oracle);
     }

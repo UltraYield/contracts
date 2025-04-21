@@ -57,6 +57,7 @@ abstract contract AsyncVault is BaseControlledAsyncRedeem {
         address _feeRecipient,
         Fees memory _fees
     ) BaseERC7540(_owner, _asset, _name, _symbol) {
+        require(_feeRecipient != address(0)); 
         feeRecipient = _feeRecipient;
         _setFees(_fees);
     }

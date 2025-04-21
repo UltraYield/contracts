@@ -105,6 +105,7 @@ abstract contract BaseERC7540 is
         require(controller != operator, "ERC7540Vault/cannot-set-self-as-operator");
         require(block.timestamp <= deadline, "ERC7540Vault/expired");
         require(!authorizations[controller][nonce], "ERC7540Vault/authorization-used");
+        require(signature.length == 65, "ERC7540Vault/Invalid signature length");
 
         authorizations[controller][nonce] = true;
 
