@@ -60,6 +60,7 @@ abstract contract AsyncVault is BaseControlledAsyncRedeem {
         require(_feeRecipient != address(0)); 
         feeRecipient = _feeRecipient;
         _setFees(_fees);
+        _pause();
     }
 
     /*//////////////////////////////////////////////////////////////
