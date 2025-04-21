@@ -144,11 +144,11 @@ abstract contract AsyncVault is BaseControlledAsyncRedeem {
             1e18
         );
 
-        // Burn the shares
-        _burn(address(this), shares);
-
         // Fulfill request
         _fulfillRedeem(assets - feesToCollect, shares, controller);
+
+        // Burn the shares
+        _burn(address(this), shares);
 
         collectWithdrawalFee(feesToCollect);
     }
