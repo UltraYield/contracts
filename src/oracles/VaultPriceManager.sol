@@ -2,8 +2,8 @@
 pragma solidity 0.8.28;
 
 import { InitializableOwnable } from "src/utils/InitializableOwnable.sol";
-import { FixedPointMathLib } from "solmate/utils/FixedPointMathLib.sol";
-import { ERC4626 } from "solmate/tokens/ERC4626.sol";
+import { FixedPointMathLib } from "../utils/FixedPointMathLib.sol";
+import { IERC4626 } from "openzeppelin-contracts/interfaces/IERC4626.sol";
 import { IUltraVaultOracle, Price } from "src/interfaces/IUltraVaultOracle.sol";
 import { IERC20Supply } from "src/interfaces/IERC20Supply.sol";
 import { IPausable } from "src/interfaces/IPausable.sol";
@@ -83,7 +83,7 @@ contract VaultPriceManager is InitializableOwnable {
 
         highwaterMarks[vault] = 1e18;
 
-        oracle.setPrice(vault, address(ERC4626(vault).asset()), 1e18);
+        oracle.setPrice(vault, address(IERC4626(vault).asset()), 1e18);
 
         emit VaultAdded(vault);
     }
