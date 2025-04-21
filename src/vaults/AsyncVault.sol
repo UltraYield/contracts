@@ -201,13 +201,13 @@ abstract contract AsyncVault is BaseControlledAsyncRedeem {
     }
 
     /// @dev Internal fulfill redeem request logic
-    /// @dev In async vaults it's a priveledged function
+    /// @dev In async vaults it's a privileged function
     function _fulfillRedeem(
         uint256 assets,
         uint256 shares,
         address controller
     ) internal virtual onlyRoleOrOwner(OPERATOR_ROLE) override returns (uint256) {
-        super._fulfillRedeem(assets, shares, controller);
+        return super._fulfillRedeem(assets, shares, controller);
     }
 
     /**

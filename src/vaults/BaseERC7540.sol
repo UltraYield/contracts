@@ -28,10 +28,9 @@ abstract contract BaseERC7540 is
     // @dev Assume requests are non-fungible and all have ID = 0
     uint256 internal constant REQUEST_ID = 0;
 
-    address public share = address(this);
+    address public immutable share = address(this);
 
     mapping(address => mapping(address => bool)) public isOperator;
-    mapping(address controller => mapping(bytes32 nonce => bool used)) public authorizations;
 
     /**
      * @notice Constructor for BaseERC7540
@@ -46,6 +45,7 @@ abstract contract BaseERC7540 is
         string memory _name,
         string memory _symbol
     ) public virtual onlyInitializing {
+        __ERC20_init(_name, _symbol);
         __ERC4626_init(IERC20(_asset));
         initOwner(_owner);
     }
