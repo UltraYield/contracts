@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0
-pragma solidity ^0.8.28;
+pragma solidity 0.8.28;
 
 /**
  * @title InitializableOwnable
@@ -40,6 +40,7 @@ contract InitializableOwnable {
      * @dev Can only be called once
      */
     function initOwner(address _newOwner) public notInitialized {
+        require(_newOwner != address(0));
         initialized = true;
         owner = _newOwner;
     }

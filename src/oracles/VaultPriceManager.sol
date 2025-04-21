@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0
-pragma solidity ^0.8.28;
+pragma solidity 0.8.28;
 
 import { InitializableOwnable } from "src/utils/InitializableOwnable.sol";
 import { FixedPointMathLib } from "solmate/utils/FixedPointMathLib.sol";
@@ -36,7 +36,7 @@ contract VaultPriceManager is InitializableOwnable {
 
     // Events
     event VaultAdded(address vault);
-    event LimitUpdated(address vault, Limit oldLimit, Limit newLimit);
+    event LimitsUpdated(address vault, Limit oldLimit, Limit newLimit);
     event AdminUpdated(address vault, address admin, bool isAdmin);
 
     // Errors
@@ -62,6 +62,7 @@ contract VaultPriceManager is InitializableOwnable {
      * @param _owner Owner address
      */
     constructor(address _oracle, address _owner) {
+        require(_oracle != address(0));
         initOwner(_owner);
         oracle = IUltraVaultOracle(_oracle);
     }
@@ -77,7 +78,7 @@ contract VaultPriceManager is InitializableOwnable {
      * @dev Must be called before vault receives deposits
      */
     function addVault(address vault) external onlyOwner {
-        if (IERC20Supply(vault).totalSupply() > 1)
+        if (IERC20Supply(vault).totalSupply() > 0)
             revert CanNotAddNonEmptyVault();
 
         highwaterMarks[vault] = 1e18;
@@ -213,9 +214,10 @@ contract VaultPriceManager is InitializableOwnable {
         address _admin,
         bool _isAdmin
     ) external onlyOwner {
-        emit AdminUpdated(_vault, _admin, _isAdmin);
-
-        isAdmin[_vault][_admin] = _isAdmin;
+        if (isAdmin[_vault][_admin] != _isAdmin) {
+            emit AdminUpdated(_vault, _admin, _isAdmin);
+            isAdmin[_vault][_admin] = _isAdmin;
+        }
     }
 
     /**
@@ -261,9 +263,17 @@ contract VaultPriceManager is InitializableOwnable {
     function _setLimits(address _vault, Limit memory _limit) internal {
         if (_limit.jump > 1e18 || _limit.drawdown > 1e18)
             revert InvalidLimit();
-        emit LimitUpdated(_vault, limits[_vault], _limit);
 
-        limits[_vault] = _limit;
+        Limit memory oldLimit = limits[_vault];
+
+        if (
+            _limit.jump != oldLimit.jump || 
+            _limit.drawdown != oldLimit.drawdown
+        ) {
+            emit LimitsUpdated(_vault, limits[_vault], _limit);
+
+            limits[_vault] = _limit;
+        }
     }
 
     /*//////////////////////////////////////////////////////////////

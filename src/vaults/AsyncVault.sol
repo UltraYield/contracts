@@ -1,18 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0
-pragma solidity ^0.8.28;
+pragma solidity 0.8.28;
 
 import { BaseControlledAsyncRedeem } from "./BaseControlledAsyncRedeem.sol";
 import { BaseERC7540, ERC20 } from "./BaseERC7540.sol";
 import { SafeTransferLib } from "solmate/utils/SafeTransferLib.sol";
 import { FixedPointMathLib } from "solmate/utils/FixedPointMathLib.sol";
-
-/// @notice Vault deposit limits and minimum amounts
-struct Limits {
-    /// @notice Max assets that can be deposited
-    uint256 depositLimit;
-    /// @notice Min shares for mint/redeem
-    uint256 minAmount;
-}
 
 /// @notice Vault fee configuration
 struct Fees {
@@ -35,22 +27,18 @@ abstract contract AsyncVault is BaseControlledAsyncRedeem {
     using FixedPointMathLib for uint256;
 
     // Events
-    event FeesRecipientUpdated(Fees oldRecipient, Fees newRecipient);
+    event FeesRecipientUpdated(address oldRecipient, address newRecipient);
     event FeesUpdated(Fees oldFees, Fees newFees);
-    event LimitsUpdated(Limits oldLimits, Limits newLimits);
 
     // Errors
-    error ZeroAmount();
     error Misconfigured();
-    error InvalidFee(uint256 fee);
-    error CanNotRedeemLessThanMinAmount();
+
+    bytes32 public constant OPERATOR_ROLE = keccak256("OPERATOR_ROLE");
 
     /// @notice Fee recipient address
     address feeRecipient;
     /// @notice Current fees
     Fees public fees;
-    /// @notice Current limits
-    Limits public limits;
 
     /**
      * @notice Initialize vault with basic parameters
@@ -60,7 +48,6 @@ abstract contract AsyncVault is BaseControlledAsyncRedeem {
      * @param _symbol Vault symbol
      * @param _feeRecipient Fee recipient
      * @param _fees Fee configuration
-     * @param _limits Deposit limits and minimum amounts
      */
     constructor(
         address _owner,
@@ -68,12 +55,12 @@ abstract contract AsyncVault is BaseControlledAsyncRedeem {
         string memory _name,
         string memory _symbol,
         address _feeRecipient,
-        Fees memory _fees,
-        Limits memory _limits
+        Fees memory _fees
     ) BaseERC7540(_owner, _asset, _name, _symbol) {
+        require(_feeRecipient != address(0)); 
         feeRecipient = _feeRecipient;
         _setFees(_fees);
-        _setLimits(_limits);
+        _pause();
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -117,105 +104,6 @@ abstract contract AsyncVault is BaseControlledAsyncRedeem {
     }
 
     /*//////////////////////////////////////////////////////////////
-                            ACCOUNTING LOGIC
-    //////////////////////////////////////////////////////////////*/
-
-    /**
-     * @notice Preview shares received for deposit
-     * @param assets Amount to deposit
-     * @return shares Amount of shares received
-     * @dev Returns 0 if vault is paused or deposit doesn't meet limits
-     */
-    function previewDeposit(
-        uint256 assets
-    ) public view override returns (uint256) {
-        Limits memory limits_ = limits;
-        uint256 shares = convertToShares(assets);
-
-        if (
-            paused ||
-            totalAssets() + assets > limits_.depositLimit ||
-            shares < limits_.minAmount
-        ) return 0;
-
-        return super.previewDeposit(assets);
-    }
-
-    /**
-     * @notice Preview assets needed for mint
-     * @param shares Amount to mint
-     * @return assets Amount of assets required
-     * @dev Returns 0 if vault is paused or mint doesn't meet limits
-     */
-    function previewMint(
-        uint256 shares
-    ) public view override returns (uint256) {
-        Limits memory limits_ = limits;
-        uint256 assets = convertToAssets(shares);
-
-        if (
-            paused ||
-            totalAssets() + assets > limits_.depositLimit ||
-            shares < limits_.minAmount
-        ) return 0;
-
-        return super.previewMint(shares);
-    }
-
-    /**
-     * @notice Convert shares to assets with lower bound
-     * @param shares Amount to convert
-     * @return lowerTotalAssets Lower bound of assets
-     * @dev Used on redeem fulfillment to ensure asset buffer between reported and actual totalAssets
-     */
-    function convertToLowBoundAssets(
-        uint256 shares
-    ) public view returns (uint256) {
-        uint256 supply = totalSupply;
-        uint256 assets = totalAssets();
-
-        return supply == 0 ? shares : shares.mulDivDown(assets, supply);
-    }
-
-    /*//////////////////////////////////////////////////////////////
-                     DEPOSIT/WITHDRAWAL LIMIT LOGIC
-    //////////////////////////////////////////////////////////////*/
-
-    /**
-     * @notice Get max assets that can be deposited
-     * @return maxAssets Maximum deposit amount
-     * @dev Returns 0 if vault is paused or deposit limit reached
-     */
-    function maxDeposit(address) public view override returns (uint256) {
-        uint256 assets = totalAssets();
-        uint256 depositLimit_ = limits.depositLimit;
-
-        if (paused) return 0;
-        if (depositLimit_ == type(uint256).max) return depositLimit_;
-
-        return assets >= depositLimit_ ? 0 : depositLimit_ - assets;
-    }
-
-    /**
-     * @notice Get max shares that can be minted
-     * @return maxShares Maximum mint amount
-     * @dev Returns 0 if vault is paused or deposit limit reached
-     * @dev Overflows if depositLimit is close to maxUint
-     */
-    function maxMint(address) public view override returns (uint256 maxShares) {
-        uint256 assets = totalAssets();
-        uint256 depositLimit_ = limits.depositLimit;
-
-        if (paused) 
-            return 0;
-        if (depositLimit_ == type(uint256).max) 
-            return depositLimit_;
-
-        return assets >= depositLimit_ ? 0 : 
-            convertToShares(depositLimit_ - assets);
-    }
-
-    /*//////////////////////////////////////////////////////////////
                         REQUEST REDEEM LOGIC
     //////////////////////////////////////////////////////////////*/
 
@@ -225,27 +113,7 @@ abstract contract AsyncVault is BaseControlledAsyncRedeem {
      * @return requestId Request identifier
      */
     function requestRedeem(uint256 shares) external returns (uint256 requestId) {
-        return requestRedeem(shares, msg.sender, msg.sender);
-    }
-
-    /**
-     * @notice Request redeem of shares
-     * @param shares Amount to redeem
-     * @param controller Receiver of pending shares
-     * @param owner Owner of shares
-     * @return requestId Request identifier
-     * @dev Adds to controller's pending redeem requests
-     * @dev Reverts if shares < minAmount
-     */
-    function requestRedeem(
-        uint256 shares,
-        address controller,
-        address owner
-    ) public override returns (uint256 requestId) {
-        if (shares < limits.minAmount) 
-            revert CanNotRedeemLessThanMinAmount();
-
-        return _requestRedeem(shares, controller, owner);
+        return _requestRedeem(shares, msg.sender, msg.sender);
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -267,9 +135,7 @@ abstract contract AsyncVault is BaseControlledAsyncRedeem {
         // Collect fees accrued to date
         _collectFees();
 
-        // Using the lower bound totalAssets ensures that even with volatile 
-        // strategies and market conditions we will have sufficient assets to cover the redeem
-        assets = convertToLowBoundAssets(shares);
+        assets = convertToAssets(shares);
 
         // Calculate the withdrawal incentive fee from the assets
         Fees memory fees_ = fees;
@@ -278,11 +144,11 @@ abstract contract AsyncVault is BaseControlledAsyncRedeem {
             1e18
         );
 
-        // Burn the shares
-        _burn(address(this), shares);
-
         // Fulfill request
         _fulfillRedeem(assets - feesToCollect, shares, controller);
+
+        // Burn the shares
+        _burn(address(this), shares);
 
         collectWithdrawalFee(feesToCollect);
     }
@@ -310,7 +176,7 @@ abstract contract AsyncVault is BaseControlledAsyncRedeem {
         uint256 totalFees;
 
         for (uint256 i; i < shares.length; i++) {
-            uint256 assets = convertToLowBoundAssets(shares[i]);
+            uint256 assets = convertToAssets(shares[i]);
 
             // Calculate the withdrawal incentive fee from the assets
             uint256 feesToCollect = assets.mulDivDown(
@@ -332,6 +198,16 @@ abstract contract AsyncVault is BaseControlledAsyncRedeem {
         collectWithdrawalFee(totalFees);
 
         return total;
+    }
+
+    /// @dev Internal fulfill redeem request logic
+    /// @dev In async vaults it's a priveledged function
+    function _fulfillRedeem(
+        uint256 assets,
+        uint256 shares,
+        address controller
+    ) internal virtual onlyRoleOrOwner(OPERATOR_ROLE) override returns (uint256) {
+        super._fulfillRedeem(assets, shares, controller);
     }
 
     /**
@@ -429,9 +305,13 @@ abstract contract AsyncVault is BaseControlledAsyncRedeem {
         if (newFeeRecipient_ == address(0)) 
             revert Misconfigured();
 
-        _collectFees();
+        if (feeRecipient != newFeeRecipient_) {
+            _collectFees();
 
-        feeRecipient = newFeeRecipient_;
+            emit FeesRecipientUpdated(feeRecipient, newFeeRecipient_);
+
+            feeRecipient = newFeeRecipient_;
+        }
     }
 
     /**
@@ -492,29 +372,5 @@ abstract contract AsyncVault is BaseControlledAsyncRedeem {
             // Mint shares to fee recipient
             _mint(feeRecipient, convertToShares(performanceFee + managementFee));
         }
-    }
-
-    /*//////////////////////////////////////////////////////////////
-                          LIMIT LOGIC
-    //////////////////////////////////////////////////////////////*/
-
-    /**
-     * @notice Update deposit limits and minimum amounts
-     * @param limits_ New limit configuration
-     */
-    function setLimits(Limits memory limits_) external onlyOwner {
-        _setLimits(limits_);
-    }
-
-    function _setLimits(Limits memory limits_) internal {
-        uint256 totalSupply_ = totalSupply;
-        if (totalSupply_ > 0 && limits_.depositLimit < totalAssets())
-            revert Misconfigured();
-        if (limits_.minAmount > (10 ** decimals)) 
-            revert Misconfigured();
-
-        emit LimitsUpdated(limits, limits_);
-
-        limits = limits_;
     }
 }

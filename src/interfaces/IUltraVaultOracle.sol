@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0
-pragma solidity ^0.8.28;
+pragma solidity 0.8.28;
 
 import { IPriceSource } from "./IPriceSource.sol";
 
@@ -64,13 +64,13 @@ interface IUltraVaultOracle is IPriceSource {
      * @param base The base asset
      * @param quote The quote asset
      * @param targetPrice The target price of the base in terms of the quote
-     * @param timestampForFullVesting The target timestamp for full vesting
+     * @param vestingTime The time over which vesting would occur
      */
     function scheduleLinearPriceUpdate(
         address base,
         address quote,
         uint256 targetPrice,
-        uint256 timestampForFullVesting
+        uint256 vestingTime
     ) external;
 
     /**
@@ -78,14 +78,14 @@ interface IUltraVaultOracle is IPriceSource {
      * @param bases The base assets
      * @param quotes The quote assets
      * @param targetPrices The target prices of the bases in terms of the quotes
-     * @param timestampsForFullVesting Target timestamps for full vesting
+     * @param vestingTimes The times over which vesting would occur
      * @dev Array lengths must match
      */
-    function scheduleLinearPricesUpdate(
+    function scheduleLinearPricesUpdates(
         address[] memory bases,
         address[] memory quotes,
         uint256[] memory targetPrices,
-        uint256[] memory timestampsForFullVesting
+        uint256[] memory vestingTimes
     ) external;
 
     /**

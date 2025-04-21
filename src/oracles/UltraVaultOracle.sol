@@ -1,11 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0
-pragma solidity ^0.8.28;
+pragma solidity 0.8.28;
 
 import { IUltraVaultOracle, Price } from "src/interfaces/IUltraVaultOracle.sol";
 import { IPriceSource } from "src/interfaces/IPriceSource.sol";
 import { InitializableOwnable } from "src/utils/InitializableOwnable.sol";
 import { Math } from "openzeppelin-contracts/utils/math/Math.sol";
-import { ScaleUtils, Scale } from "src/oracles/ScaleUtils.sol";
 import { IERC20Metadata } from "openzeppelin-contracts/token/ERC20/extensions/IERC20Metadata.sol";
 
 /**
@@ -100,19 +99,19 @@ contract UltraVaultOracle is IPriceSource, InitializableOwnable {
      * @param base The base asset
      * @param quote The quote asset
      * @param targetPrice The target price of the base in terms of the quote
-     * @param timestampForFullVesting The target timestamp for full vesting
+     * @param vestingTime The time over which vesting would occur
      */
     function scheduleLinearPriceUpdate(
         address base,
         address quote,
         uint256 targetPrice,
-        uint256 timestampForFullVesting
+        uint256 vestingTime
     ) external onlyOwner {
         _scheduleLinearPriceUpdate(
             base,
             quote,
             targetPrice,
-            timestampForFullVesting
+            vestingTime
         );
     }
 
@@ -121,25 +120,25 @@ contract UltraVaultOracle is IPriceSource, InitializableOwnable {
      * @param bases The base assets
      * @param quotes The quote assets
      * @param targetPrices The target prices of the bases in terms of the quotes
-     * @param timestampsForFullVesting The price increases per block
+     * @param vestingTimes The times over which vesting would occur
      * @dev Array lengths must match
      */
-    function scheduleLinearPricesUpdate(
+    function scheduleLinearPricesUpdates(
         address[] memory bases,
         address[] memory quotes,
         uint256[] memory targetPrices,
-        uint256[] memory timestampsForFullVesting
+        uint256[] memory vestingTimes
     ) external onlyOwner {
         _checkLength(bases.length, quotes.length);
         _checkLength(bases.length, targetPrices.length);
-        _checkLength(bases.length, timestampsForFullVesting.length);
+        _checkLength(bases.length, vestingTimes.length);
 
         for (uint256 i = 0; i < bases.length; i++) {
             _scheduleLinearPriceUpdate(
                 bases[i],
                 quotes[i],
                 targetPrices[i],
-                timestampsForFullVesting[i]
+                vestingTimes[i]
             );
         }
     }
@@ -148,10 +147,16 @@ contract UltraVaultOracle is IPriceSource, InitializableOwnable {
         address base,
         address quote,
         uint256 targetPrice,
-        uint256 timestampForFullVesting
+        uint256 vestingTime
     ) internal {
-        if (timestampForFullVesting == 0)
+        // We are scheduling updates at least over 23 hours for operator convenience
+        if (
+            vestingTime < 23 hours || 
+            vestingTime > 60 days
+        )
             revert Misconfigured();
+
+        uint256 timestampForFullVesting = block.timestamp + vestingTime;
 
         uint256 price = _getCurrentPrice(base, quote);
 
@@ -229,16 +234,6 @@ contract UltraVaultOracle is IPriceSource, InitializableOwnable {
         return _getQuote(inAmount, base, quote);
     }
 
-    /// @inheritdoc IPriceSource
-    function getQuotes(
-        uint256 inAmount,
-        address base, 
-        address quote
-    ) external view returns (uint256, uint256) {
-        uint256 outAmount = _getQuote(inAmount, base, quote);
-        return (outAmount, outAmount);
-    }
-
     function _getQuote(
         uint256 inAmount,
         address base,
@@ -251,9 +246,8 @@ contract UltraVaultOracle is IPriceSource, InitializableOwnable {
         uint8 baseDecimals = _getDecimals(base);
         uint8 quoteDecimals = _getDecimals(quote);
 
-        Scale scale = ScaleUtils.calcScale(baseDecimals, quoteDecimals, 18);
-
-        return ScaleUtils.calcOutAmount(inAmount, price, scale, false);
+        // 18 is price feed decimals
+        return inAmount * price * (10 ** quoteDecimals) / (10 ** (baseDecimals + 18));
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -270,7 +264,7 @@ contract UltraVaultOracle is IPriceSource, InitializableOwnable {
      * @notice Get asset decimals
      * @param asset Token address
      * @return The decimals of the asset
-     * @dev Returns decimas if found, otherwise 18 for future deployments
+     * @dev Returns decimals if found, otherwise 18 for future deployments
      */
     function _getDecimals(address asset) internal view returns (uint8) {
         (bool success, bytes memory data) = 

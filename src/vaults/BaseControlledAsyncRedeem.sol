@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0
-pragma solidity ^0.8.28;
+pragma solidity 0.8.28;
 
 import { BaseERC7540 } from "./BaseERC7540.sol";
 import { IERC7540Redeem } from "ERC-7540/interfaces/IERC7540.sol";
@@ -55,13 +55,13 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, IERC7540Redeem {
         uint256 assets,
         address receiver
     ) public override whenNotPaused returns (uint256 shares) {
-        // Pre-deposit hook
-        beforeDeposit(assets, shares);
-
         // Rounding down can cause zero shares minted
         shares = previewDeposit(assets);
         if (shares == 0)
             revert EmptyDeposit();
+
+        // Pre-deposit hook
+        beforeDeposit(assets, shares);
 
         // Transfer before mint to avoid reentering
         SafeTransferLib.safeTransferFrom(
@@ -91,13 +91,14 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, IERC7540Redeem {
         uint256 shares,
         address receiver
     ) public override whenNotPaused returns (uint256 assets) {
-        // Pre-deposit hook
-        beforeDeposit(assets, shares);
 
         if (shares == 0)
             revert NothingToMint();
 
         assets = previewMint(shares); 
+
+        // Pre-deposit hook
+        beforeDeposit(assets, shares);
 
         // Need to transfer before minting or ERC777s could reenter
         SafeTransferLib.safeTransferFrom(
@@ -322,7 +323,7 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, IERC7540Redeem {
     }
 
     /*//////////////////////////////////////////////////////////////
-                     DEPOSIT/WITHDRAWAL LIMIT LOGIC
+                     DEPOSIT/WITHDRAWAL LIMITS
     //////////////////////////////////////////////////////////////*/
 
     /**
@@ -408,12 +409,12 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, IERC7540Redeem {
         if (shares == 0)
             revert NothingToRedeem();
 
-        // Transfer shares to vault for burning later
-        SafeTransferLib.safeTransferFrom(this, owner, address(this), shares);
-
         PendingRedeem storage pendingRedeem = _pendingRedeem[controller];
         pendingRedeem.shares += shares;
         pendingRedeem.requestTime = block.timestamp;
+
+        // Transfer shares to vault for burning later
+        SafeTransferLib.safeTransferFrom(this, owner, address(this), shares);
 
         emit RedeemRequested(controller, owner, REQUEST_ID, msg.sender, shares);
         return REQUEST_ID;
@@ -463,11 +464,11 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, IERC7540Redeem {
         if (shares == 0) 
             revert NothingToRedeem();
 
-        // Return pending shares
-        SafeTransferLib.safeTransfer(ERC20(address(this)), receiver, shares);
-
         pendingRedeem.shares = 0;
         pendingRedeem.requestTime = 0;
+
+        // Return pending shares
+        SafeTransferLib.safeTransfer(ERC20(address(this)), receiver, shares);
 
         emit RedeemRequestCanceled(controller, receiver, shares);
     }
