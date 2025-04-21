@@ -99,19 +99,19 @@ contract UltraVaultOracle is IPriceSource, InitializableOwnable {
      * @param base The base asset
      * @param quote The quote asset
      * @param targetPrice The target price of the base in terms of the quote
-     * @param timestampForFullVesting The target timestamp for full vesting
+     * @param vestingTime The time over which vesting would occur
      */
     function scheduleLinearPriceUpdate(
         address base,
         address quote,
         uint256 targetPrice,
-        uint256 timestampForFullVesting
+        uint256 vestingTime
     ) external onlyOwner {
         _scheduleLinearPriceUpdate(
             base,
             quote,
             targetPrice,
-            timestampForFullVesting
+            vestingTime
         );
     }
 
@@ -120,25 +120,25 @@ contract UltraVaultOracle is IPriceSource, InitializableOwnable {
      * @param bases The base assets
      * @param quotes The quote assets
      * @param targetPrices The target prices of the bases in terms of the quotes
-     * @param timestampsForFullVesting The price increases per block
+     * @param vestingTimes The times over which vesting would occur
      * @dev Array lengths must match
      */
-    function scheduleLinearPricesUpdate(
+    function scheduleLinearPricesUpdates(
         address[] memory bases,
         address[] memory quotes,
         uint256[] memory targetPrices,
-        uint256[] memory timestampsForFullVesting
+        uint256[] memory vestingTimes
     ) external onlyOwner {
         _checkLength(bases.length, quotes.length);
         _checkLength(bases.length, targetPrices.length);
-        _checkLength(bases.length, timestampsForFullVesting.length);
+        _checkLength(bases.length, vestingTimes.length);
 
         for (uint256 i = 0; i < bases.length; i++) {
             _scheduleLinearPriceUpdate(
                 bases[i],
                 quotes[i],
                 targetPrices[i],
-                timestampsForFullVesting[i]
+                vestingTimes[i]
             );
         }
     }
@@ -147,10 +147,16 @@ contract UltraVaultOracle is IPriceSource, InitializableOwnable {
         address base,
         address quote,
         uint256 targetPrice,
-        uint256 timestampForFullVesting
+        uint256 vestingTime
     ) internal {
-        if (timestampForFullVesting == 0)
+        // We are scheduling updates at least over 23 hours for operator convenience
+        if (
+            vestingTime < 23 hours || 
+            vestingTime > 60 days
+        )
             revert Misconfigured();
+
+        uint256 timestampForFullVesting = block.timestamp + vestingTime;
 
         uint256 price = _getCurrentPrice(base, quote);
 
