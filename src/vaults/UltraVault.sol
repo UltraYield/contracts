@@ -41,6 +41,9 @@ contract UltraVault is AsyncVault {
     AddressUpdateProposal public proposedFundsHolder;
     AddressUpdateProposal public proposedOracle;
 
+    // Referrals
+    mapping(address => address) public referredBy;
+
     /**
      * @notice Initializer for the UltraVault, initially paused
      * @param _owner Owner of the vault
@@ -72,6 +75,25 @@ contract UltraVault is AsyncVault {
         
         // Calling at the very end since we need oracle to be setup
         super.initialize(_owner, _asset, _name, _symbol, _feeRecipient, _fees);
+    }
+
+    /*//////////////////////////////////////////////////////////////
+                        REFERRALS LOGIC
+    //////////////////////////////////////////////////////////////*/
+
+    /**
+     * @notice Helper to deposit assets for msg.sender upon referral
+     * @param assets Amount to deposit
+     * @return shares Amount of shares received
+     */
+    function referDeposit(
+        uint256 assets, 
+        address referrer
+    ) external returns (uint256) {
+        if (referredBy[msg.sender] == address(0)) {
+            referredBy[msg.sender] = referrer;
+        }
+        return deposit(assets, msg.sender);
     }
 
     /*//////////////////////////////////////////////////////////////
