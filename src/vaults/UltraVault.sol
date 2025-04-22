@@ -29,9 +29,11 @@ contract UltraVault is AsyncVault {
     error InvalidFundsHolder();
     error NoPendingFundsHolderUpdate();
     error CanNotAcceptFundsHolderYet();
+    error FundsHolderUpdateExpired();
     error MissingOracle();
     error NoOracleProposed();
     error CanNotAcceptOracleYet();
+    error OracleUpdateExpired();
 
     address public fundsHolder;
 
@@ -168,8 +170,10 @@ contract UltraVault is AsyncVault {
 
         if (proposal.addr == address(0))
             revert NoPendingFundsHolderUpdate();
-        if (proposal.timestamp + 3 days > block.timestamp)
+        if (block.timestamp < proposal.timestamp + 3 days)
             revert CanNotAcceptFundsHolderYet();
+        if (block.timestamp > proposal.timestamp + 7 days)
+            revert FundsHolderUpdateExpired();
 
         emit FundsHolderChanged(fundsHolder, proposal.addr);
 
@@ -211,8 +215,10 @@ contract UltraVault is AsyncVault {
 
         if (proposal.addr == address(0))
             revert NoOracleProposed();
-        if (proposal.timestamp + 3 days > block.timestamp)
+        if (block.timestamp < proposal.timestamp + 3 days)
             revert CanNotAcceptOracleYet();
+        if (block.timestamp > proposal.timestamp + 7 days)
+            revert OracleUpdateExpired();
 
         emit OracleUpdated(address(oracle), proposal.addr);
 
