@@ -2,9 +2,9 @@
 pragma solidity 0.8.28;
 
 import { BaseControlledAsyncRedeem } from "./BaseControlledAsyncRedeem.sol";
-import { BaseERC7540, ERC20 } from "./BaseERC7540.sol";
-import { SafeTransferLib } from "solmate/utils/SafeTransferLib.sol";
-import { FixedPointMathLib } from "solmate/utils/FixedPointMathLib.sol";
+import { BaseERC7540 } from "./BaseERC7540.sol";
+import { FixedPointMathLib } from "../utils/FixedPointMathLib.sol";
+import { SafeERC20, IERC20 } from "openzeppelin-contracts/token/ERC20/utils/SafeERC20.sol";
 
 /// @notice Vault fee configuration
 struct Fees {
@@ -49,18 +49,18 @@ abstract contract AsyncVault is BaseControlledAsyncRedeem {
      * @param _feeRecipient Fee recipient
      * @param _fees Fee configuration
      */
-    constructor(
+    function initialize(
         address _owner,
         address _asset,
         string memory _name,
         string memory _symbol,
         address _feeRecipient,
         Fees memory _fees
-    ) BaseERC7540(_owner, _asset, _name, _symbol) {
+    ) public virtual onlyInitializing {
+        super.initialize(_owner, _asset, _name, _symbol);
         require(_feeRecipient != address(0)); 
         feeRecipient = _feeRecipient;
         _setFees(_fees);
-        _pause();
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -201,13 +201,13 @@ abstract contract AsyncVault is BaseControlledAsyncRedeem {
     }
 
     /// @dev Internal fulfill redeem request logic
-    /// @dev In async vaults it's a priveledged function
+    /// @dev In async vaults it's a privileged function
     function _fulfillRedeem(
         uint256 assets,
         uint256 shares,
         address controller
     ) internal virtual onlyRoleOrOwner(OPERATOR_ROLE) override returns (uint256) {
-        super._fulfillRedeem(assets, shares, controller);
+        return super._fulfillRedeem(assets, shares, controller);
     }
 
     /**
@@ -219,7 +219,7 @@ abstract contract AsyncVault is BaseControlledAsyncRedeem {
         uint256 fee
     ) internal virtual {
         if (fee > 0) 
-            SafeTransferLib.safeTransfer(asset, feeRecipient, fee);
+            SafeERC20.safeTransfer(IERC20(asset()), feeRecipient, fee);
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -267,13 +267,13 @@ abstract contract AsyncVault is BaseControlledAsyncRedeem {
     function _accruedPerformanceFee(
         Fees memory fees_
     ) internal view returns (uint256) {
-        uint256 shareValue = convertToAssets(10 ** decimals);
+        uint256 shareValue = convertToAssets(10 ** decimals());
         uint256 performanceFee = uint256(fees_.performanceFee);
 
         return performanceFee > 0 && shareValue > fees_.highwaterMark ?
-            performanceFee.mulDivUp(
-                (shareValue - fees_.highwaterMark) * totalSupply,
-                (10 ** (18 + decimals))
+            performanceFee.mulDivDown(
+                (shareValue - fees_.highwaterMark) * totalSupply(),
+                (10 ** (18 + decimals()))
             ) :
             0;
     }
@@ -338,7 +338,7 @@ abstract contract AsyncVault is BaseControlledAsyncRedeem {
 
         if (fees.highwaterMark == 0) {
             // Baseline
-            fees_.highwaterMark = convertToAssets(10 ** decimals);
+            fees_.highwaterMark = convertToAssets(10 ** decimals());
         } else {
             fees_.highwaterMark = fees.highwaterMark;
         }
@@ -360,7 +360,7 @@ abstract contract AsyncVault is BaseControlledAsyncRedeem {
         Fees memory fees_ = fees;
         uint256 performanceFee = _accruedPerformanceFee(fees_);
         uint256 managementFee = _accruedManagementFee(fees_);
-        uint256 shareValue = convertToAssets(10 ** decimals);
+        uint256 shareValue = convertToAssets(10 ** decimals());
 
         if (performanceFee + managementFee > 0) {
             // Update the high water mark

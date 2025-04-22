@@ -2,9 +2,9 @@
 pragma solidity 0.8.28;
 
 import { AsyncVault, Fees } from "./AsyncVault.sol";
-import { SafeTransferLib } from "solmate/utils/SafeTransferLib.sol";
-import { FixedPointMathLib } from "solmate/utils/FixedPointMathLib.sol";
+import { FixedPointMathLib } from "../utils/FixedPointMathLib.sol";
 import { IPriceSource } from "src/interfaces/IPriceSource.sol";
+import { SafeERC20, IERC20 } from "openzeppelin-contracts/token/ERC20/utils/SafeERC20.sol";
 
 struct AddressUpdateProposal {
     address addr;
@@ -29,9 +29,11 @@ contract UltraVault is AsyncVault {
     error InvalidFundsHolder();
     error NoPendingFundsHolderUpdate();
     error CanNotAcceptFundsHolderYet();
+    error FundsHolderUpdateExpired();
     error MissingOracle();
     error NoOracleProposed();
     error CanNotAcceptOracleYet();
+    error OracleUpdateExpired();
 
     address public fundsHolder;
 
@@ -41,8 +43,11 @@ contract UltraVault is AsyncVault {
     AddressUpdateProposal public proposedFundsHolder;
     AddressUpdateProposal public proposedOracle;
 
+    // Referrals
+    mapping(address => address) public referredBy;
+
     /**
-     * @notice Constructor for the UltraVault
+     * @notice Initializer for the UltraVault, initially paused
      * @param _owner Owner of the vault
      * @param _asset Underlying asset address
      * @param _name Vault name
@@ -52,7 +57,7 @@ contract UltraVault is AsyncVault {
      * @param _oracle The oracle to use for pricing
      * @param _fundsHolder The fundsHolder which will manage the assets
      */
-    constructor(
+    function initialize(
         address _owner,
         address _asset,
         string memory _name,
@@ -61,12 +66,36 @@ contract UltraVault is AsyncVault {
         Fees memory _fees,
         address _oracle,
         address _fundsHolder
-    ) AsyncVault(_owner, _asset, _name, _symbol, _feeRecipient, _fees) {
+    ) external initializer {
         if (_fundsHolder == address(0) || _oracle == address(0))
             revert Misconfigured();
 
         fundsHolder = _fundsHolder;
         oracle = IPriceSource(_oracle);
+
+        _pause();
+        
+        // Calling at the very end since we need oracle to be setup
+        super.initialize(_owner, _asset, _name, _symbol, _feeRecipient, _fees);
+    }
+
+    /*//////////////////////////////////////////////////////////////
+                        REFERRALS LOGIC
+    //////////////////////////////////////////////////////////////*/
+
+    /**
+     * @notice Helper to deposit assets for msg.sender upon referral
+     * @param assets Amount to deposit
+     * @return shares Amount of shares received
+     */
+    function referDeposit(
+        uint256 assets, 
+        address referrer
+    ) external returns (uint256) {
+        if (referredBy[msg.sender] == address(0)) {
+            referredBy[msg.sender] = referrer;
+        }
+        return deposit(assets, msg.sender);
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -75,7 +104,7 @@ contract UltraVault is AsyncVault {
 
     /// @notice Get total assets managed by fundsHolder
     function totalAssets() public view override returns (uint256) {
-        return oracle.getQuote(totalSupply, share, address(asset));
+        return oracle.getQuote(totalSupply(), share, asset());
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -84,10 +113,8 @@ contract UltraVault is AsyncVault {
 
     /// @dev After deposit hook - collect fees and send funds to fundsHolder
     function afterDeposit(uint256 assets, uint256) internal override {
-        _collectFees();
-
         // Funds are sent to holder
-        SafeTransferLib.safeTransfer(asset, fundsHolder, assets);
+        SafeERC20.safeTransfer(IERC20(asset()), fundsHolder, assets);
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -96,7 +123,7 @@ contract UltraVault is AsyncVault {
 
     /// @dev Before fulfill redeem - transfer funds from fundsHolder to vault
     function beforeFulfillRedeem(uint256 assets, uint256) internal override {
-        SafeTransferLib.safeTransferFrom(asset, fundsHolder, address(this), assets);
+        SafeERC20.safeTransferFrom(IERC20(asset()), fundsHolder, address(this), assets);
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -109,7 +136,7 @@ contract UltraVault is AsyncVault {
     ) internal override {
         if (fee > 0)
             // Transfer the fee from the fundsHolder to the fee recipient
-            SafeTransferLib.safeTransferFrom(asset, fundsHolder, feeRecipient, fee);
+            SafeERC20.safeTransferFrom(IERC20(asset()), fundsHolder, feeRecipient, fee);
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -143,8 +170,10 @@ contract UltraVault is AsyncVault {
 
         if (proposal.addr == address(0))
             revert NoPendingFundsHolderUpdate();
-        if (proposal.timestamp + 3 days > block.timestamp)
+        if (block.timestamp < proposal.timestamp + 3 days)
             revert CanNotAcceptFundsHolderYet();
+        if (block.timestamp > proposal.timestamp + 7 days)
+            revert FundsHolderUpdateExpired();
 
         emit FundsHolderChanged(fundsHolder, proposal.addr);
 
@@ -186,8 +215,10 @@ contract UltraVault is AsyncVault {
 
         if (proposal.addr == address(0))
             revert NoOracleProposed();
-        if (proposal.timestamp + 3 days > block.timestamp)
+        if (block.timestamp < proposal.timestamp + 3 days)
             revert CanNotAcceptOracleYet();
+        if (block.timestamp > proposal.timestamp + 7 days)
+            revert OracleUpdateExpired();
 
         emit OracleUpdated(address(oracle), proposal.addr);
 

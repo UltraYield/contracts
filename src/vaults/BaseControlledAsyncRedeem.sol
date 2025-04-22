@@ -3,9 +3,8 @@ pragma solidity 0.8.28;
 
 import { BaseERC7540 } from "./BaseERC7540.sol";
 import { IERC7540Redeem } from "ERC-7540/interfaces/IERC7540.sol";
-import { SafeTransferLib } from "solmate/utils/SafeTransferLib.sol";
-import { FixedPointMathLib } from "solmate/utils/FixedPointMathLib.sol";
-import { ERC20 } from "solmate/tokens/ERC20.sol";
+import { FixedPointMathLib } from "../utils/FixedPointMathLib.sol";
+import { SafeERC20, IERC20 } from "openzeppelin-contracts/token/ERC20/utils/SafeERC20.sol";
 
 struct PendingRedeem {
     uint256 shares;
@@ -64,8 +63,8 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, IERC7540Redeem {
         beforeDeposit(assets, shares);
 
         // Transfer before mint to avoid reentering
-        SafeTransferLib.safeTransferFrom(
-            asset,
+        SafeERC20.safeTransferFrom(
+            IERC20(asset()),
             msg.sender,
             address(this),
             assets
@@ -101,8 +100,8 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, IERC7540Redeem {
         beforeDeposit(assets, shares);
 
         // Need to transfer before minting or ERC777s could reenter
-        SafeTransferLib.safeTransferFrom(
-            asset,
+        SafeERC20.safeTransferFrom(
+            IERC20(asset()),
             msg.sender,
             address(this),
             assets
@@ -147,7 +146,7 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, IERC7540Redeem {
         beforeWithdraw(assets, shares);
 
         // Transfer assets to the receiver
-        SafeTransferLib.safeTransfer(asset, receiver, assets);
+        SafeERC20.safeTransfer(IERC20(asset()), receiver, assets);
 
         emit Withdraw(msg.sender, receiver, controller, assets, shares);
 
@@ -208,7 +207,7 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, IERC7540Redeem {
         beforeWithdraw(assets, shares);
 
         // Transfer assets to the receiver
-        SafeTransferLib.safeTransfer(asset, receiver, assets);
+        SafeERC20.safeTransfer(IERC20(asset()), receiver, assets);
 
         emit Withdraw(msg.sender, receiver, controller, assets, shares);
 
@@ -404,7 +403,7 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, IERC7540Redeem {
         address controller,
         address owner
     ) internal checkAccess(owner) returns (uint256 requestId) {
-        if (ERC20(address(this)).balanceOf(owner) < shares)
+        if (IERC20(address(this)).balanceOf(owner) < shares)
             revert InsufficientBalance();
         if (shares == 0)
             revert NothingToRedeem();
@@ -414,7 +413,7 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, IERC7540Redeem {
         pendingRedeem.requestTime = block.timestamp;
 
         // Transfer shares to vault for burning later
-        SafeTransferLib.safeTransferFrom(this, owner, address(this), shares);
+        SafeERC20.safeTransferFrom(IERC20(this), owner, address(this), shares);
 
         emit RedeemRequested(controller, owner, REQUEST_ID, msg.sender, shares);
         return REQUEST_ID;
@@ -468,7 +467,7 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, IERC7540Redeem {
         pendingRedeem.requestTime = 0;
 
         // Return pending shares
-        SafeTransferLib.safeTransfer(ERC20(address(this)), receiver, shares);
+        SafeERC20.safeTransfer(IERC20(address(this)), receiver, shares);
 
         emit RedeemRequestCanceled(controller, receiver, shares);
     }

@@ -4,7 +4,6 @@ pragma solidity 0.8.28;
 import { IUltraVaultOracle, Price } from "src/interfaces/IUltraVaultOracle.sol";
 import { IPriceSource } from "src/interfaces/IPriceSource.sol";
 import { InitializableOwnable } from "src/utils/InitializableOwnable.sol";
-import { Math } from "openzeppelin-contracts/utils/math/Math.sol";
 import { IERC20Metadata } from "openzeppelin-contracts/token/ERC20/extensions/IERC20Metadata.sol";
 
 /**
@@ -82,7 +81,7 @@ contract UltraVaultOracle is IPriceSource, InitializableOwnable {
     ) internal {
         prices[base][quote] = Price({
             price: price,
-            targetPrice: price,
+            targetPrice: 0,
             timestampForFullVesting: 0,
             lastUpdatedTimestamp: block.timestamp
         });
