@@ -271,7 +271,7 @@ abstract contract AsyncVault is BaseControlledAsyncRedeem {
         uint256 performanceFee = uint256(fees_.performanceFee);
 
         return performanceFee > 0 && shareValue > fees_.highwaterMark ?
-            performanceFee.mulDivUp(
+            performanceFee.mulDivDown(
                 (shareValue - fees_.highwaterMark) * totalSupply(),
                 (10 ** (18 + decimals()))
             ) :
