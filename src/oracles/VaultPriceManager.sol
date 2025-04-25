@@ -3,7 +3,7 @@ pragma solidity 0.8.28;
 
 import { InitializableOwnable } from "src/utils/InitializableOwnable.sol";
 import { FixedPointMathLib } from "../utils/FixedPointMathLib.sol";
-import { IERC4626 } from "openzeppelin-contracts/interfaces/IERC4626.sol";
+import { IERC4626 } from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import { IUltraVaultOracle, Price } from "src/interfaces/IUltraVaultOracle.sol";
 import { IERC20Supply } from "src/interfaces/IERC20Supply.sol";
 import { IPausable } from "src/interfaces/IPausable.sol";

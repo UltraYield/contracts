@@ -5,8 +5,8 @@ import { IERC7540Operator } from "ERC-7540/interfaces/IERC7540.sol";
 import { IERC7575, IERC165 } from "ERC-7540/interfaces/IERC7575.sol";
 import { InitializableOwnable } from "src/utils/InitializableOwnable.sol";
 import { Pausable } from "src/utils/Pausable.sol";
-import { ERC4626Upgradeable } from "openzeppelin-contracts-upgradeable/token/ERC20/extensions/ERC4626Upgradeable.sol";
-import { IERC20 } from "openzeppelin-contracts/token/ERC20/IERC20.sol";
+import { ERC4626Upgradeable } from "@openzeppelin/contracts-upgradeable/token/ERC20/extensions/ERC4626Upgradeable.sol";
+import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 abstract contract BaseERC7540 is
     ERC4626Upgradeable,
