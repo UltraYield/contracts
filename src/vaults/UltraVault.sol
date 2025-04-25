@@ -5,6 +5,7 @@ import { AsyncVault, Fees } from "./AsyncVault.sol";
 import { FixedPointMathLib } from "../utils/FixedPointMathLib.sol";
 import { IPriceSource } from "src/interfaces/IPriceSource.sol";
 import { SafeERC20, IERC20 } from "openzeppelin-contracts/token/ERC20/utils/SafeERC20.sol";
+import { UUPSUpgradeable } from "openzeppelin-contracts/proxy/utils/UUPSUpgradeable.sol";
 
 struct AddressUpdateProposal {
     address addr;
@@ -16,7 +17,7 @@ struct AddressUpdateProposal {
  * @notice ERC-7540 compliant async redeem vault with UltraVaultOracle pricing and multisig asset management
 
  */
-contract UltraVault is AsyncVault {
+contract UltraVault is AsyncVault, UUPSUpgradeable {
 
     // Events
     event FundsHolderProposed(address indexed proposedFundsHolder);
@@ -234,4 +235,11 @@ contract UltraVault is AsyncVault {
         // Pause to manually check the setup by operators
         _pause();
     }
+
+    /*//////////////////////////////////////////////////////////////
+                            UUPS UPGRADABLE
+    //////////////////////////////////////////////////////////////*/
+
+    /// @notice UUPS Upgradable access authorization
+    function _authorizeUpgrade(address newImplementation) internal override onlyOwner {}
 }
