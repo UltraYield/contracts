@@ -46,6 +46,11 @@ contract UltraVault is AsyncVault {
     // Referrals
     mapping(address => address) public referredBy;
 
+    /// @notice Disable implementation's initializer
+    constructor() {
+        _disableInitializers();
+    }
+
     /**
      * @notice Initializer for the UltraVault, initially paused
      * @param _owner Owner of the vault
