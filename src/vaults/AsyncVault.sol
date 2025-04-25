@@ -337,8 +337,13 @@ abstract contract AsyncVault is BaseControlledAsyncRedeem {
         fees_.lastUpdateTimestamp = uint64(block.timestamp);
 
         if (fees.highwaterMark == 0) {
-            // Baseline
-            fees_.highwaterMark = convertToAssets(10 ** decimals());
+            if (totalSupply() == 0) {
+                // This branch only triggers before the vault is initialized
+                fees_.highwaterMark = 0;
+            } else {
+                // Baseline in case operator doesn't set the value
+                fees_.highwaterMark = convertToAssets(10 ** decimals());
+            }
         } else {
             fees_.highwaterMark = fees.highwaterMark;
         }
