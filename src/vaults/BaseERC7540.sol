@@ -28,8 +28,6 @@ abstract contract BaseERC7540 is
     // @dev Assume requests are non-fungible and all have ID = 0
     uint256 internal constant REQUEST_ID = 0;
 
-    address public immutable share = address(this);
-
     mapping(address => mapping(address => bool)) public isOperator;
 
     /**
@@ -58,6 +56,10 @@ abstract contract BaseERC7540 is
     /*//////////////////////////////////////////////////////////////
                         ERC7540 LOGIC
     //////////////////////////////////////////////////////////////*/
+
+    function share() public view returns (address) {
+        return address(this);
+    }
 
     /**
      * @notice Set operator approval status
