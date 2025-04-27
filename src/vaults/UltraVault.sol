@@ -110,7 +110,7 @@ contract UltraVault is AsyncVault, UUPSUpgradeable {
 
     /// @notice Get total assets managed by fundsHolder
     function totalAssets() public view override returns (uint256) {
-        return oracle.getQuote(totalSupply(), share, asset());
+        return oracle.getQuote(totalSupply(), share(), asset());
     }
 
     /*//////////////////////////////////////////////////////////////
