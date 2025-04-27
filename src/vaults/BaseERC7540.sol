@@ -5,8 +5,8 @@ import { IERC7540Operator } from "ERC-7540/interfaces/IERC7540.sol";
 import { IERC7575, IERC165 } from "ERC-7540/interfaces/IERC7575.sol";
 import { InitializableOwnable } from "src/utils/InitializableOwnable.sol";
 import { Pausable } from "src/utils/Pausable.sol";
-import { ERC4626Upgradeable } from "openzeppelin-contracts-upgradeable/token/ERC20/extensions/ERC4626Upgradeable.sol";
-import { IERC20 } from "openzeppelin-contracts/token/ERC20/IERC20.sol";
+import { ERC4626Upgradeable } from "@openzeppelin/contracts-upgradeable/token/ERC20/extensions/ERC4626Upgradeable.sol";
+import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 abstract contract BaseERC7540 is
     ERC4626Upgradeable,
@@ -20,17 +20,19 @@ abstract contract BaseERC7540 is
 
     // Errors
     error AccessDenied();
+    error Misconfigured();
 
-    // Roles
-    mapping(bytes32 => mapping(address => bool)) public hasRole;
-    bytes32 public constant PAUSER_ROLE = keccak256("PAUSER_ROLE");
-
-    // @dev Assume requests are non-fungible and all have ID = 0
+    // @dev All requests have ID == 0
     uint256 internal constant REQUEST_ID = 0;
 
-    address public immutable share = address(this);
+    // Roles
+    bytes32 public constant PAUSER_ROLE = keccak256("PAUSER_ROLE");
+    mapping(bytes32 => mapping(address => bool)) public hasRole;
 
     mapping(address => mapping(address => bool)) public isOperator;
+
+    // V0: 2 total: 1 - role mapping, 1 - operator mapping
+    uint256[48] private __gap;
 
     /**
      * @notice Constructor for BaseERC7540
@@ -45,6 +47,8 @@ abstract contract BaseERC7540 is
         string memory _name,
         string memory _symbol
     ) public virtual onlyInitializing {
+        if (_asset == address(0))
+            revert Misconfigured(); 
         __ERC20_init(_name, _symbol);
         __ERC4626_init(IERC20(_asset));
         initOwner(_owner);
@@ -58,6 +62,10 @@ abstract contract BaseERC7540 is
     /*//////////////////////////////////////////////////////////////
                         ERC7540 LOGIC
     //////////////////////////////////////////////////////////////*/
+
+    function share() public view returns (address) {
+        return address(this);
+    }
 
     /**
      * @notice Set operator approval status
@@ -74,8 +82,6 @@ abstract contract BaseERC7540 is
             isOperator[msg.sender][operator] = approved;
             emit OperatorSet(msg.sender, operator, approved);
             success = true;
-        } else {
-            success = false;
         }
     }
 

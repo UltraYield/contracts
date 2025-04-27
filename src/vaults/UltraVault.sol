@@ -4,7 +4,8 @@ pragma solidity 0.8.28;
 import { AsyncVault, Fees } from "./AsyncVault.sol";
 import { FixedPointMathLib } from "../utils/FixedPointMathLib.sol";
 import { IPriceSource } from "src/interfaces/IPriceSource.sol";
-import { SafeERC20, IERC20 } from "openzeppelin-contracts/token/ERC20/utils/SafeERC20.sol";
+import { SafeERC20, IERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import { UUPSUpgradeable } from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 
 struct AddressUpdateProposal {
     address addr;
@@ -16,7 +17,7 @@ struct AddressUpdateProposal {
  * @notice ERC-7540 compliant async redeem vault with UltraVaultOracle pricing and multisig asset management
 
  */
-contract UltraVault is AsyncVault {
+contract UltraVault is AsyncVault, UUPSUpgradeable {
 
     // Events
     event FundsHolderProposed(address indexed proposedFundsHolder);
@@ -24,6 +25,8 @@ contract UltraVault is AsyncVault {
 
     event OracleProposed(address indexed proposedOracle);
     event OracleUpdated(address indexed oldOracle, address indexed newOracle);
+
+    event Referral(address indexed referrer, address user);
 
     // Errors
     error InvalidFundsHolder();
@@ -39,12 +42,21 @@ contract UltraVault is AsyncVault {
 
     IPriceSource public oracle;
 
+    // Referrals
+    mapping(address => address) public referredBy;
+
     // Updates
     AddressUpdateProposal public proposedFundsHolder;
     AddressUpdateProposal public proposedOracle;
 
-    // Referrals
-    mapping(address => address) public referredBy;
+    // V0: 7 total: 1 - funds holder, 1 - oracle, 
+    // 2 + 2 - funds and oracle proposals, 1 - referral mapping
+    uint256[43] private __gap;
+
+    /// @notice Disable implementation's initializer
+    constructor() {
+        _disableInitializers();
+    }
 
     /**
      * @notice Initializer for the UltraVault, initially paused
@@ -94,6 +106,7 @@ contract UltraVault is AsyncVault {
     ) external returns (uint256) {
         if (referredBy[msg.sender] == address(0)) {
             referredBy[msg.sender] = referrer;
+            emit Referral(referrer, msg.sender);
         }
         return deposit(assets, msg.sender);
     }
@@ -104,7 +117,7 @@ contract UltraVault is AsyncVault {
 
     /// @notice Get total assets managed by fundsHolder
     function totalAssets() public view override returns (uint256) {
-        return oracle.getQuote(totalSupply(), share, asset());
+        return oracle.getQuote(totalSupply(), share(), asset());
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -229,4 +242,11 @@ contract UltraVault is AsyncVault {
         // Pause to manually check the setup by operators
         _pause();
     }
+
+    /*//////////////////////////////////////////////////////////////
+                            UUPS UPGRADABLE
+    //////////////////////////////////////////////////////////////*/
+
+    /// @notice UUPS Upgradable access authorization
+    function _authorizeUpgrade(address newImplementation) internal override onlyOwner {}
 }

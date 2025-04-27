@@ -4,7 +4,8 @@ pragma solidity 0.8.28;
 import { BaseControlledAsyncRedeem } from "./BaseControlledAsyncRedeem.sol";
 import { BaseERC7540 } from "./BaseERC7540.sol";
 import { FixedPointMathLib } from "../utils/FixedPointMathLib.sol";
-import { SafeERC20, IERC20 } from "openzeppelin-contracts/token/ERC20/utils/SafeERC20.sol";
+import { SafeERC20, IERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import { IERC20Metadata } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 
 /// @notice Vault fee configuration
 struct Fees {
@@ -30,15 +31,15 @@ abstract contract AsyncVault is BaseControlledAsyncRedeem {
     event FeesRecipientUpdated(address oldRecipient, address newRecipient);
     event FeesUpdated(Fees oldFees, Fees newFees);
 
-    // Errors
-    error Misconfigured();
-
     bytes32 public constant OPERATOR_ROLE = keccak256("OPERATOR_ROLE");
 
     /// @notice Fee recipient address
     address feeRecipient;
     /// @notice Current fees
     Fees public fees;
+
+    // V0: 3 total:  1 - fee recipient, 2 - Fees
+    uint256[47] private __gap;
 
     /**
      * @notice Initialize vault with basic parameters
@@ -58,8 +59,11 @@ abstract contract AsyncVault is BaseControlledAsyncRedeem {
         Fees memory _fees
     ) public virtual onlyInitializing {
         super.initialize(_owner, _asset, _name, _symbol);
+
         require(_feeRecipient != address(0)); 
         feeRecipient = _feeRecipient;
+        emit FeesRecipientUpdated(address(0), _feeRecipient);
+
         _setFees(_fees);
     }
 
@@ -337,8 +341,7 @@ abstract contract AsyncVault is BaseControlledAsyncRedeem {
         fees_.lastUpdateTimestamp = uint64(block.timestamp);
 
         if (fees.highwaterMark == 0) {
-            // Baseline
-            fees_.highwaterMark = convertToAssets(10 ** decimals());
+            fees_.highwaterMark = 10 ** IERC20Metadata(asset()).decimals();
         } else {
             fees_.highwaterMark = fees.highwaterMark;
         }

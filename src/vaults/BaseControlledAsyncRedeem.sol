@@ -4,7 +4,7 @@ pragma solidity 0.8.28;
 import { BaseERC7540 } from "./BaseERC7540.sol";
 import { IERC7540Redeem } from "ERC-7540/interfaces/IERC7540.sol";
 import { FixedPointMathLib } from "../utils/FixedPointMathLib.sol";
-import { SafeERC20, IERC20 } from "openzeppelin-contracts/token/ERC20/utils/SafeERC20.sol";
+import { SafeERC20, IERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 struct PendingRedeem {
     uint256 shares;
@@ -37,6 +37,9 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, IERC7540Redeem {
 
     mapping(address => PendingRedeem) internal _pendingRedeem;
     mapping(address => ClaimableRedeem) internal _claimableRedeem;
+
+    // V0: 2 total: 1 - pending redeems, 1 - claimable redeems
+    uint256[48] private __gap;
 
     /*//////////////////////////////////////////////////////////////
                             ERC4626 OVERRIDES
