@@ -31,15 +31,15 @@ abstract contract AsyncVault is BaseControlledAsyncRedeem {
     event FeesRecipientUpdated(address oldRecipient, address newRecipient);
     event FeesUpdated(Fees oldFees, Fees newFees);
 
-    // Errors
-    error Misconfigured();
-
     bytes32 public constant OPERATOR_ROLE = keccak256("OPERATOR_ROLE");
 
     /// @notice Fee recipient address
     address feeRecipient;
     /// @notice Current fees
     Fees public fees;
+
+    // V0: 3 total:  1 - fee recipient, 2 - Fees
+    uint256[47] private __gap;
 
     /**
      * @notice Initialize vault with basic parameters
@@ -59,8 +59,11 @@ abstract contract AsyncVault is BaseControlledAsyncRedeem {
         Fees memory _fees
     ) public virtual onlyInitializing {
         super.initialize(_owner, _asset, _name, _symbol);
+
         require(_feeRecipient != address(0)); 
         feeRecipient = _feeRecipient;
+        emit FeesRecipientUpdated(address(0), _feeRecipient);
+
         _setFees(_fees);
     }
 

@@ -26,6 +26,8 @@ contract UltraVault is AsyncVault, UUPSUpgradeable {
     event OracleProposed(address indexed proposedOracle);
     event OracleUpdated(address indexed oldOracle, address indexed newOracle);
 
+    event Referral(address indexed referrer, address user);
+
     // Errors
     error InvalidFundsHolder();
     error NoPendingFundsHolderUpdate();
@@ -40,12 +42,16 @@ contract UltraVault is AsyncVault, UUPSUpgradeable {
 
     IPriceSource public oracle;
 
+    // Referrals
+    mapping(address => address) public referredBy;
+
     // Updates
     AddressUpdateProposal public proposedFundsHolder;
     AddressUpdateProposal public proposedOracle;
 
-    // Referrals
-    mapping(address => address) public referredBy;
+    // V0: 7 total: 1 - funds holder, 1 - oracle, 
+    // 2 + 2 - funds and oracle proposals, 1 - referral mapping
+    uint256[43] private __gap;
 
     /// @notice Disable implementation's initializer
     constructor() {
@@ -100,6 +106,7 @@ contract UltraVault is AsyncVault, UUPSUpgradeable {
     ) external returns (uint256) {
         if (referredBy[msg.sender] == address(0)) {
             referredBy[msg.sender] = referrer;
+            emit Referral(referrer, msg.sender);
         }
         return deposit(assets, msg.sender);
     }

@@ -38,6 +38,9 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, IERC7540Redeem {
     mapping(address => PendingRedeem) internal _pendingRedeem;
     mapping(address => ClaimableRedeem) internal _claimableRedeem;
 
+    // V0: 2 total: 1 - pending redeems, 1 - claimable redeems
+    uint256[48] private __gap;
+
     /*//////////////////////////////////////////////////////////////
                             ERC4626 OVERRIDES
     //////////////////////////////////////////////////////////////*/
