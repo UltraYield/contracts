@@ -37,6 +37,7 @@ contract UltraVault is AsyncVault, UUPSUpgradeable {
     error NoOracleProposed();
     error CanNotAcceptOracleYet();
     error OracleUpdateExpired();
+    error CantSetBalancesInNonEmptyVault();
 
     address public fundsHolder;
 
@@ -109,6 +110,31 @@ contract UltraVault is AsyncVault, UUPSUpgradeable {
             emit Referral(referrer, msg.sender);
         }
         return deposit(assets, msg.sender);
+    }
+
+    /*//////////////////////////////////////////////////////////////
+                        INITIAL BALANCES SETUP
+    //////////////////////////////////////////////////////////////*/
+
+    /**
+     * @notice Setup initial balances in the vault without depositing the funds
+     * @notice We expect the funds to be separately sent to funds holder
+     * @param users Array of users to setup balances
+     * @param shares Shares of respective users
+     * @dev Reverts if arrays length mismatch
+     */
+    function setupInitialBalances(
+        address[] memory users,
+        uint256[] memory shares
+    ) external onlyOwner {
+        if (totalSupply() > 0)
+            revert CantSetBalancesInNonEmptyVault();
+        if (users.length != shares.length) 
+            revert Misconfigured();
+
+        for (uint256 i; i < users.length; i++) {
+            _mint(users[i], shares[i]);
+        }
     }
 
     /*//////////////////////////////////////////////////////////////
