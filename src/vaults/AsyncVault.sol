@@ -30,6 +30,7 @@ abstract contract AsyncVault is BaseControlledAsyncRedeem {
     // Events
     event FeesRecipientUpdated(address oldRecipient, address newRecipient);
     event FeesUpdated(Fees oldFees, Fees newFees);
+    event FeesCollected(uint256 shares, uint256 managementFee, uint256 performanceFee);
 
     bytes32 public constant OPERATOR_ROLE = keccak256("OPERATOR_ROLE");
 
@@ -361,8 +362,8 @@ abstract contract AsyncVault is BaseControlledAsyncRedeem {
 
     function _collectFees() internal {
         Fees memory fees_ = fees;
-        uint256 performanceFee = _accruedPerformanceFee(fees_);
         uint256 managementFee = _accruedManagementFee(fees_);
+        uint256 performanceFee = _accruedPerformanceFee(fees_);
         uint256 shareValue = convertToAssets(10 ** decimals());
 
         if (performanceFee + managementFee > 0) {
@@ -372,8 +373,12 @@ abstract contract AsyncVault is BaseControlledAsyncRedeem {
 
             fees.lastUpdateTimestamp = uint64(block.timestamp);
 
+            uint256 feeShares = convertToShares(managementFee + performanceFee);
+
             // Mint shares to fee recipient
-            _mint(feeRecipient, convertToShares(performanceFee + managementFee));
+            _mint(feeRecipient, feeShares);
+
+            emit FeesCollected(feeShares, managementFee, performanceFee);
         }
     }
 }
