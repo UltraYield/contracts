@@ -31,6 +31,7 @@ abstract contract AsyncVault is BaseControlledAsyncRedeem {
     event FeesRecipientUpdated(address oldRecipient, address newRecipient);
     event FeesUpdated(Fees oldFees, Fees newFees);
     event FeesCollected(uint256 shares, uint256 managementFee, uint256 performanceFee);
+    event WithdrawalFeeCollected(uint256 shares);
 
     bytes32 public constant OPERATOR_ROLE = keccak256("OPERATOR_ROLE");
 
@@ -223,8 +224,10 @@ abstract contract AsyncVault is BaseControlledAsyncRedeem {
     function collectWithdrawalFee(
         uint256 fee
     ) internal virtual {
-        if (fee > 0) 
+        if (fee > 0) {
             SafeERC20.safeTransfer(IERC20(asset()), feeRecipient, fee);
+            emit WithdrawalFeeCollected(fee);
+        }
     }
 
     /*//////////////////////////////////////////////////////////////

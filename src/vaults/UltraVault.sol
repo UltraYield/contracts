@@ -147,9 +147,11 @@ contract UltraVault is AsyncVault, UUPSUpgradeable {
     function collectWithdrawalFee(
         uint256 fee
     ) internal override {
-        if (fee > 0)
+        if (fee > 0) {
             // Transfer the fee from the fundsHolder to the fee recipient
             SafeERC20.safeTransferFrom(IERC20(asset()), fundsHolder, feeRecipient, fee);
+            emit WithdrawalFeeCollected(fee);
+        }
     }
 
     /*//////////////////////////////////////////////////////////////
