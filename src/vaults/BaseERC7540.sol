@@ -88,7 +88,7 @@ abstract contract BaseERC7540 is
     /// @inheritdoc ERC4626Upgradeable
     function deposit(uint256 assets, address receiver) public virtual override returns (uint256) {
         uint256 shares = super.deposit(assets, receiver);
-        afterDeposit(assets, shares);
+        afterDeposit(asset(), assets, shares);
 
         return shares;
     }
@@ -100,7 +100,7 @@ abstract contract BaseERC7540 is
         address owner
     ) public virtual override returns (uint256) {
         uint256 shares = previewWithdraw(assets);
-        beforeWithdraw(assets, shares);
+        beforeWithdraw(asset(), assets, shares);
 
         return super.withdraw(assets, receiver, owner);
     }
@@ -153,9 +153,9 @@ abstract contract BaseERC7540 is
                           INTERNAL HOOKS LOGIC
     //////////////////////////////////////////////////////////////*/
 
-    function beforeWithdraw(uint256 assets, uint256 shares) internal virtual {}
+    function beforeWithdraw(address asset, uint256 assets, uint256 shares) internal virtual {}
 
-    function afterDeposit(uint256 assets, uint256 shares) internal virtual {}
+    function afterDeposit(address asset, uint256 assets, uint256 shares) internal virtual {}
 
     /*//////////////////////////////////////////////////////////////
                         ERC165 LOGIC

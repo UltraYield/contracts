@@ -5,16 +5,7 @@ import { BaseERC7540 } from "./BaseERC7540.sol";
 import { IERC7540Redeem } from "ERC-7540/interfaces/IERC7540.sol";
 import { FixedPointMathLib } from "../utils/FixedPointMathLib.sol";
 import { SafeERC20, IERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-
-struct PendingRedeem {
-    uint256 shares;
-    uint256 requestTime;
-}
-
-struct ClaimableRedeem {
-    uint256 assets;
-    uint256 shares;
-}
+import { IUltraQueue, PendingRedeem, ClaimableRedeem } from "../interfaces/IUltraQueue.sol";
 
 /**
  * @title BaseControlledAsyncRedeem
@@ -35,11 +26,36 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, IERC7540Redeem {
     error NothingToWithdraw();
     error InsufficientBalance();
 
+    // Deprecated
     mapping(address => PendingRedeem) internal _pendingRedeem;
     mapping(address => ClaimableRedeem) internal _claimableRedeem;
 
+    // Request queue
+    IUltraQueue requestQueue;
+
     // V0: 2 total: 1 - pending redeems, 1 - claimable redeems
-    uint256[48] private __gap;
+    // V1: +1, 3 total: added requestQueue. deprecated: _pendingRedeem and _claimableRedeem
+    uint256[47] private __gap;
+
+    /**
+     * @notice Initialize vault with basic parameters
+     * @param _owner Owner of the vault
+     * @param _asset Underlying asset address
+     * @param _name Vault name
+     * @param _symbol Vault symbol
+     * @param _requestQueue withdrawal request queue
+     */
+    function initialize(
+        address _owner,
+        address _asset,
+        string memory _name,
+        string memory _symbol,
+        address _requestQueue
+    ) public virtual onlyInitializing {
+        super.initialize(_owner, _asset, _name, _symbol);
+
+        requestQueue = IUltraQueue(_requestQueue);
+    }
 
     /*//////////////////////////////////////////////////////////////
                             ERC4626 OVERRIDES
@@ -57,17 +73,34 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, IERC7540Redeem {
         uint256 assets,
         address receiver
     ) public override whenNotPaused returns (uint256 shares) {
+        return _depositAsset(asset(), assets, receiver);
+    }
+
+    /**
+     * @notice Deposit assets for receiver
+     * @param asset Asset to deposit
+     * @param assets Amount to deposit
+     * @param receiver Share recipient
+     * @return shares Amount of shares received
+     * @dev Synchronous function, reverts if paused
+     * @dev Uses claimable balances before transferring assets
+     */
+    function _depositAsset(
+        address asset,
+        uint256 assets,
+        address receiver
+    ) internal whenNotPaused returns (uint256 shares) {
         // Rounding down can cause zero shares minted
         shares = previewDeposit(assets);
         if (shares == 0)
             revert EmptyDeposit();
 
         // Pre-deposit hook
-        beforeDeposit(assets, shares);
+        beforeDeposit(asset, assets, shares);
 
         // Transfer before mint to avoid reentering
         SafeERC20.safeTransferFrom(
-            IERC20(asset()),
+            IERC20(asset),
             msg.sender,
             address(this),
             assets
@@ -78,7 +111,7 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, IERC7540Redeem {
         emit Deposit(msg.sender, receiver, assets, shares);
 
         // After-deposit hook
-        afterDeposit(assets, shares);
+        afterDeposit(asset, assets, shares);
     }
 
     /**
@@ -92,7 +125,16 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, IERC7540Redeem {
     function mint(
         uint256 shares,
         address receiver
-    ) public override whenNotPaused returns (uint256 assets) {
+    ) public override returns (uint256 assets) {
+        return _mintWithAsset(asset(), shares, receiver);
+    }
+
+    /// @dev Mint with asset
+    function _mintWithAsset(
+        address asset,
+        uint256 shares,
+        address receiver
+    ) internal whenNotPaused returns (uint256 assets) {
 
         if (shares == 0)
             revert NothingToMint();
@@ -100,11 +142,11 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, IERC7540Redeem {
         assets = previewMint(shares); 
 
         // Pre-deposit hook
-        beforeDeposit(assets, shares);
+        beforeDeposit(asset, assets, shares);
 
         // Need to transfer before minting or ERC777s could reenter
         SafeERC20.safeTransferFrom(
-            IERC20(asset()),
+            IERC20(asset),
             msg.sender,
             address(this),
             assets
@@ -115,7 +157,7 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, IERC7540Redeem {
         emit Deposit(msg.sender, receiver, assets, shares);
 
         // After-deposit hook
-        afterDeposit(assets, shares);
+        afterDeposit(asset, assets, shares);
     }
 
     /**
@@ -133,39 +175,47 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, IERC7540Redeem {
         address receiver,
         address controller
     ) public virtual override checkAccess(controller) returns (uint256 shares) {
+        return _withdrawAsset(asset(), assets, receiver, controller);
+    }
+
+    function _withdrawAsset(
+        address asset,
+        uint256 assets,
+        address receiver,
+        address controller
+    ) internal virtual checkAccess(controller) returns (uint256 shares) {
         if (assets == 0)
             revert NothingToWithdraw();
 
-        ClaimableRedeem storage claimableRedeem = _claimableRedeem[controller];
+        ClaimableRedeem memory claimableRedeem =
+            requestQueue.getClaimableRedeem(controller, address(this), asset);
         shares = assets.mulDivUp(
             claimableRedeem.shares,
             claimableRedeem.assets
         );
 
         // Handle
-        _withdrawClaimableBalance(assets, claimableRedeem);
+        _withdrawClaimableBalanceForAsset(asset, controller, assets, claimableRedeem);
 
         // Before-withdrawal hook
-        beforeWithdraw(assets, shares);
+        beforeWithdraw(asset, assets, shares);
+
+        requestQueue.setClaimableRedeem(controller, address(this), asset, claimableRedeem);
 
         // Transfer assets to the receiver
-        SafeERC20.safeTransfer(IERC20(asset()), receiver, assets);
+        SafeERC20.safeTransfer(IERC20(asset), receiver, assets);
 
         emit Withdraw(msg.sender, receiver, controller, assets, shares);
 
         // After-withdrawal hook
-        afterWithdraw(assets, shares);
+        afterWithdraw(asset, assets, shares);
     }
 
-    /**
-     * @notice Update claimable balance after withdrawal
-     * @param assets Amount withdrawn
-     * @param claimableRedeem Controller's claimable balance
-     * @dev Handles precision loss in partial claims
-     */
-    function _withdrawClaimableBalance(
+    function _withdrawClaimableBalanceForAsset(
+        address asset,
+        address controller,
         uint256 assets,
-        ClaimableRedeem storage claimableRedeem
+        ClaimableRedeem memory claimableRedeem
     ) internal {
         uint256 sharesUp = assets.mulDivUp(
             claimableRedeem.shares,
@@ -177,6 +227,8 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, IERC7540Redeem {
             claimableRedeem.shares > sharesUp ?
             claimableRedeem.shares - sharesUp :
             0;
+        
+        requestQueue.setClaimableRedeem(controller, address(this), asset, claimableRedeem);
     }
 
     /**
@@ -193,29 +245,41 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, IERC7540Redeem {
         uint256 shares,
         address receiver,
         address controller
-    ) public virtual override checkAccess(controller) returns (uint256 assets) {
+    ) public virtual override returns (uint256 assets) {
+        return _redeemAsset(asset(), shares, receiver, controller);
+    }
+
+    function _redeemAsset(
+        address asset,
+        uint256 shares,
+        address receiver,
+        address controller
+    ) internal virtual checkAccess(controller) returns (uint256 assets) {
         if (shares == 0)
             revert NothingToRedeem();
 
-        ClaimableRedeem storage claimableRedeem = _claimableRedeem[controller];
+        ClaimableRedeem memory claimableRedeem =
+            requestQueue.getClaimableRedeem(controller, address(this), asset);
         assets = shares.mulDivDown(
             claimableRedeem.assets,
             claimableRedeem.shares
         );
 
         // Modify the claimableRedeem state accordingly
-        _redeemClaimableBalance(shares, claimableRedeem);
+        _redeemClaimableBalanceForAsset(asset, controller, shares, claimableRedeem);
 
         // Before-withdrawal hook
-        beforeWithdraw(assets, shares);
+        beforeWithdraw(asset, assets, shares);
+
+        requestQueue.setClaimableRedeem(controller, address(this), asset, claimableRedeem);
 
         // Transfer assets to the receiver
-        SafeERC20.safeTransfer(IERC20(asset()), receiver, assets);
+        SafeERC20.safeTransfer(IERC20(asset), receiver, assets);
 
         emit Withdraw(msg.sender, receiver, controller, assets, shares);
 
         // After-withdrawal hook
-        afterWithdraw(assets, shares);
+        afterWithdraw(asset, assets, shares);
     }
 
     /**
@@ -224,9 +288,11 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, IERC7540Redeem {
      * @param claimableRedeem Claimable redeem of the user
      * @dev Handles precision loss in partial claims
      */
-    function _redeemClaimableBalance(
+    function _redeemClaimableBalanceForAsset(
+        address asset,
+        address controller,
         uint256 shares,
-        ClaimableRedeem storage claimableRedeem
+        ClaimableRedeem memory claimableRedeem
     ) internal {
         uint256 assetsRoundedUp = shares.mulDivUp(
             claimableRedeem.assets,
@@ -238,6 +304,8 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, IERC7540Redeem {
             claimableRedeem.assets - assetsRoundedUp :
             0;
         claimableRedeem.shares -= shares;
+
+        requestQueue.setClaimableRedeem(controller, address(this), asset, claimableRedeem);
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -252,14 +320,14 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, IERC7540Redeem {
     function getPendingRedeem(
         address controller
     ) public view returns (PendingRedeem memory) {
-        return _pendingRedeem[controller];
+        return requestQueue.getPendingRedeem(controller, address(this), asset());
     }
 
     /// @notice Get claimable redeem request
     function getClaimableRedeem(
         address controller
     ) public view returns (ClaimableRedeem memory) {
-        return _claimableRedeem[controller];
+        return requestQueue.getClaimableRedeem(controller, address(this), asset());
     }
 
     /**
@@ -271,7 +339,7 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, IERC7540Redeem {
         uint256,
         address controller
     ) public view returns (uint256) {
-        return _pendingRedeem[controller].shares;
+        return requestQueue.getPendingRedeem(controller, address(this), asset()).shares;
     }
 
     /**
@@ -283,7 +351,7 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, IERC7540Redeem {
         uint256,
         address controller
     ) public view returns (uint256) {
-        return _claimableRedeem[controller].shares;
+        return requestQueue.getClaimableRedeem(controller, address(this), asset()).shares;
     }
 
     /**
@@ -357,7 +425,7 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, IERC7540Redeem {
     function maxWithdraw(
         address controller
     ) public view virtual override returns (uint256) {
-        return _claimableRedeem[controller].assets;
+        return requestQueue.getClaimableRedeem(controller, address(this), asset()).assets;
     }
 
     /**
@@ -369,7 +437,7 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, IERC7540Redeem {
     function maxRedeem(
         address controller
     ) public view virtual override returns (uint256) {
-        return _claimableRedeem[controller].shares;
+        return requestQueue.getClaimableRedeem(controller, address(this), asset()).shares;
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -397,11 +465,11 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, IERC7540Redeem {
         address controller,
         address owner
     ) external virtual returns (uint256 requestId) {
-        return _requestRedeem(shares, controller, owner);
+        return _requestRedeemOfAsset(asset(), shares, controller, owner);
     }
 
-    /// @dev Internal redeem request logic
-    function _requestRedeem(
+    function _requestRedeemOfAsset(
+        address asset,
         uint256 shares,
         address controller,
         address owner
@@ -411,9 +479,12 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, IERC7540Redeem {
         if (shares == 0)
             revert NothingToRedeem();
 
-        PendingRedeem storage pendingRedeem = _pendingRedeem[controller];
+        PendingRedeem memory pendingRedeem =
+            requestQueue.getPendingRedeem(controller, address(this), asset);
         pendingRedeem.shares += shares;
         pendingRedeem.requestTime = block.timestamp;
+
+        requestQueue.setPendingRedeem(controller, address(this), asset, pendingRedeem);
 
         // Transfer shares to vault for burning later
         SafeERC20.safeTransferFrom(IERC20(this), owner, address(this), shares);
@@ -438,7 +509,7 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, IERC7540Redeem {
      * @dev Transfers pending shares back to msg.sender
      */
     function cancelRedeemRequest(address controller) external virtual {
-        return _cancelRedeemRequest(controller, msg.sender);
+        return _cancelRedeemRequestOfAsset(asset(), controller, msg.sender);
     }
 
     /**
@@ -451,16 +522,17 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, IERC7540Redeem {
         address controller,
         address receiver
     ) public virtual {
-        return _cancelRedeemRequest(controller, receiver);
+        return _cancelRedeemRequestOfAsset(asset(), controller, receiver);
     }
 
-    /// @dev Internal cancel redeem request logic
-    function _cancelRedeemRequest(
+    function _cancelRedeemRequestOfAsset(
+        address asset,
         address controller,
         address receiver
     ) internal virtual checkAccess(controller) {
         // Get the pending shares
-        PendingRedeem storage pendingRedeem = _pendingRedeem[controller];
+        PendingRedeem memory pendingRedeem = 
+            requestQueue.getPendingRedeem(controller, address(this), asset);
         uint256 shares = pendingRedeem.shares;
 
         if (shares == 0) 
@@ -468,6 +540,8 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, IERC7540Redeem {
 
         pendingRedeem.shares = 0;
         pendingRedeem.requestTime = 0;
+
+        requestQueue.setPendingRedeem(controller, address(this), asset, pendingRedeem);
 
         // Return pending shares
         SafeERC20.safeTransfer(IERC20(address(this)), receiver, shares);
@@ -500,11 +574,12 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, IERC7540Redeem {
 
         _burn(address(this), shares);
 
-        return _fulfillRedeem(assets, shares, controller);
+        return _fulfillRedeemOfAsset(asset(), assets, shares, controller);
     }
 
     /// @dev Internal fulfill redeem request logic
-    function _fulfillRedeem(
+    function _fulfillRedeemOfAsset(
+        address asset,
         uint256 assets,
         uint256 shares,
         address controller
@@ -512,8 +587,10 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, IERC7540Redeem {
         if (assets == 0 || shares == 0) 
             revert InvalidRedeemCall();
 
-        PendingRedeem storage pendingRedeem = _pendingRedeem[controller];
-        ClaimableRedeem storage claimableRedeem = _claimableRedeem[controller];
+        PendingRedeem memory pendingRedeem = 
+            requestQueue.getPendingRedeem(controller, address(this), asset);
+        ClaimableRedeem memory claimableRedeem =
+            requestQueue.getClaimableRedeem(controller, address(this), asset);
 
         if (pendingRedeem.shares == 0)
             revert NothingToRedeem();
@@ -522,7 +599,7 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, IERC7540Redeem {
             revert NotEnoughPendingShares();
 
         // Before fulfill redeem hook
-        beforeFulfillRedeem(assets, shares);
+        beforeFulfillRedeem(asset, assets, shares);
 
         claimableRedeem.shares += shares;
         claimableRedeem.assets += assets;
@@ -531,6 +608,9 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, IERC7540Redeem {
         // Reset the requestTime if redeem is full
         if (pendingRedeem.shares == 0) 
             pendingRedeem.requestTime = 0;
+
+        requestQueue.setPendingRedeem(controller, address(this), asset, pendingRedeem);
+        requestQueue.setClaimableRedeem(controller, address(this), asset, claimableRedeem);
 
         emit RedeemRequestFulfilled(controller, msg.sender, shares, assets);
 
@@ -546,18 +626,21 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, IERC7540Redeem {
 
     /// @dev Hook for inheriting contracts before deposit
     function beforeDeposit(
+        address asset,
         uint256 assets, 
         uint256 shares
     ) internal virtual {}
 
     /// @dev Hook for inheriting contracts after withdrawal
     function afterWithdraw(
+        address asset,
         uint256 assets, 
         uint256 shares
     ) internal virtual {}
 
     /// @dev Hook for inheriting contracts before fulfill
     function beforeFulfillRedeem(
+        address asset,
         uint256 assets,
         uint256 shares
     ) internal virtual {}
