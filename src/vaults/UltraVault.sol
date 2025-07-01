@@ -67,8 +67,8 @@ contract UltraVault is AsyncVault, UUPSUpgradeable {
 
     // V0: 7 total: 1 - funds holder, 1 - oracle, 
     // 2 + 2 - funds and oracle proposals, 1 - referral mapping
-    // V1: 8 total, +1: rateProvider
-    uint256[42] private __gap;
+    // V1: 9 total, +1: rateProvider and proposedRateProvider
+    uint256[41] private __gap;
 
     /// @notice Disable implementation's initializer
     constructor() {
