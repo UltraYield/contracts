@@ -6,6 +6,8 @@ import { IERC7540Redeem } from "ERC-7540/interfaces/IERC7540.sol";
 import { FixedPointMathLib } from "../utils/FixedPointMathLib.sol";
 import { SafeERC20, IERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import { IUltraQueue, PendingRedeem, ClaimableRedeem } from "../interfaces/IUltraQueue.sol";
+import { IUltraVaultRateProvider, AssetData } from "../interfaces/IUltraVaultRateProvider.sol";
+import { AddressUpdateProposal } from "../utils/AddressUpdates.sol";
 
 /**
  * @title BaseControlledAsyncRedeem
@@ -14,6 +16,10 @@ import { IUltraQueue, PendingRedeem, ClaimableRedeem } from "../interfaces/IUltr
  */
 abstract contract BaseControlledAsyncRedeem is BaseERC7540, IERC7540Redeem {
     using FixedPointMathLib for uint256;
+
+    // Rate provider events
+    event RateProviderProposed(address indexed proposedProvider);
+    event RateProviderUpdated(address indexed oldProvider, address indexed newProvider);
 
     // Errors
     error CanNotPreviewWithdrawInAsyncVault();
@@ -25,6 +31,13 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, IERC7540Redeem {
     error NothingToRedeem();
     error NothingToWithdraw();
     error InsufficientBalance();
+    error AssetNotSupported();
+
+    // Rate provider errors
+    error MissingRateProvider();
+    error NoRateProviderProposed();
+    error CanNotAcceptRateProviderYet();
+    error RateProviderUpdateExpired();
 
     // Deprecated
     mapping(address => PendingRedeem) internal _pendingRedeem;
@@ -32,6 +45,10 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, IERC7540Redeem {
 
     // Request queue
     IUltraQueue requestQueue;
+
+    // Rate provider
+    IUltraVaultRateProvider public rateProvider;
+    AddressUpdateProposal public proposedRateProvider;
 
     // V0: 2 total: 1 - pending redeems, 1 - claimable redeems
     // V1: +1, 3 total: added requestQueue. deprecated: _pendingRedeem and _claimableRedeem
@@ -50,11 +67,28 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, IERC7540Redeem {
         address _asset,
         string memory _name,
         string memory _symbol,
+        address _rateProvider,
         address _requestQueue
     ) public virtual onlyInitializing {
         super.initialize(_owner, _asset, _name, _symbol);
 
+        rateProvider = IUltraVaultRateProvider(_rateProvider);
         requestQueue = IUltraQueue(_requestQueue);
+    }
+
+    /*//////////////////////////////////////////////////////////////
+                            ACCOUNTING LOGIC
+    //////////////////////////////////////////////////////////////*/
+
+    function convertToUnderlying(
+        address asset,
+        uint256 assets
+    ) public virtual returns (uint256 baseAssets) {
+        if (!rateProvider.isSupported(asset)) revert AssetNotSupported();
+
+        // Get rate between deposit asset and base asset
+        uint256 rate = rateProvider.getRate(asset);
+        return (assets * rate) / 1e18;
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -72,8 +106,26 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, IERC7540Redeem {
     function deposit(
         uint256 assets,
         address receiver
-    ) public override whenNotPaused returns (uint256 shares) {
+    ) public virtual override whenNotPaused returns (uint256 shares) {
         return _depositAsset(asset(), assets, receiver);
+    }
+
+    /**
+     * @notice Deposit assets for receiver
+     * @param asset Asset
+     * @param assets Amount to deposit
+     * @param receiver Share recipient
+     * @return shares Amount of shares received
+     * @dev Synchronous function, reverts if paused
+     * @dev Uses claimable balances before transferring assets
+     */
+    function depositAsset(
+        address asset,
+        uint256 assets,
+        address receiver
+    ) public whenNotPaused returns (uint256 shares) {
+        uint256 baseAssets = convertToUnderlying(asset, assets);
+        return _depositAsset(asset, baseAssets, receiver);
     }
 
     /**
@@ -125,7 +177,7 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, IERC7540Redeem {
     function mint(
         uint256 shares,
         address receiver
-    ) public override returns (uint256 assets) {
+    ) public virtual override returns (uint256 assets) {
         return _mintWithAsset(asset(), shares, receiver);
     }
 
@@ -176,6 +228,27 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, IERC7540Redeem {
         address controller
     ) public virtual override checkAccess(controller) returns (uint256 shares) {
         return _withdrawAsset(asset(), assets, receiver, controller);
+    }
+
+    /**
+     * @notice Withdraw assets from fulfilled redeem requests
+     * @param asset Asset
+     * @param assets Amount to withdraw
+     * @param receiver Asset recipient
+     * @param controller Controller address
+     * @return shares Amount of shares burned
+     * @dev Asynchronous function, works when paused
+     * @dev Caller must be controller or operator
+     * @dev Requires sufficient claimable assets
+     */
+    function withdrawAsset(
+        address asset,
+        uint256 assets,
+        address receiver,
+        address controller
+    ) public virtual checkAccess(controller) returns (uint256 shares) {
+        uint256 baseAssets = convertToUnderlying(asset, assets);
+        return _withdrawAsset(asset, baseAssets, receiver, controller);
     }
 
     function _withdrawAsset(
@@ -247,6 +320,27 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, IERC7540Redeem {
         address controller
     ) public virtual override returns (uint256 assets) {
         return _redeemAsset(asset(), shares, receiver, controller);
+    }
+
+    /**
+     * @notice Redeem shares from fulfilled requests
+     * @param asset Asset
+     * @param shares Amount to redeem
+     * @param receiver Asset recipient
+     * @param controller Controller address
+     * @return assets Amount of assets received
+     * @dev Asynchronous function, works when paused
+     * @dev Caller must be controller or operator
+     * @dev Requires sufficient claimable shares
+     */
+    function redeemAsset(
+        address asset,
+        uint256 shares,
+        address receiver,
+        address controller
+    ) public virtual returns (uint256 assets) {
+        uint256 baseShares = convertToUnderlying(asset, shares);
+        return _redeemAsset(asset, baseShares, receiver, controller);
     }
 
     function _redeemAsset(
@@ -323,11 +417,32 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, IERC7540Redeem {
         return requestQueue.getPendingRedeem(controller, address(this), asset());
     }
 
+    /**
+     * @notice Get the controller's pending redeem
+     * @param asset Asset
+     * @param controller Controller address
+     * @return pendingRedeem Pending redeem details
+     */
+    function getPendingRedeemForAsset(
+        address asset,
+        address controller
+    ) public view returns (PendingRedeem memory) {
+        return requestQueue.getPendingRedeem(controller, address(this), asset);
+    }
+
     /// @notice Get claimable redeem request
     function getClaimableRedeem(
         address controller
     ) public view returns (ClaimableRedeem memory) {
         return requestQueue.getClaimableRedeem(controller, address(this), asset());
+    }
+
+    /// @notice Get claimable redeem request
+    function getClaimableRedeemForAsset(
+        address asset,
+        address controller
+    ) public view returns (ClaimableRedeem memory) {
+        return requestQueue.getClaimableRedeem(controller, address(this), asset);
     }
 
     /**
@@ -343,6 +458,20 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, IERC7540Redeem {
     }
 
     /**
+     * @notice Get pending shares for controller
+     * @param asset Asset
+     * @param controller Controller address
+     * @return pendingShares Amount of pending shares
+     */
+    function pendingRedeemRequestForAsset(
+        address asset,
+        uint256,
+        address controller
+    ) public view returns (uint256) {
+        return requestQueue.getPendingRedeem(controller, address(this), asset).shares;
+    }
+
+    /**
      * @notice Get claimable shares for controller
      * @param controller Controller address
      * @return claimableShares Amount of claimable shares
@@ -352,6 +481,20 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, IERC7540Redeem {
         address controller
     ) public view returns (uint256) {
         return requestQueue.getClaimableRedeem(controller, address(this), asset()).shares;
+    }
+
+    /**
+     * @notice Get claimable shares for controller
+     * @param asset Asset
+     * @param controller Controller address
+     * @return claimableShares Amount of claimable shares
+     */
+    function claimableRedeemRequestForAsset(
+        address asset,
+        uint256,
+        address controller
+    ) public view returns (uint256) {
+        return requestQueue.getClaimableRedeem(controller, address(this), asset).shares;
     }
 
     /**
@@ -429,6 +572,20 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, IERC7540Redeem {
     }
 
     /**
+     * @notice Get max assets for withdraw
+     * @param asset Asset
+     * @param controller Controller address
+     * @return assets Maximum withdraw amount
+     * @dev Returns controller's claimable assets
+     */
+    function maxWithdrawForAsset(
+        address asset,
+        address controller
+    ) public view virtual returns (uint256) {
+        return requestQueue.getClaimableRedeem(controller, address(this), asset).assets;
+    }
+
+    /**
      * @notice Get max shares for redeem
      * @param controller Controller address
      * @return shares Maximum redeem amount
@@ -438,6 +595,20 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, IERC7540Redeem {
         address controller
     ) public view virtual override returns (uint256) {
         return requestQueue.getClaimableRedeem(controller, address(this), asset()).shares;
+    }
+
+    /**
+     * @notice Get max shares for redeem
+     * @param asset Asset
+     * @param controller Controller address
+     * @return shares Maximum redeem amount
+     * @dev Returns controller's claimable shares
+     */
+    function maxRedeemForAsset(
+        address asset,
+        address controller
+    ) public view virtual returns (uint256) {
+        return requestQueue.getClaimableRedeem(controller, address(this), asset).shares;
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -466,6 +637,25 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, IERC7540Redeem {
         address owner
     ) external virtual returns (uint256 requestId) {
         return _requestRedeemOfAsset(asset(), shares, controller, owner);
+    }
+
+    /**
+     * @notice Request redeem of shares
+     * @param asset Asset
+     * @param shares Amount to redeem
+     * @param controller Share recipient
+     * @param owner Share owner
+     * @return requestId Request identifier
+     * @dev Adds to controller's pending redeem requests
+     */
+    function requestRedeemOfAsset(
+        address asset,
+        uint256 shares,
+        address controller,
+        address owner
+    ) external virtual returns (uint256 requestId) {
+        uint256 baseShares = convertToUnderlying(asset, shares);
+        return _requestRedeemOfAsset(asset, baseShares, controller, owner);
     }
 
     function _requestRedeemOfAsset(
@@ -510,6 +700,21 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, IERC7540Redeem {
      */
     function cancelRedeemRequest(address controller) external virtual {
         return _cancelRedeemRequestOfAsset(asset(), controller, msg.sender);
+    }
+
+    /**
+     * @notice Cancel redeem request for controller
+     * @param asset Asset
+     * @param controller Controller address
+     * @param receiver Share recipient
+     * @dev Transfers pending shares back to receiver
+     */
+    function cancelRedeemRequestOfAsset(
+        address asset,
+        address controller,
+        address receiver
+    ) external virtual {
+        return _cancelRedeemRequestOfAsset(asset, controller, receiver);
     }
 
     /**
@@ -577,6 +782,26 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, IERC7540Redeem {
         return _fulfillRedeemOfAsset(asset(), assets, shares, controller);
     }
 
+    /**
+     * @notice Fulfill redeem request
+     * @param asset Asset
+     * @param shares Amount to redeem
+     * @param controller Controller address
+     * @return assets Amount of claimable assets
+     */
+    function fulfillRedeemOfAsset(
+        address asset,
+        uint256 shares,
+        address controller
+    ) external virtual returns (uint256) {
+        uint256 assets = convertToAssets(shares);
+        uint256 baseAssets = convertToUnderlying(asset, assets);
+
+        _burn(address(this), shares);
+
+        return _fulfillRedeemOfAsset(asset, baseAssets, shares, controller);
+    }
+
     /// @dev Internal fulfill redeem request logic
     function _fulfillRedeemOfAsset(
         address asset,
@@ -618,6 +843,51 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, IERC7540Redeem {
         afterFulfillRedeem(assets, shares);
 
         return assets;
+    }
+
+    /*//////////////////////////////////////////////////////////////
+                            RATE PROVIDER UPDATES
+    //////////////////////////////////////////////////////////////*/
+
+    /**
+     * @notice Propose new rate provider for owner acceptance after delay
+     * @param newRateProvider Address of the new rate provider
+     */
+    function proposeRateProvider(address newRateProvider) external onlyOwner {
+        if (newRateProvider == address(0))
+            revert MissingRateProvider();
+
+        proposedRateProvider = AddressUpdateProposal({
+            addr: newRateProvider,
+            timestamp: block.timestamp
+        });
+
+        emit RateProviderProposed(newRateProvider);
+    }
+
+    /**
+     * @notice Accept proposed rate provider
+     * @dev Pauses vault to ensure provider setup and prevent deposits with faulty prices
+     * @dev Oracle must be switched before unpausing
+     */
+    function acceptProposedRateProvider() external onlyOwner {
+        AddressUpdateProposal memory proposal = proposedRateProvider;
+
+        if (proposal.addr == address(0))
+            revert NoRateProviderProposed();
+        if (block.timestamp < proposal.timestamp + 3 days)
+            revert CanNotAcceptRateProviderYet();
+        if (block.timestamp > proposal.timestamp + 7 days)
+            revert RateProviderUpdateExpired();
+
+        emit RateProviderUpdated(address(rateProvider), proposal.addr);
+
+        rateProvider = IUltraVaultRateProvider(proposal.addr);
+
+        delete proposedRateProvider;
+
+        // Pause to manually check the setup by operators
+        _pause();
     }
 
     /*//////////////////////////////////////////////////////////////

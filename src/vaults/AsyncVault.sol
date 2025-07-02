@@ -57,11 +57,12 @@ abstract contract AsyncVault is BaseControlledAsyncRedeem {
         address _asset,
         string memory _name,
         string memory _symbol,
+        address _rateProvider,
         address _requestQueue,
         address _feeRecipient,
         Fees memory _fees
     ) public virtual onlyInitializing {
-        super.initialize(_owner, _asset, _name, _symbol, _requestQueue);
+        super.initialize(_owner, _asset, _name, _symbol, _rateProvider, _requestQueue);
 
         require(_feeRecipient != address(0)); 
         feeRecipient = _feeRecipient;
