@@ -52,32 +52,63 @@ interface IUltraVault {
     ) external view returns (uint256);
 
     /**
-     * @notice Helper to deposit assets for msg.sender
+     * @notice Deposit assets for receiver
+     * @param asset Asset
      * @param assets Amount to deposit
-     * @param receiver One to get the assets
+     * @param receiver Share recipient
      * @return shares Amount of shares received
+     * @dev Synchronous function, reverts if paused
+     * @dev Uses claimable balances before transferring assets
      */
-    function deposit(uint256 assets, address receiver) external returns (uint256 shares);
+    function depositAsset(
+        address asset,
+        uint256 assets,
+        address receiver
+    ) external returns (uint256 shares);
 
     /**
-     * @notice Request redeem for msg.sender
-     * @param shares Amount to redeem
-     * @return requestId Request identifier
+     * @notice Mint shares for receiver with specific asset
+     * @param asset Asset to mint with
+     * @param shares Amount to mint
+     * @param receiver Share recipient
+     * @return assets Amount of assets required
+     * @dev Synchronous function, reverts if paused
+     * @dev Uses claimable balances before minting shares
      */
-    function requestRedeem(uint256 shares) external returns (uint256 requestId);
+    function mintWithAsset(
+        address asset,
+        uint256 shares,
+        address receiver
+    ) external returns (uint256 assets);
+
+    /**
+     * @notice Request redeem of shares
+     * @param asset Asset
+     * @param shares Amount to redeem
+     * @param controller Share recipient
+     * @param owner Share owner
+     * @return requestId Request identifier
+     * @dev Adds to controller's pending redeem requests
+     */
+    function requestRedeemOfAsset(
+        address asset,
+        uint256 shares,
+        address controller,
+        address owner
+    ) external returns (uint256 requestId);
 
     /**
      * @notice Fulfill redeem request
+     * @param asset Asset
      * @param shares Amount to redeem
-     * @param controller Controller to redeem for
-     * @return assets Amount of assets received
-     * @dev Reverts if shares < minAmount
-     * @dev Collects withdrawal fee to incentivize manager
+     * @param controller Controller address
+     * @return assets Amount of claimable assets
      */
-    function fulfillRedeem(
+    function fulfillRedeemOfAsset(
+        address asset,
         uint256 shares,
         address controller
-    ) external returns (uint256 assets);
+    ) external returns (uint256);
 
     /**
      * @dev Returns the oracle address of the vault.

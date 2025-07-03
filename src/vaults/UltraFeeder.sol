@@ -15,7 +15,7 @@ import { Initializable } from "@openzeppelin/contracts-upgradeable/proxy/utils/I
 import { IPriceSource } from "src/interfaces/IPriceSource.sol";
 
 /**
- * @title UltraMultiVault
+ * @title UltraFeeder
  * @notice ERC-4626 compliant vault that wraps UltraVault for deposits and handles async redeems
  * @dev This vault only handles deposits into the main UltraVault and manages async redeems
  */
@@ -23,7 +23,6 @@ contract UltraFeeder is BaseControlledAsyncRedeem, UUPSUpgradeable {
     using FixedPointMathLib for uint256;
 
     IUltraVault public mainVault;
-    IERC20 public underlying;
 
     event RedeemRequested(address indexed user, uint256 shares);
     event RedeemFulfilled(address indexed user, uint256 assets);
@@ -34,9 +33,10 @@ contract UltraFeeder is BaseControlledAsyncRedeem, UUPSUpgradeable {
     error NoPendingRedeem();
     error NoClaimableAssets();
     error InvalidRedeemRequest();
+    error AssetMismatch();
 
-    // V0: 2 total: 1 - mainVault, 1 - underlying
-    uint256[48] private __gap;
+    // V0: 1 total: mainVault
+    uint256[49] private __gap;
 
     /// @notice Disable implementation's initializer
     constructor() {
@@ -45,9 +45,13 @@ contract UltraFeeder is BaseControlledAsyncRedeem, UUPSUpgradeable {
 
     /**
      * @notice Initializes the vault
-     * @param _mainVault The UltraVault to deposit into
+     * @param _owner Owner of the vault
+     * @param _asset Underlying asset address
      * @param _name The name of the vault token
      * @param _symbol The symbol of the vault token
+     * @param _mainVault The UltraVault to deposit into
+     * @param _rateProvider Rate provider for asset conversions
+     * @param _requestQueue Request queue for async redeems
      */
     function initialize(
         address _owner,
@@ -61,7 +65,11 @@ contract UltraFeeder is BaseControlledAsyncRedeem, UUPSUpgradeable {
         if (address(_mainVault) == address(0)) revert InvalidMainVault();
         mainVault = IUltraVault(_mainVault);
         
+        // Validate that the main vault's asset matches our asset
+        if (mainVault.asset() != _asset) revert AssetMismatch();
+        
         super.initialize(_owner, _asset, _name, _symbol, _rateProvider, _requestQueue);
+        _pause();
     }
 
     /**
@@ -72,8 +80,8 @@ contract UltraFeeder is BaseControlledAsyncRedeem, UUPSUpgradeable {
         uint256 balance = mainVault.balanceOf(address(this));
         return IPriceSource(mainVault.oracle()).getQuote(
             balance,
-            share(), 
-            address(mainVault)
+            address(mainVault),
+            address(asset())
         );
     }
 
@@ -114,10 +122,10 @@ contract UltraFeeder is BaseControlledAsyncRedeem, UUPSUpgradeable {
         );
 
         // Approve main vault to spend assets
-        SafeERC20.safeIncreaseAllowance(underlying, address(mainVault), assets);
+        SafeERC20.safeIncreaseAllowance(IERC20(asset), address(mainVault), assets);
         
         // Deposit into main vault
-        shares = mainVault.deposit(assets, address(this));
+        shares = mainVault.depositAsset(asset, assets, address(this));
         
         // Mint shares to receiver
         _mint(receiver, shares);
@@ -153,10 +161,10 @@ contract UltraFeeder is BaseControlledAsyncRedeem, UUPSUpgradeable {
         );
 
         // Approve main vault to spend assets
-        SafeERC20.safeIncreaseAllowance(underlying, address(mainVault), assets);
+        SafeERC20.safeIncreaseAllowance(IERC20(asset), address(mainVault), assets);
         
         // Deposit into main vault
-        mainVault.deposit(assets, address(this));
+        mainVault.mintWithAsset(asset, assets, address(this));
 
         _mint(receiver, shares);
 
@@ -168,7 +176,10 @@ contract UltraFeeder is BaseControlledAsyncRedeem, UUPSUpgradeable {
 
     /**
      * @notice Request to redeem shares
+     * @param asset Asset to redeem
      * @param shares The amount of shares to redeem
+     * @param controller Controller address
+     * @param owner Share owner
      * @return requestId The request ID
      */
     function _requestRedeemOfAsset(
@@ -182,18 +193,13 @@ contract UltraFeeder is BaseControlledAsyncRedeem, UUPSUpgradeable {
         if (shares == 0)
             revert NothingToRedeem();
 
-        // // Burn user's shares
-        // _burn(msg.sender, shares);
+        // Approve main vault to spend it's shares
+        SafeERC20.safeIncreaseAllowance(IERC20(address(mainVault)), address(mainVault), shares);
 
-        // // Request redeem from main vault
-        // requestId = mainVault.requestRedeem(shares);
+        // Request redeem from main vault
+        requestId = mainVault.requestRedeemOfAsset(asset, shares, address(this), address(this));
 
-        // // Track pending redeem
-        // pendingRedeems[msg.sender] += shares;
-
-        // emit RedeemRequested(msg.sender, shares);
-        // return requestId;
-
+        // Track pending redeem in our queue
         PendingRedeem memory pendingRedeem =
             requestQueue.getPendingRedeem(controller, address(this), asset);
         pendingRedeem.shares += shares;
@@ -229,7 +235,7 @@ contract UltraFeeder is BaseControlledAsyncRedeem, UUPSUpgradeable {
             revert NotEnoughPendingShares();
 
         // Fulfill redeem in main vault. Requires correctly set role
-        assets = mainVault.fulfillRedeem(shares, address(this));
+        assets = mainVault.fulfillRedeemOfAsset(asset, shares, address(this));
 
         claimableRedeem.shares += shares;
         claimableRedeem.assets += assets;
@@ -255,7 +261,7 @@ contract UltraFeeder is BaseControlledAsyncRedeem, UUPSUpgradeable {
     //////////////////////////////////////////////////////////////*/
 
     /**
-     * @notice Returns the amount of assets that would be deposited for a given amount of shares
+     * @notice Returns the amount of shares that would be minted for a given amount of assets
      * @param assets The amount of assets to convert
      * @return The amount of shares that would be minted
      */
@@ -264,12 +270,12 @@ contract UltraFeeder is BaseControlledAsyncRedeem, UUPSUpgradeable {
     }
 
     /**
-     * @notice Returns the amount of shares that would be minted for a given amount of assets
-     * @param assets The amount of assets to convert
-     * @return The amount of shares that would be minted
+     * @notice Returns the amount of assets required for a given amount of shares
+     * @param shares The amount of shares to convert
+     * @return The amount of assets required
      */
-    function previewMint(uint256 assets) public view override returns (uint256) {
-        return mainVault.previewMint(assets);
+    function previewMint(uint256 shares) public view override returns (uint256) {
+        return mainVault.previewMint(shares);
     }
 
     /**
