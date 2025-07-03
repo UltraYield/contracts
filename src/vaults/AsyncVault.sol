@@ -162,6 +162,41 @@ abstract contract AsyncVault is BaseControlledAsyncRedeem {
     }
 
     /**
+     * @notice Fulfill redeem request
+     * @param asset Asset
+     * @param shares Amount to redeem
+     * @param controller Controller address
+     * @return assets Amount of claimable assets
+     */
+    function fulfillRedeemOfAsset(
+        address asset,
+        uint256 shares,
+        address controller
+    ) external virtual override returns (uint256 assets) {
+        // Collect fees accrued to date
+        _collectFees();
+        
+        uint256 totalAssets = convertToAssets(shares);
+        uint256 totalBaseAssets = convertToUnderlying(asset, totalAssets);
+        assets = totalBaseAssets;
+
+        // Calculate the withdrawal incentive fee from the assets
+        Fees memory fees_ = fees;
+        uint256 feesToCollect = totalBaseAssets.mulDivDown(
+            uint256(fees_.withdrawalFee),
+            1e18
+        );
+
+        // Fulfill request
+        _fulfillRedeemOfAsset(asset, totalBaseAssets - feesToCollect, shares, controller);
+
+        // Burn the shares
+        _burn(address(this), shares);
+
+        collectWithdrawalFeeInAsset(asset, feesToCollect);
+    }
+
+    /**
      * @notice Fulfill multiple redeem requests
      * @param shares Array of share amounts
      * @param controllers Array of controllers
