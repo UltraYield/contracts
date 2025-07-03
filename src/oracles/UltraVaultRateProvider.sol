@@ -3,6 +3,7 @@ pragma solidity 0.8.28;
 
 import { IRateProvider } from "../interfaces/IRateProvider.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import { IERC20Metadata } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import { InitializableOwnable } from "../utils/InitializableOwnable.sol";
 import { Initializable } from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import { AssetData } from "../interfaces/IUltraVaultRateProvider.sol";
@@ -22,9 +23,14 @@ contract UltraVaultRateProvider is InitializableOwnable, Initializable {
     error InvalidRateProvider();
     error AssetAlreadySupported();
 
+    address public baseAsset;
+    uint8 public decimals;
+
     // State
     mapping(address => AssetData) public supportedAssets;
-    address public baseAsset;
+
+    // V0: 3 total: baseAsset, decimals, supportedAssets
+    uint256[47] private __gap;
 
     constructor() {
         _disableInitializers();
@@ -33,9 +39,11 @@ contract UltraVaultRateProvider is InitializableOwnable, Initializable {
     function initialize(address _owner, address _baseAsset) external initializer {
         initOwner(_owner);
         baseAsset = _baseAsset;
+        decimals = IERC20Metadata(_baseAsset).decimals();
         // Base asset is always supported and pegged to itself
         supportedAssets[_baseAsset] = AssetData({
             isPegged: true,
+            decimals: decimals,
             rateProvider: address(0)
         });
     }
@@ -54,6 +62,7 @@ contract UltraVaultRateProvider is InitializableOwnable, Initializable {
 
         supportedAssets[asset] = AssetData({
             isPegged: isPegged,
+            decimals: IERC20Metadata(asset).decimals(),
             rateProvider: rateProvider
         });
 
@@ -90,18 +99,24 @@ contract UltraVaultRateProvider is InitializableOwnable, Initializable {
     /**
      * @notice Get the rate between an asset and the base asset
      * @param asset The asset to get rate for
-     * @return rate The rate in terms of base asset (18 decimals)
+     * @param assets Amount to covert
+     * @return result The rate in terms of base asset (18 decimals)
      */
-    function getRate(address asset) external view returns (uint256 rate) {
+    function convertToUnderlying(address asset, uint256 assets) external view returns (uint256 result) {
         AssetData memory data = supportedAssets[asset];
         if (data.isPegged) {
-            return 1e18; // 1:1 rate
+            if (data.decimals == decimals) {
+                return assets; // 1:1 rate
+            } else {
+                // 1:1 rate accounting for decimals, based on 10e18 used 
+                return _convertDecimals(assets, decimals, data.decimals);
+            }
         }
 
         if (data.rateProvider == address(0)) revert AssetNotSupported();
 
         // Call external rate provider
-        return IRateProvider(data.rateProvider).getRate(asset);
+        return IRateProvider(data.rateProvider).convertToUnderlying(asset, assets);
     }
 
     /**
@@ -115,5 +130,22 @@ contract UltraVaultRateProvider is InitializableOwnable, Initializable {
             return true;
         }
         return data.rateProvider != address(0);
+    }
+
+    /**
+     * @notice Help account for decimals
+     */
+    function _convertDecimals(
+        uint256 amount, 
+        uint8 fromDecimals, 
+        uint8 toDecimals
+    ) internal pure returns (uint256) {
+        if (fromDecimals == toDecimals) {
+            return amount;
+        } else if (fromDecimals < toDecimals) {
+            return amount * 10 ** (toDecimals - fromDecimals);
+        } else {
+            return amount / 10 ** (fromDecimals - toDecimals);
+        }
     }
 } 

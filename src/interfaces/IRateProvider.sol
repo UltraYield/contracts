@@ -10,9 +10,7 @@ interface IRateProvider {
     /**
      * @notice Get the rate between an asset and the base asset
      * @param asset The asset to get rate for
-     * @return rate The rate in terms of base asset (with same decimals)
+     * @return result The rate in terms of base asset (18 decimals)
      */
-    function getRate(
-        address asset
-    ) external view returns (uint256 rate);
+    function convertToUnderlying(address asset, uint256 assets) external view returns (uint256 result);
 }
