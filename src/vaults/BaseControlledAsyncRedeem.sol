@@ -86,9 +86,7 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, IERC7540Redeem {
     ) public virtual returns (uint256 baseAssets) {
         if (!rateProvider.isSupported(asset)) revert AssetNotSupported();
 
-        // Get rate between deposit asset and base asset
-        uint256 rate = rateProvider.getRate(asset);
-        return (assets * rate) / 1e18;
+        return rateProvider.convertToUnderlying(asset, assets);
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -141,7 +139,7 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, IERC7540Redeem {
         address asset,
         uint256 assets,
         address receiver
-    ) internal whenNotPaused returns (uint256 shares) {
+    ) internal virtual whenNotPaused returns (uint256 shares) {
         // Rounding down can cause zero shares minted
         shares = previewDeposit(assets);
         if (shares == 0)
@@ -186,7 +184,7 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, IERC7540Redeem {
         address asset,
         uint256 shares,
         address receiver
-    ) internal whenNotPaused returns (uint256 assets) {
+    ) internal virtual whenNotPaused returns (uint256 assets) {
 
         if (shares == 0)
             revert NothingToMint();
@@ -663,7 +661,7 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, IERC7540Redeem {
         uint256 shares,
         address controller,
         address owner
-    ) internal checkAccess(owner) returns (uint256 requestId) {
+    ) internal virtual checkAccess(owner) returns (uint256 requestId) {
         if (IERC20(address(this)).balanceOf(owner) < shares)
             revert InsufficientBalance();
         if (shares == 0)

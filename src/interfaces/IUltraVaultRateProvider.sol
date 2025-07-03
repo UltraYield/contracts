@@ -8,6 +8,7 @@ import { Initializable } from "@openzeppelin/contracts-upgradeable/proxy/utils/I
 
 struct AssetData {
     bool isPegged;  // If true, asset is 1:1 with base asset
+    uint8 decimals;
     address rateProvider;  // External rate provider if not pegged
 }
 
@@ -41,9 +42,10 @@ interface IUltraVaultRateProvider {
     /**
      * @notice Get the rate between an asset and the base asset
      * @param asset The asset to get rate for
-     * @return rate The rate in terms of base asset (18 decimals)
+     * @param assets Amount to covert
+     * @return result The rate in terms of base asset (18 decimals)
      */
-    function getRate(address asset) external view returns (uint256 rate);
+    function convertToUnderlying(address asset, uint256 assets) external view returns (uint256 result);
 
     /**
      * @notice Check if an asset is supported
