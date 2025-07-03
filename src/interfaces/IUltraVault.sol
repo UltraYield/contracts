@@ -8,6 +8,12 @@ pragma solidity 0.8.28;
 interface IUltraVault {
 
     /**
+     * @notice Returns the address of the underlying token used for the Vault
+     * @return assetTokenAddress The address of the underlying asset
+     */
+    function asset() external view returns (address);
+
+    /**
      * @notice Preview shares for deposit
      * @param assets Amount to deposit
      * @return shares Amount of shares received

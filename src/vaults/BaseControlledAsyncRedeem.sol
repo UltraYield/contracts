@@ -179,6 +179,24 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, IERC7540Redeem {
         return _mintWithAsset(asset(), shares, receiver);
     }
 
+    /**
+     * @notice Mint shares for receiver with specific asset
+     * @param asset Asset to mint with
+     * @param shares Amount to mint
+     * @param receiver Share recipient
+     * @return assets Amount of assets required
+     * @dev Synchronous function, reverts if paused
+     * @dev Uses claimable balances before minting shares
+     */
+    function mintWithAsset(
+        address asset,
+        uint256 shares,
+        address receiver
+    ) public whenNotPaused returns (uint256 assets) {
+        uint256 baseShares = convertToUnderlying(asset, shares);
+        return _mintWithAsset(asset, baseShares, receiver);
+    }
+
     /// @dev Mint with asset
     function _mintWithAsset(
         address asset,

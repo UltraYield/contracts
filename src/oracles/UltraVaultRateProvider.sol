@@ -55,7 +55,8 @@ contract UltraVaultRateProvider is InitializableOwnable, Initializable {
      * @param rateProvider External rate provider if not pegged
      */
     function addAsset(address asset, bool isPegged, address rateProvider) external onlyOwner {
-        if (address(supportedAssets[asset].rateProvider) != address(0)) 
+        AssetData memory data = supportedAssets[asset];
+        if (data.isPegged || data.rateProvider != address(0)) 
             revert AssetAlreadySupported();
         if (!isPegged && rateProvider == address(0))
             revert InvalidRateProvider();
@@ -108,8 +109,8 @@ contract UltraVaultRateProvider is InitializableOwnable, Initializable {
             if (data.decimals == decimals) {
                 return assets; // 1:1 rate
             } else {
-                // 1:1 rate accounting for decimals, based on 10e18 used 
-                return _convertDecimals(assets, decimals, data.decimals);
+                // 1:1 rate accounting for decimals, convert from asset decimals to base asset decimals
+                return _convertDecimals(assets, data.decimals, decimals);
             }
         }
 
