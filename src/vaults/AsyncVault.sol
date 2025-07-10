@@ -57,10 +57,12 @@ abstract contract AsyncVault is BaseControlledAsyncRedeem {
         address _asset,
         string memory _name,
         string memory _symbol,
+        address _rateProvider,
+        address _requestQueue,
         address _feeRecipient,
         Fees memory _fees
     ) public virtual onlyInitializing {
-        super.initialize(_owner, _asset, _name, _symbol);
+        super.initialize(_owner, _asset, _name, _symbol, _rateProvider, _requestQueue);
 
         require(_feeRecipient != address(0)); 
         feeRecipient = _feeRecipient;
@@ -119,7 +121,7 @@ abstract contract AsyncVault is BaseControlledAsyncRedeem {
      * @return requestId Request identifier
      */
     function requestRedeem(uint256 shares) external returns (uint256 requestId) {
-        return _requestRedeem(shares, msg.sender, msg.sender);
+        return _requestRedeemOfAsset(asset(), shares, msg.sender, msg.sender);
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -151,12 +153,51 @@ abstract contract AsyncVault is BaseControlledAsyncRedeem {
         );
 
         // Fulfill request
-        _fulfillRedeem(assets - feesToCollect, shares, controller);
+        _fulfillRedeemOfAsset(asset(), assets - feesToCollect, shares, controller);
 
         // Burn the shares
         _burn(address(this), shares);
 
-        collectWithdrawalFee(feesToCollect);
+        collectWithdrawalFeeInAsset(asset(), feesToCollect);
+    }
+
+    /**
+     * @notice Fulfill redeem request
+     * @param asset Asset
+     * @param shares Amount to redeem
+     * @param controller Controller address
+     * @return assets Amount of claimable assets
+     */
+    function fulfillRedeemOfAsset(
+        address asset,
+        uint256 shares,
+        address controller
+    ) external virtual override returns (uint256 assets) {
+        // Collect fees accrued to date
+        _collectFees();
+        
+        // Convert shares to underlying assets, then to asset units
+        uint256 underlyingAssets = convertToAssets(shares);
+        assets = convertFromUnderlying(asset, underlyingAssets);
+        
+        // Calculate the withdrawal incentive fee directly in asset units
+        Fees memory fees_ = fees;
+        uint256 feesToCollect = assets.mulDivDown(
+            uint256(fees_.withdrawalFee),
+            1e18
+        );
+
+        // Fulfill request with asset units (base contract expects asset units)
+        _fulfillRedeemOfAsset(asset, assets - feesToCollect, shares, controller);
+
+        // Burn the shares
+        _burn(address(this), shares);
+
+        // Collect withdrawal fee in asset units
+        collectWithdrawalFeeInAsset(asset, feesToCollect);
+
+        // Return the amount in asset units for consistency with base contract
+        return assets - feesToCollect;
     }
 
     /**
@@ -191,7 +232,7 @@ abstract contract AsyncVault is BaseControlledAsyncRedeem {
             );
 
             // Fulfill redeem
-            _fulfillRedeem(assets - feesToCollect, shares[i], controllers[i]);
+            _fulfillRedeemOfAsset(asset(), assets - feesToCollect, shares[i], controllers[i]);
 
             total += assets;
             totalFees += feesToCollect;
@@ -201,19 +242,20 @@ abstract contract AsyncVault is BaseControlledAsyncRedeem {
         // Burn the shares
         _burn(address(this), totalShares);
 
-        collectWithdrawalFee(totalFees);
+        collectWithdrawalFeeInAsset(asset(), totalFees);
 
         return total;
     }
 
     /// @dev Internal fulfill redeem request logic
     /// @dev In async vaults it's a privileged function
-    function _fulfillRedeem(
+    function _fulfillRedeemOfAsset(
+        address asset,
         uint256 assets,
         uint256 shares,
         address controller
     ) internal virtual onlyRoleOrOwner(OPERATOR_ROLE) override returns (uint256) {
-        return super._fulfillRedeem(assets, shares, controller);
+        return super._fulfillRedeemOfAsset(asset, assets, shares, controller);
     }
 
     /**
@@ -221,11 +263,12 @@ abstract contract AsyncVault is BaseControlledAsyncRedeem {
      * @param fee Amount to collect
      * @dev Can be overridden for custom withdrawal logic
      */
-    function collectWithdrawalFee(
+    function collectWithdrawalFeeInAsset(
+        address asset,
         uint256 fee
     ) internal virtual {
         if (fee > 0) {
-            SafeERC20.safeTransfer(IERC20(asset()), feeRecipient, fee);
+            SafeERC20.safeTransfer(IERC20(asset), feeRecipient, fee);
             emit WithdrawalFeeCollected(fee);
         }
     }
@@ -238,7 +281,7 @@ abstract contract AsyncVault is BaseControlledAsyncRedeem {
      * @notice Collect fees before withdraw
      * @dev Expected to be overridden in inheriting contracts
      */
-    function beforeWithdraw(uint256, uint256) internal virtual override {
+    function beforeWithdraw(address, uint256, uint256) internal virtual override {
         if (!paused) 
             _collectFees();
     }
@@ -247,7 +290,7 @@ abstract contract AsyncVault is BaseControlledAsyncRedeem {
      * @notice Collect fees before deposit
      * @dev Expected to be overridden in inheriting contracts
      */
-    function beforeDeposit(uint256, uint256) internal virtual override {
+    function beforeDeposit(address, uint256, uint256) internal virtual override {
         _collectFees();
     }
 

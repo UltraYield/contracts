@@ -2,20 +2,15 @@
 pragma solidity 0.8.28;
 
 import { AsyncVault, Fees } from "./AsyncVault.sol";
-import { FixedPointMathLib } from "../utils/FixedPointMathLib.sol";
+import { PendingRedeem, ClaimableRedeem } from "./BaseControlledAsyncRedeem.sol";
+import { AddressUpdateProposal } from "../utils/AddressUpdates.sol";
 import { IPriceSource } from "src/interfaces/IPriceSource.sol";
 import { SafeERC20, IERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import { UUPSUpgradeable } from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 
-struct AddressUpdateProposal {
-    address addr;
-    uint256 timestamp;
-}
-
 /**
  * @title UltraVault
  * @notice ERC-7540 compliant async redeem vault with UltraVaultOracle pricing and multisig asset management
-
  */
 contract UltraVault is AsyncVault, UUPSUpgradeable {
 
@@ -28,7 +23,7 @@ contract UltraVault is AsyncVault, UUPSUpgradeable {
 
     event Referral(address indexed referrer, address user);
 
-    // Errors
+    // Update errors
     error InvalidFundsHolder();
     error NoPendingFundsHolderUpdate();
     error CanNotAcceptFundsHolderYet();
@@ -37,6 +32,8 @@ contract UltraVault is AsyncVault, UUPSUpgradeable {
     error NoOracleProposed();
     error CanNotAcceptOracleYet();
     error OracleUpdateExpired();
+
+    // Misc errors
     error CantSetBalancesInNonEmptyVault();
 
     address public fundsHolder;
@@ -75,6 +72,8 @@ contract UltraVault is AsyncVault, UUPSUpgradeable {
         address _asset,
         string memory _name,
         string memory _symbol,
+        address _rateProvider,
+        address _requestQueue,
         address _feeRecipient,
         Fees memory _fees,
         address _oracle,
@@ -85,11 +84,12 @@ contract UltraVault is AsyncVault, UUPSUpgradeable {
 
         fundsHolder = _fundsHolder;
         oracle = IPriceSource(_oracle);
+        
 
         _pause();
         
         // Calling at the very end since we need oracle to be setup
-        super.initialize(_owner, _asset, _name, _symbol, _feeRecipient, _fees);
+        super.initialize(_owner, _asset, _name, _symbol, _rateProvider, _requestQueue, _feeRecipient, _fees);
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -151,9 +151,9 @@ contract UltraVault is AsyncVault, UUPSUpgradeable {
     //////////////////////////////////////////////////////////////*/
 
     /// @dev After deposit hook - collect fees and send funds to fundsHolder
-    function afterDeposit(uint256 assets, uint256) internal override {
+    function afterDeposit(address asset, uint256 assets, uint256) internal override {
         // Funds are sent to holder
-        SafeERC20.safeTransfer(IERC20(asset()), fundsHolder, assets);
+        SafeERC20.safeTransfer(IERC20(asset), fundsHolder, assets);
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -161,21 +161,23 @@ contract UltraVault is AsyncVault, UUPSUpgradeable {
     //////////////////////////////////////////////////////////////*/
 
     /// @dev Before fulfill redeem - transfer funds from fundsHolder to vault
-    function beforeFulfillRedeem(uint256 assets, uint256) internal override {
-        SafeERC20.safeTransferFrom(IERC20(asset()), fundsHolder, address(this), assets);
+    /// @dev "assets" will already be correct given the token user requested
+    function beforeFulfillRedeem(address asset, uint256 assets, uint256) internal override {
+        SafeERC20.safeTransferFrom(IERC20(asset), fundsHolder, address(this), assets);
     }
 
     /*//////////////////////////////////////////////////////////////
-                    AsyncVault OVERRIDES
+                        AsyncVault OVERRIDES
     //////////////////////////////////////////////////////////////*/
 
     /// @inheritdoc AsyncVault
-    function collectWithdrawalFee(
+    function collectWithdrawalFeeInAsset(
+        address asset,
         uint256 fee
     ) internal override {
         if (fee > 0) {
             // Transfer the fee from the fundsHolder to the fee recipient
-            SafeERC20.safeTransferFrom(IERC20(asset()), fundsHolder, feeRecipient, fee);
+            SafeERC20.safeTransferFrom(IERC20(asset), fundsHolder, feeRecipient, fee);
             emit WithdrawalFeeCollected(fee);
         }
     }
