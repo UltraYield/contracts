@@ -48,6 +48,14 @@ interface IUltraVaultRateProvider {
     function convertToUnderlying(address asset, uint256 assets) external view returns (uint256 result);
 
     /**
+     * @notice Convert from base asset to specific asset
+     * @param asset The asset to convert to
+     * @param baseAssets Amount in base asset units
+     * @return result The amount in asset units
+     */
+    function convertFromUnderlying(address asset, uint256 baseAssets) external view returns (uint256 result);
+
+    /**
      * @notice Check if an asset is supported
      * @param asset The asset to check
      * @return True if asset is supported

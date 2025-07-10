@@ -176,24 +176,28 @@ abstract contract AsyncVault is BaseControlledAsyncRedeem {
         // Collect fees accrued to date
         _collectFees();
         
-        uint256 totalAssets = convertToAssets(shares);
-        uint256 totalBaseAssets = convertToUnderlying(asset, totalAssets);
-        assets = totalBaseAssets;
-
-        // Calculate the withdrawal incentive fee from the assets
+        // Convert shares to underlying assets, then to asset units
+        uint256 underlyingAssets = convertToAssets(shares);
+        assets = convertFromUnderlying(asset, underlyingAssets);
+        
+        // Calculate the withdrawal incentive fee directly in asset units
         Fees memory fees_ = fees;
-        uint256 feesToCollect = totalBaseAssets.mulDivDown(
+        uint256 feesToCollect = assets.mulDivDown(
             uint256(fees_.withdrawalFee),
             1e18
         );
 
-        // Fulfill request
-        _fulfillRedeemOfAsset(asset, totalBaseAssets - feesToCollect, shares, controller);
+        // Fulfill request with asset units (base contract expects asset units)
+        _fulfillRedeemOfAsset(asset, assets - feesToCollect, shares, controller);
 
         // Burn the shares
         _burn(address(this), shares);
 
+        // Collect withdrawal fee in asset units
         collectWithdrawalFeeInAsset(asset, feesToCollect);
+
+        // Return the amount in asset units for consistency with base contract
+        return assets - feesToCollect;
     }
 
     /**
