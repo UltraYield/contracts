@@ -161,6 +161,7 @@ contract UltraVault is AsyncVault, UUPSUpgradeable {
     //////////////////////////////////////////////////////////////*/
 
     /// @dev Before fulfill redeem - transfer funds from fundsHolder to vault
+    /// @dev "assets" will already be correct given the token user requested
     function beforeFulfillRedeem(address asset, uint256 assets, uint256) internal override {
         SafeERC20.safeTransferFrom(IERC20(asset), fundsHolder, address(this), assets);
     }
