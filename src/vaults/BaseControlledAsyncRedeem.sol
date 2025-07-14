@@ -711,6 +711,8 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, IERC7540Redeem {
         if (shares == 0)
             revert NothingToRedeem();
 
+        beforeRequestRedeem(asset, shares, controller, owner);
+
         PendingRedeem memory pendingRedeem =
             requestQueue.getPendingRedeem(controller, address(this), asset);
         pendingRedeem.shares += shares;
@@ -951,6 +953,14 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, IERC7540Redeem {
         address asset,
         uint256 assets, 
         uint256 shares
+    ) internal virtual {}
+
+    /// @dev Hook for inheriting contracts after request redeem
+    function beforeRequestRedeem(
+        address asset,
+        uint256 shares,
+        address controller,
+        address owner
     ) internal virtual {}
 
     /// @dev Hook for inheriting contracts before fulfill

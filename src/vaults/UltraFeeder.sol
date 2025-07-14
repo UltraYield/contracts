@@ -22,6 +22,8 @@ import { IPriceSource } from "src/interfaces/IPriceSource.sol";
 contract UltraFeeder is BaseControlledAsyncRedeem, UUPSUpgradeable {
     using FixedPointMathLib for uint256;
 
+    bytes32 public constant OPERATOR_ROLE = keccak256("OPERATOR_ROLE");
+
     IUltraVault public mainVault;
 
     event RedeemRequested(address indexed user, uint256 shares);
@@ -34,6 +36,7 @@ contract UltraFeeder is BaseControlledAsyncRedeem, UUPSUpgradeable {
     error NoClaimableAssets();
     error InvalidRedeemRequest();
     error AssetMismatch();
+    error ShareNumberMismatch();
 
     // V0: 1 total: mainVault
     uint256[49] private __gap;
@@ -50,16 +53,14 @@ contract UltraFeeder is BaseControlledAsyncRedeem, UUPSUpgradeable {
      * @param _name The name of the vault token
      * @param _symbol The symbol of the vault token
      * @param _mainVault The UltraVault to deposit into
-     * @param _rateProvider Rate provider for asset conversions
      * @param _requestQueue Request queue for async redeems
      */
     function initialize(
+        address _mainVault,
         address _owner,
         address _asset,
         string memory _name,
         string memory _symbol,
-        address _mainVault,
-        address _rateProvider,
         address _requestQueue
     ) external initializer {
         if (address(_mainVault) == address(0)) revert InvalidMainVault();
@@ -68,7 +69,7 @@ contract UltraFeeder is BaseControlledAsyncRedeem, UUPSUpgradeable {
         // Validate that the main vault's asset matches our asset
         if (mainVault.asset() != _asset) revert AssetMismatch();
         
-        super.initialize(_owner, _asset, _name, _symbol, _rateProvider, _requestQueue);
+        super.initialize(_owner, _asset, _name, _symbol, mainVault.rateProvider(), _requestQueue);
         _pause();
     }
 
@@ -77,9 +78,8 @@ contract UltraFeeder is BaseControlledAsyncRedeem, UUPSUpgradeable {
      * @return The total assets in the vault
      */
     function totalAssets() public view override returns (uint256) {
-        uint256 balance = mainVault.balanceOf(address(this));
         return IPriceSource(mainVault.oracle()).getQuote(
-            balance,
+            totalSupply(),
             address(mainVault),
             address(asset())
         );
@@ -89,171 +89,52 @@ contract UltraFeeder is BaseControlledAsyncRedeem, UUPSUpgradeable {
                     BaseControlledAsyncRedeem OVERRIDES
     //////////////////////////////////////////////////////////////*/
 
-    /**
-     * @notice Deposit assets for receiver
-     * @param asset Asset to deposit
-     * @param assets Amount to deposit
-     * @param receiver Share recipient
-     * @return shares Amount of shares received
-     * @dev Synchronous function, reverts if paused
-     * @dev Uses claimable balances before transferring assets
-     */
-    function _depositAsset(
-        address asset,
-        uint256 assets,
-        address receiver
-    ) internal override whenNotPaused returns (uint256 shares) {
-        if (mainVault.paused()) revert VaultPaused();
-
-        // Rounding down can cause zero shares minted
-        shares = previewDeposit(assets);
-        if (shares == 0)
-            revert EmptyDeposit();
-
-        // Pre-deposit hook
-        beforeDeposit(asset, assets, shares);
-
-        // Transfer before mint to avoid reentering
-        SafeERC20.safeTransferFrom(
-            IERC20(asset),
-            msg.sender,
-            address(this),
-            assets
-        );
-
+    /// @dev After deposit hook - collect fees and send funds to fundsHolder
+    function afterDeposit(address asset, uint256 assets, uint256 shares) internal override {
         // Approve main vault to spend assets
         SafeERC20.safeIncreaseAllowance(IERC20(asset), address(mainVault), assets);
-        
-        // Deposit into main vault
-        shares = mainVault.depositAsset(asset, assets, address(this));
-        
-        // Mint shares to receiver
-        _mint(receiver, shares);
 
-        emit Deposit(msg.sender, receiver, assets, shares);
-
-        // After-deposit hook
-        afterDeposit(asset, assets, shares);
+        uint256 mainShares = mainVault.depositAsset(asset, assets, address(this));
+        if (mainShares != shares) {
+            revert ShareNumberMismatch();
+        }
     }
 
-    /// @dev Mint with asset
-    function _mintWithAsset(
-        address asset,
-        uint256 shares,
-        address receiver
-    ) internal override whenNotPaused returns (uint256 assets) {
-        if (mainVault.paused()) revert VaultPaused();
-
-        if (shares == 0)
-            revert NothingToMint();
-
-        assets = previewMint(shares); 
-
-        // Pre-deposit hook
-        beforeDeposit(asset, assets, shares);
-
-        // Need to transfer before minting or ERC777s could reenter
-        SafeERC20.safeTransferFrom(
-            IERC20(asset),
-            msg.sender,
-            address(this),
-            assets
-        );
-
-        // Approve main vault to spend assets
-        SafeERC20.safeIncreaseAllowance(IERC20(asset), address(mainVault), assets);
-        
-        // Deposit into main vault
-        mainVault.mintWithAsset(asset, assets, address(this));
-
-        _mint(receiver, shares);
-
-        emit Deposit(msg.sender, receiver, assets, shares);
-
-        // After-deposit hook
-        afterDeposit(asset, assets, shares);
-    }
-
-    /**
-     * @notice Request to redeem shares
-     * @param asset Asset to redeem
-     * @param shares The amount of shares to redeem
-     * @param controller Controller address
-     * @param owner Share owner
-     * @return requestId The request ID
-     */
-    function _requestRedeemOfAsset(
+    /// @dev Hook for inheriting contracts after request redeem
+    function beforeRequestRedeem(
         address asset,
         uint256 shares,
         address controller,
         address owner
-    ) internal override checkAccess(owner) returns (uint256 requestId) {
-        if (IERC20(address(this)).balanceOf(owner) < shares)
-            revert InsufficientBalance();
-        if (shares == 0)
-            revert NothingToRedeem();
-
+    ) internal override {
         // Approve main vault to spend it's shares
         SafeERC20.safeIncreaseAllowance(IERC20(address(mainVault)), address(mainVault), shares);
 
         // Request redeem from main vault
-        requestId = mainVault.requestRedeemOfAsset(asset, shares, address(this), address(this));
-
-        // Track pending redeem in our queue
-        PendingRedeem memory pendingRedeem =
-            requestQueue.getPendingRedeem(controller, address(this), asset);
-        pendingRedeem.shares += shares;
-        pendingRedeem.requestTime = block.timestamp;
-
-        requestQueue.setPendingRedeem(controller, address(this), asset, pendingRedeem);
-
-        // Transfer shares to vault for burning later
-        SafeERC20.safeTransferFrom(IERC20(this), owner, address(this), shares);
-
-        emit RedeemRequested(controller, owner, REQUEST_ID, msg.sender, shares);
-        return REQUEST_ID;
+        mainVault.requestRedeemOfAsset(asset, shares, address(this), address(this));
     }
 
+    /// @dev Before fulfill redeem - transfer funds from fundsHolder to vault
+    /// @dev "assets" will already be correct given the token user requested
+    function beforeFulfillRedeem(address asset, uint256 assets, uint256 shares) internal override {
+
+        // Fulfill redeem in main vault. Returns asset units
+        mainVault.fulfillRedeemOfAsset(asset, shares, address(this));
+        uint256 mainAssetsClaimed = mainVault.redeemAsset(asset, shares, address(this), address(this));
+
+        if (mainAssetsClaimed != assets) {
+            revert ShareNumberMismatch();
+        }
+    }
+
+    /// @dev In async vaults it's a privileged function
     function _fulfillRedeemOfAsset(
         address asset,
         uint256 assets,
         uint256 shares,
         address controller
-    ) internal virtual override returns (uint256) {
-        if (assets == 0 || shares == 0) 
-            revert InvalidRedeemCall();
-
-        PendingRedeem memory pendingRedeem = 
-            requestQueue.getPendingRedeem(controller, address(this), asset);
-        ClaimableRedeem memory claimableRedeem =
-            requestQueue.getClaimableRedeem(controller, address(this), asset);
-
-        if (pendingRedeem.shares == 0)
-            revert NothingToRedeem();
-
-        if (shares > pendingRedeem.shares)
-            revert NotEnoughPendingShares();
-
-        // Fulfill redeem in main vault. Requires correctly set role
-        assets = mainVault.fulfillRedeemOfAsset(asset, shares, address(this));
-
-        claimableRedeem.shares += shares;
-        claimableRedeem.assets += assets;
-        pendingRedeem.shares -= shares;
-
-        // Reset the requestTime if redeem is full
-        if (pendingRedeem.shares == 0) 
-            pendingRedeem.requestTime = 0;
-
-        requestQueue.setPendingRedeem(controller, address(this), asset, pendingRedeem);
-        requestQueue.setClaimableRedeem(controller, address(this), asset, claimableRedeem);
-
-        emit RedeemRequestFulfilled(controller, msg.sender, shares, assets);
-
-        // After fulfill redeem hook
-        afterFulfillRedeem(assets, shares);
-
-        return assets;
+    ) internal override onlyRoleOrOwner(OPERATOR_ROLE) returns (uint256) {
+        return super._fulfillRedeemOfAsset(asset, assets, shares, controller);
     }
 
     /*//////////////////////////////////////////////////////////////
