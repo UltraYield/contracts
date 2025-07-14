@@ -14,6 +14,11 @@ interface IUltraVault {
     function asset() external view returns (address);
 
     /**
+     * @notice Returns the address of the rate provider
+     */
+    function rateProvider() external view returns (address);
+
+    /**
      * @notice Preview shares for deposit
      * @param assets Amount to deposit
      * @return shares Amount of shares received
@@ -109,6 +114,24 @@ interface IUltraVault {
         uint256 shares,
         address controller
     ) external returns (uint256);
+
+    /**
+     * @notice Redeem shares from fulfilled requests
+     * @param asset Asset
+     * @param shares Amount to redeem
+     * @param receiver Asset recipient
+     * @param controller Controller address
+     * @return assets Amount of assets received
+     * @dev Asynchronous function, works when paused
+     * @dev Caller must be controller or operator
+     * @dev Requires sufficient claimable shares
+     */
+    function redeemAsset(
+        address asset,
+        uint256 shares,
+        address receiver,
+        address controller
+    ) external returns (uint256 assets);
 
     /**
      * @dev Returns the oracle address of the vault.
