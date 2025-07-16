@@ -39,10 +39,6 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, IERC7540Redeem {
     error CanNotAcceptRateProviderYet();
     error RateProviderUpdateExpired();
 
-    // Deprecated
-    mapping(address => PendingRedeem) internal _pendingRedeem;
-    mapping(address => ClaimableRedeem) internal _claimableRedeem;
-
     // Request queue
     IUltraQueue requestQueue;
 
@@ -51,7 +47,9 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, IERC7540Redeem {
     AddressUpdateProposal public proposedRateProvider;
 
     // V0: 2 total: 1 - pending redeems, 1 - claimable redeems
-    // V1: +1, 3 total: added requestQueue. deprecated: _pendingRedeem and _claimableRedeem
+    // V1: 3 total: requestQueue, rateProvider, proposedRateProvider
+    // deprecated: _pendingRedeem and _claimableRedeem and removed 
+    // altogether for new deployments, adjusted storage gap
     uint256[47] private __gap;
 
     /**
@@ -60,6 +58,7 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, IERC7540Redeem {
      * @param _asset Underlying asset address
      * @param _name Vault name
      * @param _symbol Vault symbol
+     * @param _rateProvider oracle for assets exchange rate
      * @param _requestQueue withdrawal request queue
      */
     function initialize(
@@ -83,7 +82,7 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, IERC7540Redeem {
     function convertToUnderlying(
         address asset,
         uint256 assets
-    ) public virtual returns (uint256 baseAssets) {
+    ) public view virtual returns (uint256 baseAssets) {
         // If asset is the same as base asset, no conversion needed
         if (asset == this.asset()) {
             return assets;
@@ -97,7 +96,7 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, IERC7540Redeem {
     function convertFromUnderlying(
         address asset,
         uint256 baseAssets
-    ) public virtual returns (uint256 assets) {
+    ) public view virtual returns (uint256 assets) {
         // If asset is the same as base asset, no conversion needed
         if (asset == this.asset()) {
             return baseAssets;
@@ -123,7 +122,7 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, IERC7540Redeem {
     function deposit(
         uint256 assets,
         address receiver
-    ) public virtual override whenNotPaused returns (uint256 shares) {
+    ) public virtual override returns (uint256 shares) {
         return _depositAsset(asset(), assets, receiver);
     }
 
@@ -140,7 +139,7 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, IERC7540Redeem {
         address asset,
         uint256 assets,
         address receiver
-    ) public whenNotPaused returns (uint256 shares) {
+    ) public returns (uint256 shares) {
         return _depositAsset(asset, assets, receiver);
     }
 
@@ -158,10 +157,8 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, IERC7540Redeem {
         uint256 assets,
         address receiver
     ) internal virtual whenNotPaused returns (uint256 shares) {
-        // Convert to underlying for share calculation
-        uint256 baseAssets = convertToUnderlying(asset, assets);
-        // Rounding down can cause zero shares minted
-        shares = previewDeposit(baseAssets);
+        shares = previewDepositForAsset(asset, assets);
+
         if (shares == 0)
             revert EmptyDeposit();
 
@@ -212,7 +209,7 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, IERC7540Redeem {
         address asset,
         uint256 shares,
         address receiver
-    ) public whenNotPaused returns (uint256 assets) {
+    ) public returns (uint256 assets) {
         return _mintWithAsset(asset, shares, receiver);
     }
 
@@ -226,9 +223,7 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, IERC7540Redeem {
         if (shares == 0)
             revert NothingToMint();
 
-        // Calculate assets needed in underlying units, then convert to asset units
-        uint256 baseAssets = previewMint(shares);
-        assets = convertFromUnderlying(asset, baseAssets);
+        assets = previewMintForAsset(asset, shares);
 
         // Pre-deposit hook - use the actual asset amount being transferred
         beforeDeposit(asset, assets, shares);
@@ -310,8 +305,6 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, IERC7540Redeem {
 
         // Before-withdrawal hook - use the actual asset amount being withdrawn
         beforeWithdraw(asset, assets, shares);
-
-        requestQueue.setClaimableRedeem(controller, address(this), asset, claimableRedeem);
 
         // Transfer assets to the receiver
         SafeERC20.safeTransfer(IERC20(asset), receiver, assets);
@@ -552,6 +545,22 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, IERC7540Redeem {
     }
 
     /**
+     * @notice Preview shares for deposit
+     * @param asset Asset
+     * @param assets Amount to deposit
+     * @return shares Amount of shares received
+     * @dev Returns 0 if vault is paused
+     */
+    function previewDepositForAsset(
+        address asset,
+        uint256 assets
+    ) public view virtual returns (uint256) {
+        // Convert to underlying for share calculation
+        uint256 baseAssets = convertToUnderlying(asset, assets);
+        return paused ? 0 : super.previewDeposit(baseAssets);
+    }
+
+    /**
      * @notice Preview assets for mint
      * @param shares Amount to mint
      * @return assets Amount of assets required
@@ -562,6 +571,22 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, IERC7540Redeem {
     ) public view virtual override returns (uint256) {
         return paused ? 0 : super.previewMint(shares);
     }
+
+    /**
+     * @notice Preview assets for mint
+     * @param shares Amount to mint
+     * @return assets Amount of assets required
+     * @dev Returns 0 if vault is paused
+     */
+    function previewMintForAsset(
+        address asset,
+        uint256 shares
+    ) public view virtual returns (uint256) {
+        // Calculate assets needed in underlying units, then convert to asset units
+        uint256 baseAssets = super.previewMint(shares);
+        return paused ? 0 : convertFromUnderlying(asset, baseAssets);
+    }
+
 
     /// @dev Preview withdraw not supported for async flows
     function previewWithdraw(

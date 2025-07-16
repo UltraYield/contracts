@@ -6,22 +6,13 @@ import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { IERC20Metadata } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import { InitializableOwnable } from "../utils/InitializableOwnable.sol";
 import { Initializable } from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
-import { AssetData } from "../interfaces/IUltraVaultRateProvider.sol";
+import { IUltraVaultRateProvider, AssetData } from "../interfaces/IUltraVaultRateProvider.sol";
 
 /**
  * @title UltraVaultRateProvider
  * @notice Handles rate calculations between assets for UltraVault
  */
-contract UltraVaultRateProvider is InitializableOwnable, Initializable {
-    // Events
-    event AssetAdded(address indexed asset, bool isPegged);
-    event AssetRemoved(address indexed asset);
-    event RateProviderUpdated(address indexed asset, address rateProvider);
-
-    // Errors
-    error AssetNotSupported();
-    error InvalidRateProvider();
-    error AssetAlreadySupported();
+contract UltraVaultRateProvider is InitializableOwnable, Initializable, IUltraVaultRateProvider {
 
     address public baseAsset;
     uint8 public decimals;
@@ -46,6 +37,7 @@ contract UltraVaultRateProvider is InitializableOwnable, Initializable {
             decimals: decimals,
             rateProvider: address(0)
         });
+        emit AssetAdded(address(_baseAsset), true);
     }
 
     /**
@@ -59,6 +51,8 @@ contract UltraVaultRateProvider is InitializableOwnable, Initializable {
         if (data.isPegged || data.rateProvider != address(0)) 
             revert AssetAlreadySupported();
         if (!isPegged && rateProvider == address(0))
+            revert InvalidRateProvider();
+        if (isPegged && rateProvider != address(0))
             revert InvalidRateProvider();
 
         supportedAssets[asset] = AssetData({
