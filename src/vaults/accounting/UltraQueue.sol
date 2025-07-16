@@ -6,9 +6,8 @@ import { Initializable } from "@openzeppelin/contracts-upgradeable/proxy/utils/I
 import { PendingRedeem, ClaimableRedeem } from "../../interfaces/IUltraQueue.sol";
 
 /**
- * @title VaultPriceManager
- * @notice Contract managing vault price updates with limits
- * @dev Has built in safety mechanisms to pause vault upon sudden moves
+ * @title UltraQueue
+ * @notice Contract to help manage redeems for async vaults
  */
 contract UltraQueue is VaultAdminControl, Initializable {
 

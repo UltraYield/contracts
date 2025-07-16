@@ -18,6 +18,16 @@ struct AssetData {
  */
 interface IUltraVaultRateProvider {
 
+    // Events
+    event AssetAdded(address indexed asset, bool isPegged);
+    event AssetRemoved(address indexed asset);
+    event RateProviderUpdated(address indexed asset, address rateProvider);
+
+    // Errors
+    error AssetNotSupported();
+    error InvalidRateProvider();
+    error AssetAlreadySupported();
+
     /**
      * @notice Add a new supported asset
      * @param asset The asset to add

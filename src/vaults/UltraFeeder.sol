@@ -26,10 +26,6 @@ contract UltraFeeder is BaseControlledAsyncRedeem, UUPSUpgradeable {
 
     IUltraVault public mainVault;
 
-    event RedeemRequested(address indexed user, uint256 shares);
-    event RedeemFulfilled(address indexed user, uint256 assets);
-    event AssetsClaimed(address indexed user, uint256 assets);
-
     error VaultPaused();
     error InvalidMainVault();
     error NoPendingRedeem();

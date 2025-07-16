@@ -49,6 +49,8 @@ abstract contract AsyncVault is BaseControlledAsyncRedeem {
      * @param _asset Underlying asset address
      * @param _name Vault name
      * @param _symbol Vault symbol
+     * @param _rateProvider oracle for assets exchange rate
+     * @param _requestQueue withdrawal request queue
      * @param _feeRecipient Fee recipient
      * @param _fees Fee configuration
      */
