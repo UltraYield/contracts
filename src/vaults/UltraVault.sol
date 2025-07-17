@@ -21,7 +21,7 @@ contract UltraVault is AsyncVault, UUPSUpgradeable {
     event OracleProposed(address indexed proposedOracle);
     event OracleUpdated(address indexed oldOracle, address indexed newOracle);
 
-    event Referral(address indexed referrer, address user);
+    event Referral(string indexed referralId, address user, uint256 shares);
 
     // Update errors
     error InvalidFundsHolder();
@@ -40,8 +40,8 @@ contract UltraVault is AsyncVault, UUPSUpgradeable {
 
     IPriceSource public oracle;
 
-    // Referrals
-    mapping(address => address) public referredBy;
+    // Deprecated
+    uint256 private deprecated1;
 
     // Updates
     AddressUpdateProposal public proposedFundsHolder;
@@ -101,17 +101,65 @@ contract UltraVault is AsyncVault, UUPSUpgradeable {
     /**
      * @notice Helper to deposit assets for msg.sender upon referral
      * @param assets Amount to deposit
+     * @param referralId id of referral
      * @return shares Amount of shares received
      */
-    function referDeposit(
-        uint256 assets, 
-        address referrer
+    function deposit(
+        uint256 assets,
+        string calldata referralId
     ) external returns (uint256) {
-        if (referredBy[msg.sender] == address(0)) {
-            referredBy[msg.sender] = referrer;
-            emit Referral(referrer, msg.sender);
-        }
-        return deposit(assets, msg.sender);
+        return _depositAssetWithReferral(asset(), assets, msg.sender, referralId);
+    }
+
+    /**
+     * @notice Helper to deposit assets for msg.sender upon referral specifying receiver
+     * @param assets Amount to deposit
+     * @param receiver receiver of deposit
+     * @param referralId id of referral
+     * @return shares Amount of shares received
+     */
+    function deposit(
+        uint256 assets,
+        address receiver,
+        string calldata referralId
+    ) external returns (uint256) {
+        return _depositAssetWithReferral(asset(), assets, receiver, referralId);
+    }
+
+    /**
+     * @notice Helper to deposit particular asset for msg.sender upon referral
+     * @param asset Asset to deposit
+     * @param assets Amount to deposit
+     * @param receiver receiver of deposit
+     * @param referralId id of referral
+     * @return shares Amount of shares received
+     */
+    function depositAsset(
+        address asset,
+        uint256 assets,
+        address receiver,
+        string calldata referralId
+    ) external returns (uint256) {
+        return _depositAssetWithReferral(asset, assets, receiver, referralId);
+    }
+
+    /**
+     * @notice Internal helper to deposit assets for msg.sender upon referral
+     * @param asset Asset to deposit
+     * @param assets Amount to deposit
+     * @param receiver receiver of deposit
+     * @param referralId id of referral
+     * @return shares Amount of shares received
+     */
+    function _depositAssetWithReferral(
+        address asset,
+        uint256 assets,
+        address receiver,
+        string calldata referralId
+    ) internal returns (uint256 shares) {
+        shares = _depositAsset(asset, assets, receiver);
+        emit Referral(referralId, msg.sender, shares);
+        return shares;
     }
 
     /*//////////////////////////////////////////////////////////////
