@@ -2,20 +2,15 @@
 pragma solidity 0.8.28;
 
 import { AsyncVault, Fees } from "./AsyncVault.sol";
-import { FixedPointMathLib } from "../utils/FixedPointMathLib.sol";
+import { PendingRedeem, ClaimableRedeem } from "./BaseControlledAsyncRedeem.sol";
+import { AddressUpdateProposal } from "../utils/AddressUpdates.sol";
 import { IPriceSource } from "src/interfaces/IPriceSource.sol";
 import { SafeERC20, IERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import { UUPSUpgradeable } from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 
-struct AddressUpdateProposal {
-    address addr;
-    uint256 timestamp;
-}
-
 /**
  * @title UltraVault
  * @notice ERC-7540 compliant async redeem vault with UltraVaultOracle pricing and multisig asset management
-
  */
 contract UltraVault is AsyncVault, UUPSUpgradeable {
 
@@ -26,9 +21,9 @@ contract UltraVault is AsyncVault, UUPSUpgradeable {
     event OracleProposed(address indexed proposedOracle);
     event OracleUpdated(address indexed oldOracle, address indexed newOracle);
 
-    event Referral(address indexed referrer, address user);
+    event Referral(string indexed referralId, address user, uint256 shares);
 
-    // Errors
+    // Update errors
     error InvalidFundsHolder();
     error NoPendingFundsHolderUpdate();
     error CanNotAcceptFundsHolderYet();
@@ -37,14 +32,16 @@ contract UltraVault is AsyncVault, UUPSUpgradeable {
     error NoOracleProposed();
     error CanNotAcceptOracleYet();
     error OracleUpdateExpired();
+
+    // Misc errors
     error CantSetBalancesInNonEmptyVault();
 
     address public fundsHolder;
 
     IPriceSource public oracle;
 
-    // Referrals
-    mapping(address => address) public referredBy;
+    // Deprecated
+    uint256 private deprecated1;
 
     // Updates
     AddressUpdateProposal public proposedFundsHolder;
@@ -65,6 +62,8 @@ contract UltraVault is AsyncVault, UUPSUpgradeable {
      * @param _asset Underlying asset address
      * @param _name Vault name
      * @param _symbol Vault symbol
+     * @param _rateProvider oracle for assets exchange rate
+     * @param _requestQueue withdrawal request queue
      * @param _feeRecipient Fee recipient
      * @param _fees Fee on the vault
      * @param _oracle The oracle to use for pricing
@@ -75,6 +74,8 @@ contract UltraVault is AsyncVault, UUPSUpgradeable {
         address _asset,
         string memory _name,
         string memory _symbol,
+        address _rateProvider,
+        address _requestQueue,
         address _feeRecipient,
         Fees memory _fees,
         address _oracle,
@@ -85,11 +86,12 @@ contract UltraVault is AsyncVault, UUPSUpgradeable {
 
         fundsHolder = _fundsHolder;
         oracle = IPriceSource(_oracle);
+        
 
         _pause();
         
         // Calling at the very end since we need oracle to be setup
-        super.initialize(_owner, _asset, _name, _symbol, _feeRecipient, _fees);
+        super.initialize(_owner, _asset, _name, _symbol, _rateProvider, _requestQueue, _feeRecipient, _fees);
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -99,17 +101,65 @@ contract UltraVault is AsyncVault, UUPSUpgradeable {
     /**
      * @notice Helper to deposit assets for msg.sender upon referral
      * @param assets Amount to deposit
+     * @param referralId id of referral
      * @return shares Amount of shares received
      */
-    function referDeposit(
-        uint256 assets, 
-        address referrer
+    function deposit(
+        uint256 assets,
+        string calldata referralId
     ) external returns (uint256) {
-        if (referredBy[msg.sender] == address(0)) {
-            referredBy[msg.sender] = referrer;
-            emit Referral(referrer, msg.sender);
-        }
-        return deposit(assets, msg.sender);
+        return _depositAssetWithReferral(asset(), assets, msg.sender, referralId);
+    }
+
+    /**
+     * @notice Helper to deposit assets for msg.sender upon referral specifying receiver
+     * @param assets Amount to deposit
+     * @param receiver receiver of deposit
+     * @param referralId id of referral
+     * @return shares Amount of shares received
+     */
+    function deposit(
+        uint256 assets,
+        address receiver,
+        string calldata referralId
+    ) external returns (uint256) {
+        return _depositAssetWithReferral(asset(), assets, receiver, referralId);
+    }
+
+    /**
+     * @notice Helper to deposit particular asset for msg.sender upon referral
+     * @param asset Asset to deposit
+     * @param assets Amount to deposit
+     * @param receiver receiver of deposit
+     * @param referralId id of referral
+     * @return shares Amount of shares received
+     */
+    function depositAsset(
+        address asset,
+        uint256 assets,
+        address receiver,
+        string calldata referralId
+    ) external returns (uint256) {
+        return _depositAssetWithReferral(asset, assets, receiver, referralId);
+    }
+
+    /**
+     * @notice Internal helper to deposit assets for msg.sender upon referral
+     * @param asset Asset to deposit
+     * @param assets Amount to deposit
+     * @param receiver receiver of deposit
+     * @param referralId id of referral
+     * @return shares Amount of shares received
+     */
+    function _depositAssetWithReferral(
+        address asset,
+        uint256 assets,
+        address receiver,
+        string calldata referralId
+    ) internal returns (uint256 shares) {
+        shares = _depositAsset(asset, assets, receiver);
+        emit Referral(referralId, msg.sender, shares);
+        return shares;
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -151,9 +201,9 @@ contract UltraVault is AsyncVault, UUPSUpgradeable {
     //////////////////////////////////////////////////////////////*/
 
     /// @dev After deposit hook - collect fees and send funds to fundsHolder
-    function afterDeposit(uint256 assets, uint256) internal override {
+    function afterDeposit(address asset, uint256 assets, uint256) internal override {
         // Funds are sent to holder
-        SafeERC20.safeTransfer(IERC20(asset()), fundsHolder, assets);
+        SafeERC20.safeTransfer(IERC20(asset), fundsHolder, assets);
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -161,21 +211,23 @@ contract UltraVault is AsyncVault, UUPSUpgradeable {
     //////////////////////////////////////////////////////////////*/
 
     /// @dev Before fulfill redeem - transfer funds from fundsHolder to vault
-    function beforeFulfillRedeem(uint256 assets, uint256) internal override {
-        SafeERC20.safeTransferFrom(IERC20(asset()), fundsHolder, address(this), assets);
+    /// @dev "assets" will already be correct given the token user requested
+    function beforeFulfillRedeem(address asset, uint256 assets, uint256) internal override {
+        SafeERC20.safeTransferFrom(IERC20(asset), fundsHolder, address(this), assets);
     }
 
     /*//////////////////////////////////////////////////////////////
-                    AsyncVault OVERRIDES
+                        AsyncVault OVERRIDES
     //////////////////////////////////////////////////////////////*/
 
     /// @inheritdoc AsyncVault
-    function collectWithdrawalFee(
+    function collectWithdrawalFeeInAsset(
+        address asset,
         uint256 fee
     ) internal override {
         if (fee > 0) {
             // Transfer the fee from the fundsHolder to the fee recipient
-            SafeERC20.safeTransferFrom(IERC20(asset()), fundsHolder, feeRecipient, fee);
+            SafeERC20.safeTransferFrom(IERC20(asset), fundsHolder, feeRecipient, fee);
             emit WithdrawalFeeCollected(fee);
         }
     }
@@ -211,9 +263,9 @@ contract UltraVault is AsyncVault, UUPSUpgradeable {
 
         if (proposal.addr == address(0))
             revert NoPendingFundsHolderUpdate();
-        if (block.timestamp < proposal.timestamp + 3 days)
+        if (block.timestamp < proposal.timestamp + ADDRESS_UPDATE_TIMELOCK)
             revert CanNotAcceptFundsHolderYet();
-        if (block.timestamp > proposal.timestamp + 7 days)
+        if (block.timestamp > proposal.timestamp + MAX_ADDRESS_UPDATE_WAIT)
             revert FundsHolderUpdateExpired();
 
         emit FundsHolderChanged(fundsHolder, proposal.addr);
@@ -256,9 +308,9 @@ contract UltraVault is AsyncVault, UUPSUpgradeable {
 
         if (proposal.addr == address(0))
             revert NoOracleProposed();
-        if (block.timestamp < proposal.timestamp + 3 days)
+        if (block.timestamp < proposal.timestamp + ADDRESS_UPDATE_TIMELOCK)
             revert CanNotAcceptOracleYet();
-        if (block.timestamp > proposal.timestamp + 7 days)
+        if (block.timestamp > proposal.timestamp + MAX_ADDRESS_UPDATE_WAIT)
             revert OracleUpdateExpired();
 
         emit OracleUpdated(address(oracle), proposal.addr);
