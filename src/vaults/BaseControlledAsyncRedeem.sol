@@ -31,13 +31,15 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, IERC7540Redeem {
     error NothingToRedeem();
     error NothingToWithdraw();
     error InsufficientBalance();
-    error AssetNotSupported();
 
     // Rate provider errors
     error MissingRateProvider();
     error NoRateProviderProposed();
     error CanNotAcceptRateProviderYet();
     error RateProviderUpdateExpired();
+
+    uint256 public constant ADDRESS_UPDATE_TIMELOCK = 3 days;
+    uint256 public constant MAX_ADDRESS_UPDATE_WAIT = 7 days;
 
     // Request queue
     IUltraQueue requestQueue;
@@ -87,9 +89,8 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, IERC7540Redeem {
         if (asset == this.asset()) {
             return assets;
         }
-        
-        if (!rateProvider.isSupported(asset)) revert AssetNotSupported();
 
+        // Call reverts if asset not supported
         return rateProvider.convertToUnderlying(asset, assets);
     }
 
@@ -101,9 +102,8 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, IERC7540Redeem {
         if (asset == this.asset()) {
             return baseAssets;
         }
-        
-        if (!rateProvider.isSupported(asset)) revert AssetNotSupported();
 
+        // Call reverts if asset not supported
         return rateProvider.convertFromUnderlying(asset, baseAssets);
     }
 
@@ -258,7 +258,7 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, IERC7540Redeem {
         uint256 assets,
         address receiver,
         address controller
-    ) public virtual override checkAccess(controller) returns (uint256 shares) {
+    ) public virtual override returns (uint256 shares) {
         return _withdrawAsset(asset(), assets, receiver, controller);
     }
 
@@ -278,7 +278,7 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, IERC7540Redeem {
         uint256 assets,
         address receiver,
         address controller
-    ) public virtual checkAccess(controller) returns (uint256 shares) {
+    ) public virtual returns (uint256 shares) {
         return _withdrawAsset(asset, assets, receiver, controller);
     }
 
@@ -947,9 +947,9 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, IERC7540Redeem {
 
         if (proposal.addr == address(0))
             revert NoRateProviderProposed();
-        if (block.timestamp < proposal.timestamp + 3 days)
+        if (block.timestamp < proposal.timestamp + ADDRESS_UPDATE_TIMELOCK)
             revert CanNotAcceptRateProviderYet();
-        if (block.timestamp > proposal.timestamp + 7 days)
+        if (block.timestamp > proposal.timestamp + MAX_ADDRESS_UPDATE_WAIT)
             revert RateProviderUpdateExpired();
 
         emit RateProviderUpdated(address(rateProvider), proposal.addr);

@@ -215,9 +215,9 @@ contract UltraVault is AsyncVault, UUPSUpgradeable {
 
         if (proposal.addr == address(0))
             revert NoPendingFundsHolderUpdate();
-        if (block.timestamp < proposal.timestamp + 3 days)
+        if (block.timestamp < proposal.timestamp + ADDRESS_UPDATE_TIMELOCK)
             revert CanNotAcceptFundsHolderYet();
-        if (block.timestamp > proposal.timestamp + 7 days)
+        if (block.timestamp > proposal.timestamp + MAX_ADDRESS_UPDATE_WAIT)
             revert FundsHolderUpdateExpired();
 
         emit FundsHolderChanged(fundsHolder, proposal.addr);
@@ -260,9 +260,9 @@ contract UltraVault is AsyncVault, UUPSUpgradeable {
 
         if (proposal.addr == address(0))
             revert NoOracleProposed();
-        if (block.timestamp < proposal.timestamp + 3 days)
+        if (block.timestamp < proposal.timestamp + ADDRESS_UPDATE_TIMELOCK)
             revert CanNotAcceptOracleYet();
-        if (block.timestamp > proposal.timestamp + 7 days)
+        if (block.timestamp > proposal.timestamp + MAX_ADDRESS_UPDATE_WAIT)
             revert OracleUpdateExpired();
 
         emit OracleUpdated(address(oracle), proposal.addr);
