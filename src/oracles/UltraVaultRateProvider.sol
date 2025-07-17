@@ -6,22 +6,13 @@ import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { IERC20Metadata } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import { InitializableOwnable } from "../utils/InitializableOwnable.sol";
 import { Initializable } from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
-import { AssetData } from "../interfaces/IUltraVaultRateProvider.sol";
+import { IUltraVaultRateProvider, AssetData } from "../interfaces/IUltraVaultRateProvider.sol";
 
 /**
  * @title UltraVaultRateProvider
  * @notice Handles rate calculations between assets for UltraVault
  */
-contract UltraVaultRateProvider is InitializableOwnable, Initializable {
-    // Events
-    event AssetAdded(address indexed asset, bool isPegged);
-    event AssetRemoved(address indexed asset);
-    event RateProviderUpdated(address indexed asset, address rateProvider);
-
-    // Errors
-    error AssetNotSupported();
-    error InvalidRateProvider();
-    error AssetAlreadySupported();
+contract UltraVaultRateProvider is InitializableOwnable, Initializable, IUltraVaultRateProvider {
 
     address public baseAsset;
     uint8 public decimals;
@@ -46,6 +37,7 @@ contract UltraVaultRateProvider is InitializableOwnable, Initializable {
             decimals: decimals,
             rateProvider: address(0)
         });
+        emit AssetAdded(address(_baseAsset), true);
     }
 
     /**
@@ -59,6 +51,8 @@ contract UltraVaultRateProvider is InitializableOwnable, Initializable {
         if (data.isPegged || data.rateProvider != address(0)) 
             revert AssetAlreadySupported();
         if (!isPegged && rateProvider == address(0))
+            revert InvalidRateProvider();
+        if (isPegged && rateProvider != address(0))
             revert InvalidRateProvider();
 
         supportedAssets[asset] = AssetData({
@@ -98,7 +92,7 @@ contract UltraVaultRateProvider is InitializableOwnable, Initializable {
     }
 
     /**
-     * @notice Get the rate between an asset and the base asset
+     * @notice Convert from specific asset to base asset
      * @param asset The asset to get rate for
      * @param assets Amount to covert
      * @return result The rate in terms of base asset (18 decimals)
@@ -118,6 +112,29 @@ contract UltraVaultRateProvider is InitializableOwnable, Initializable {
 
         // Call external rate provider
         return IRateProvider(data.rateProvider).convertToUnderlying(asset, assets);
+    }
+
+    /**
+     * @notice Convert from base asset to specific asset
+     * @param asset The asset to convert to
+     * @param baseAssets Amount in base asset units
+     * @return result The amount in asset units
+     */
+    function convertFromUnderlying(address asset, uint256 baseAssets) external view returns (uint256 result) {
+        AssetData memory data = supportedAssets[asset];
+        if (data.isPegged) {
+            if (data.decimals == decimals) {
+                return baseAssets; // 1:1 rate
+            } else {
+                // 1:1 rate accounting for decimals, convert from base asset decimals to asset decimals
+                return _convertDecimals(baseAssets, decimals, data.decimals);
+            }
+        }
+
+        if (data.rateProvider == address(0)) revert AssetNotSupported();
+
+        // Call external rate provider
+        return IRateProvider(data.rateProvider).convertFromUnderlying(asset, baseAssets);
     }
 
     /**

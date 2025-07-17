@@ -35,6 +35,10 @@ abstract contract AsyncVault is BaseControlledAsyncRedeem {
 
     bytes32 public constant OPERATOR_ROLE = keccak256("OPERATOR_ROLE");
 
+    uint64 public constant MAX_PERFORMANCE_FEE = 3e17;
+    uint64 public constant MAX_MANAGEMENT_FEE = 5e16;
+    uint64 public constant MAX_WITHDRAWAL_FEE = 1e16;
+
     /// @notice Fee recipient address
     address feeRecipient;
     /// @notice Current fees
@@ -49,6 +53,8 @@ abstract contract AsyncVault is BaseControlledAsyncRedeem {
      * @param _asset Underlying asset address
      * @param _name Vault name
      * @param _symbol Vault symbol
+     * @param _rateProvider oracle for assets exchange rate
+     * @param _requestQueue withdrawal request queue
      * @param _feeRecipient Fee recipient
      * @param _fees Fee configuration
      */
@@ -159,6 +165,8 @@ abstract contract AsyncVault is BaseControlledAsyncRedeem {
         _burn(address(this), shares);
 
         collectWithdrawalFeeInAsset(asset(), feesToCollect);
+
+        return assets - feesToCollect;
     }
 
     /**
@@ -176,24 +184,28 @@ abstract contract AsyncVault is BaseControlledAsyncRedeem {
         // Collect fees accrued to date
         _collectFees();
         
-        uint256 totalAssets = convertToAssets(shares);
-        uint256 totalBaseAssets = convertToUnderlying(asset, totalAssets);
-        assets = totalBaseAssets;
-
-        // Calculate the withdrawal incentive fee from the assets
+        // Convert shares to underlying assets, then to asset units
+        uint256 underlyingAssets = convertToAssets(shares);
+        assets = convertFromUnderlying(asset, underlyingAssets);
+        
+        // Calculate the withdrawal incentive fee directly in asset units
         Fees memory fees_ = fees;
-        uint256 feesToCollect = totalBaseAssets.mulDivDown(
+        uint256 feesToCollect = assets.mulDivDown(
             uint256(fees_.withdrawalFee),
             1e18
         );
 
-        // Fulfill request
-        _fulfillRedeemOfAsset(asset, totalBaseAssets - feesToCollect, shares, controller);
+        // Fulfill request with asset units (base contract expects asset units)
+        _fulfillRedeemOfAsset(asset, assets - feesToCollect, shares, controller);
 
         // Burn the shares
         _burn(address(this), shares);
 
+        // Collect withdrawal fee in asset units
         collectWithdrawalFeeInAsset(asset, feesToCollect);
+
+        // Return the amount in asset units for consistency with base contract
+        return assets - feesToCollect;
     }
 
     /**
@@ -240,7 +252,7 @@ abstract contract AsyncVault is BaseControlledAsyncRedeem {
 
         collectWithdrawalFeeInAsset(asset(), totalFees);
 
-        return total;
+        return total - totalFees;
     }
 
     /// @dev Internal fulfill redeem request logic
@@ -376,9 +388,9 @@ abstract contract AsyncVault is BaseControlledAsyncRedeem {
     function _setFees(Fees memory fees_) internal {
         // Max value: 30% performance, 5% management, 1% withdrawal
         if (
-            fees_.performanceFee > 3e17 ||
-            fees_.managementFee > 5e16 ||
-            fees_.withdrawalFee > 1e16
+            fees_.performanceFee > MAX_PERFORMANCE_FEE ||
+            fees_.managementFee > MAX_MANAGEMENT_FEE ||
+            fees_.withdrawalFee > MAX_WITHDRAWAL_FEE
         ) revert Misconfigured();
 
         fees_.lastUpdateTimestamp = uint64(block.timestamp);

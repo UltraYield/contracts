@@ -18,6 +18,16 @@ struct AssetData {
  */
 interface IUltraVaultRateProvider {
 
+    // Events
+    event AssetAdded(address indexed asset, bool isPegged);
+    event AssetRemoved(address indexed asset);
+    event RateProviderUpdated(address indexed asset, address rateProvider);
+
+    // Errors
+    error AssetNotSupported();
+    error InvalidRateProvider();
+    error AssetAlreadySupported();
+
     /**
      * @notice Add a new supported asset
      * @param asset The asset to add
@@ -46,6 +56,14 @@ interface IUltraVaultRateProvider {
      * @return result The rate in terms of base asset (18 decimals)
      */
     function convertToUnderlying(address asset, uint256 assets) external view returns (uint256 result);
+
+    /**
+     * @notice Convert from base asset to specific asset
+     * @param asset The asset to convert to
+     * @param baseAssets Amount in base asset units
+     * @return result The amount in asset units
+     */
+    function convertFromUnderlying(address asset, uint256 baseAssets) external view returns (uint256 result);
 
     /**
      * @notice Check if an asset is supported
