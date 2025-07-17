@@ -24,7 +24,7 @@ contract UltraFeeder is BaseControlledAsyncRedeem, UUPSUpgradeable {
 
     bytes32 public constant OPERATOR_ROLE = keccak256("OPERATOR_ROLE");
 
-    IUltraVault public mainVault;
+    event Referral(string indexed referralId, address user, uint256 shares);
 
     error VaultPaused();
     error InvalidMainVault();
@@ -33,6 +33,8 @@ contract UltraFeeder is BaseControlledAsyncRedeem, UUPSUpgradeable {
     error InvalidRedeemRequest();
     error AssetMismatch();
     error ShareNumberMismatch();
+
+    IUltraVault public mainVault;
 
     // V0: 1 total: mainVault
     uint256[49] private __gap;
@@ -169,6 +171,74 @@ contract UltraFeeder is BaseControlledAsyncRedeem, UUPSUpgradeable {
      */
     function maxMint(address) public view override returns (uint256) {
         return mainVault.maxMint(address(this));
+    }
+
+    /*//////////////////////////////////////////////////////////////
+                        REFERRALS LOGIC
+    //////////////////////////////////////////////////////////////*/
+
+    /**
+     * @notice Helper to deposit assets for msg.sender upon referral
+     * @param assets Amount to deposit
+     * @param referralId id of referral
+     * @return shares Amount of shares received
+     */
+    function deposit(
+        uint256 assets,
+        string calldata referralId
+    ) external returns (uint256) {
+        return _depositAssetWithReferral(asset(), assets, msg.sender, referralId);
+    }
+
+    /**
+     * @notice Helper to deposit assets for msg.sender upon referral specifying receiver
+     * @param assets Amount to deposit
+     * @param receiver receiver of deposit
+     * @param referralId id of referral
+     * @return shares Amount of shares received
+     */
+    function deposit(
+        uint256 assets,
+        address receiver,
+        string calldata referralId
+    ) external returns (uint256) {
+        return _depositAssetWithReferral(asset(), assets, receiver, referralId);
+    }
+
+    /**
+     * @notice Helper to deposit particular asset for msg.sender upon referral
+     * @param asset Asset to deposit
+     * @param assets Amount to deposit
+     * @param receiver receiver of deposit
+     * @param referralId id of referral
+     * @return shares Amount of shares received
+     */
+    function depositAsset(
+        address asset,
+        uint256 assets,
+        address receiver,
+        string calldata referralId
+    ) external returns (uint256) {
+        return _depositAssetWithReferral(asset, assets, receiver, referralId);
+    }
+
+    /**
+     * @notice Internal helper to deposit assets for msg.sender upon referral
+     * @param asset Asset to deposit
+     * @param assets Amount to deposit
+     * @param receiver receiver of deposit
+     * @param referralId id of referral
+     * @return shares Amount of shares received
+     */
+    function _depositAssetWithReferral(
+        address asset,
+        uint256 assets,
+        address receiver,
+        string calldata referralId
+    ) internal returns (uint256 shares) {
+        shares = _depositAsset(asset, assets, receiver);
+        emit Referral(referralId, msg.sender, shares);
+        return shares;
     }
 
     /*//////////////////////////////////////////////////////////////
