@@ -35,6 +35,10 @@ abstract contract AsyncVault is BaseControlledAsyncRedeem {
 
     bytes32 public constant OPERATOR_ROLE = keccak256("OPERATOR_ROLE");
 
+    uint64 public constant MAX_PERFORMANCE_FEE = 3e17;
+    uint64 public constant MAX_MANAGEMENT_FEE = 5e16;
+    uint64 public constant MAX_WITHDRAWAL_FEE = 1e16;
+
     /// @notice Fee recipient address
     address feeRecipient;
     /// @notice Current fees
@@ -161,6 +165,8 @@ abstract contract AsyncVault is BaseControlledAsyncRedeem {
         _burn(address(this), shares);
 
         collectWithdrawalFeeInAsset(asset(), feesToCollect);
+
+        return assets - feesToCollect;
     }
 
     /**
@@ -246,7 +252,7 @@ abstract contract AsyncVault is BaseControlledAsyncRedeem {
 
         collectWithdrawalFeeInAsset(asset(), totalFees);
 
-        return total;
+        return total - totalFees;
     }
 
     /// @dev Internal fulfill redeem request logic
@@ -382,9 +388,9 @@ abstract contract AsyncVault is BaseControlledAsyncRedeem {
     function _setFees(Fees memory fees_) internal {
         // Max value: 30% performance, 5% management, 1% withdrawal
         if (
-            fees_.performanceFee > 3e17 ||
-            fees_.managementFee > 5e16 ||
-            fees_.withdrawalFee > 1e16
+            fees_.performanceFee > MAX_PERFORMANCE_FEE ||
+            fees_.managementFee > MAX_MANAGEMENT_FEE ||
+            fees_.withdrawalFee > MAX_WITHDRAWAL_FEE
         ) revert Misconfigured();
 
         fees_.lastUpdateTimestamp = uint64(block.timestamp);
