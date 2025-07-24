@@ -135,6 +135,48 @@ contract UltraFeeder is BaseControlledAsyncRedeem, UUPSUpgradeable {
         return super._fulfillRedeemOfAsset(asset, assets, shares, controller);
     }
 
+    /**
+     * @notice Cancel redeem request for controller and propagate to underlying vault
+     * @param controller Controller address
+     * @dev Transfers pending shares back to msg.sender and cancels underlying vault request
+     */
+    function cancelRedeemRequest(address controller) external virtual override {
+        cancelRedeemRequestOfAsset(asset(), controller, msg.sender);
+    }
+
+    /**
+     * @notice Cancel redeem request for controller and propagate to underlying vault
+     * @param controller Controller address
+     * @param receiver Share recipient
+     * @dev Transfers pending shares back to receiver and cancels underlying vault request
+     */
+    function cancelRedeemRequest(
+        address controller,
+        address receiver
+    ) public virtual override {
+        cancelRedeemRequestOfAsset(asset(), controller, receiver);
+    }
+
+    /**
+     * @notice Cancel redeem request for controller and propagate to underlying vault
+     * @param asset Asset
+     * @param controller Controller address
+     * @param receiver Share recipient
+     * @dev Transfers pending shares back to receiver and cancels underlying vault request
+     */
+    function cancelRedeemRequestOfAsset(
+        address asset,
+        address controller,
+        address receiver
+    ) public virtual override {
+        // First cancel the request in the underlying vault
+        // This ensures that the underlying vault's pending redeem is also cleared
+        mainVault.cancelRedeemRequestOfAsset(asset, address(this), address(this));
+        
+        // Then call the internal implementation to handle the feeder's cancellation
+        _cancelRedeemRequestOfAsset(asset, controller, receiver);
+    }
+
     /*//////////////////////////////////////////////////////////////
                         ACCOUNTING OVERRIDES
     //////////////////////////////////////////////////////////////*/
