@@ -294,6 +294,10 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, IERC7540Redeem {
         ClaimableRedeem memory claimableRedeem =
             requestQueue.getClaimableRedeem(controller, address(this), asset);
         
+        // Validate that requested assets don't exceed claimable assets
+        if (assets > claimableRedeem.assets)
+            revert InsufficientBalance();
+        
         // Calculate shares to burn based on the claimable redeem ratio
         shares = assets.mulDivUp(
             claimableRedeem.shares,
