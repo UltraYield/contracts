@@ -134,6 +134,37 @@ interface IUltraVault {
     ) external returns (uint256 assets);
 
     /**
+     * @notice Cancel redeem request for controller
+     * @param controller Controller address
+     * @dev Transfers pending shares back to msg.sender
+     */
+    function cancelRedeemRequest(address controller) external;
+
+    /**
+     * @notice Cancel redeem request for controller
+     * @param controller Controller address
+     * @param receiver Share recipient
+     * @dev Transfers pending shares back to receiver
+     */
+    function cancelRedeemRequest(
+        address controller,
+        address receiver
+    ) external;
+
+    /**
+     * @notice Cancel redeem request for controller
+     * @param asset Asset
+     * @param controller Controller address
+     * @param receiver Share recipient
+     * @dev Transfers pending shares back to receiver
+     */
+    function cancelRedeemRequestOfAsset(
+        address asset,
+        address controller,
+        address receiver
+    ) external;
+
+    /**
      * @dev Returns the oracle address of the vault.
      */
     function oracle() external view returns (address);
