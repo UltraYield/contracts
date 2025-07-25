@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity 0.8.28;
 
-import { IUltraVault } from "../interfaces/IUltraVault.sol";
+import { IUltraVault, Fees } from "../interfaces/IUltraVault.sol";
 import { 
     BaseControlledAsyncRedeem, 
     PendingRedeem, 
@@ -120,10 +120,40 @@ contract UltraFeeder is BaseControlledAsyncRedeem, UUPSUpgradeable {
         mainVault.fulfillRedeemOfAsset(asset, shares, address(this));
         uint256 mainAssetsClaimed = mainVault.redeemAsset(asset, shares, address(this), address(this));
 
-        if (mainAssetsClaimed != assets) {
+        // Calculate the expected assets after withdrawal fees from the underlying vault
+        Fees memory fees = mainVault.fees();
+        uint256 withdrawalFee = fees.withdrawalFee;
+        uint256 expectedAssetsAfterFees = assets - (assets * withdrawalFee / 1e18);
+
+        if (mainAssetsClaimed != expectedAssetsAfterFees) {
             revert ShareNumberMismatch();
         }
     }
+
+    /// @dev Hook for inheriting contracts after fulfill redeem
+    /// @dev Correct claimable redeem amounts to account for underlying vault fees
+    function afterFulfillRedeem(
+        address asset,
+        uint256 assets,
+        uint256 shares,
+        address controller
+    ) internal override {
+        // The base implementation has already updated claimableRedeem.assets += assets
+        // We need to correct it to use the actual assets received after fees
+        Fees memory fees = mainVault.fees();
+        uint256 withdrawalFee = fees.withdrawalFee;
+        uint256 actualAssetsReceived = assets - (assets * withdrawalFee / 1e18);
+        
+        // Correct the claimable redeem amounts to use the actual assets received
+        ClaimableRedeem memory claimableRedeem = 
+            requestQueue.getClaimableRedeem(controller, address(this), asset);
+        
+        // The base implementation added 'assets', but we need to correct it to 'actualAssetsReceived'
+        claimableRedeem.assets = claimableRedeem.assets - assets + actualAssetsReceived;
+        
+        requestQueue.setClaimableRedeem(controller, address(this), asset, claimableRedeem);
+    }
+
 
     /// @dev In async vaults it's a privileged function
     function _fulfillRedeemOfAsset(
@@ -133,6 +163,48 @@ contract UltraFeeder is BaseControlledAsyncRedeem, UUPSUpgradeable {
         address controller
     ) internal override onlyRoleOrOwner(OPERATOR_ROLE) returns (uint256) {
         return super._fulfillRedeemOfAsset(asset, assets, shares, controller);
+    }
+
+    /**
+     * @notice Cancel redeem request for controller and propagate to underlying vault
+     * @param controller Controller address
+     * @dev Transfers pending shares back to msg.sender and cancels underlying vault request
+     */
+    function cancelRedeemRequest(address controller) external virtual override {
+        cancelRedeemRequestOfAsset(asset(), controller, msg.sender);
+    }
+
+    /**
+     * @notice Cancel redeem request for controller and propagate to underlying vault
+     * @param controller Controller address
+     * @param receiver Share recipient
+     * @dev Transfers pending shares back to receiver and cancels underlying vault request
+     */
+    function cancelRedeemRequest(
+        address controller,
+        address receiver
+    ) public virtual override {
+        cancelRedeemRequestOfAsset(asset(), controller, receiver);
+    }
+
+    /**
+     * @notice Cancel redeem request for controller and propagate to underlying vault
+     * @param asset Asset
+     * @param controller Controller address
+     * @param receiver Share recipient
+     * @dev Transfers pending shares back to receiver and cancels underlying vault request
+     */
+    function cancelRedeemRequestOfAsset(
+        address asset,
+        address controller,
+        address receiver
+    ) public virtual override {
+        // First cancel the request in the underlying vault
+        // This ensures that the underlying vault's pending redeem is also cleared
+        mainVault.cancelRedeemRequestOfAsset(asset, address(this), address(this));
+        
+        // Then call the internal implementation to handle the feeder's cancellation
+        _cancelRedeemRequestOfAsset(asset, controller, receiver);
     }
 
     /*//////////////////////////////////////////////////////////////

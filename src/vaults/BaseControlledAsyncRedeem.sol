@@ -31,6 +31,7 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, IERC7540Redeem {
     error NothingToRedeem();
     error NothingToWithdraw();
     error InsufficientBalance();
+    error AssetNotSupported();
 
     // Rate provider errors
     error MissingRateProvider();
@@ -293,6 +294,10 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, IERC7540Redeem {
 
         ClaimableRedeem memory claimableRedeem =
             requestQueue.getClaimableRedeem(controller, address(this), asset);
+        
+        // Validate that requested assets don't exceed claimable assets
+        if (assets > claimableRedeem.assets)
+            revert InsufficientBalance();
         
         // Calculate shares to burn based on the claimable redeem ratio
         shares = assets.mulDivUp(
@@ -736,6 +741,11 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, IERC7540Redeem {
         if (shares == 0)
             revert NothingToRedeem();
 
+        // Validate that the asset is supported by the rate provider
+        // This prevents users from creating pending redeem requests for unsupported assets
+        if (asset != this.asset() && !rateProvider.isSupported(asset))
+            revert AssetNotSupported();
+
         beforeRequestRedeem(asset, shares, controller, owner);
 
         PendingRedeem memory pendingRedeem =
@@ -912,7 +922,7 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, IERC7540Redeem {
         emit RedeemRequestFulfilled(controller, msg.sender, shares, assets);
 
         // After fulfill redeem hook
-        afterFulfillRedeem(assets, shares);
+        afterFulfillRedeem(asset, assets, shares, controller);
 
         return assets;
     }
@@ -997,8 +1007,10 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, IERC7540Redeem {
 
     /// @dev Hook for inheriting contracts after fulfill
     function afterFulfillRedeem(
+        address asset,
         uint256 assets,
-        uint256 shares
+        uint256 shares,
+        address controller
     ) internal virtual {}
 
     /*//////////////////////////////////////////////////////////////
