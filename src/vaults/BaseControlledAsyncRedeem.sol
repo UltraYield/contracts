@@ -31,6 +31,7 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, IERC7540Redeem {
     error NothingToRedeem();
     error NothingToWithdraw();
     error InsufficientBalance();
+    error AssetNotSupported();
 
     // Rate provider errors
     error MissingRateProvider();
@@ -739,6 +740,11 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, IERC7540Redeem {
             revert InsufficientBalance();
         if (shares == 0)
             revert NothingToRedeem();
+
+        // Validate that the asset is supported by the rate provider
+        // This prevents users from creating pending redeem requests for unsupported assets
+        if (asset != this.asset() && !rateProvider.isSupported(asset))
+            revert AssetNotSupported();
 
         beforeRequestRedeem(asset, shares, controller, owner);
 
