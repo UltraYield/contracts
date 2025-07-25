@@ -916,7 +916,7 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, IERC7540Redeem {
         emit RedeemRequestFulfilled(controller, msg.sender, shares, assets);
 
         // After fulfill redeem hook
-        afterFulfillRedeem(assets, shares);
+        afterFulfillRedeem(assets, shares, controller, asset);
 
         return assets;
     }
@@ -1002,7 +1002,9 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, IERC7540Redeem {
     /// @dev Hook for inheriting contracts after fulfill
     function afterFulfillRedeem(
         uint256 assets,
-        uint256 shares
+        uint256 shares,
+        address controller,
+        address asset
     ) internal virtual {}
 
     /*//////////////////////////////////////////////////////////////

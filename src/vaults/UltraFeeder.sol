@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity 0.8.28;
 
-import { IUltraVault } from "../interfaces/IUltraVault.sol";
+import { IUltraVault, Fees } from "../interfaces/IUltraVault.sol";
 import { 
     BaseControlledAsyncRedeem, 
     PendingRedeem, 
@@ -120,10 +120,40 @@ contract UltraFeeder is BaseControlledAsyncRedeem, UUPSUpgradeable {
         mainVault.fulfillRedeemOfAsset(asset, shares, address(this));
         uint256 mainAssetsClaimed = mainVault.redeemAsset(asset, shares, address(this), address(this));
 
-        if (mainAssetsClaimed != assets) {
+        // Calculate the expected assets after withdrawal fees from the underlying vault
+        Fees memory fees = mainVault.fees();
+        uint256 withdrawalFee = fees.withdrawalFee;
+        uint256 expectedAssetsAfterFees = assets - (assets * withdrawalFee / 1e18);
+
+        if (mainAssetsClaimed != expectedAssetsAfterFees) {
             revert ShareNumberMismatch();
         }
     }
+
+    /// @dev Hook for inheriting contracts after fulfill redeem
+    /// @dev Correct claimable redeem amounts to account for underlying vault fees
+    function afterFulfillRedeem(
+        uint256 assets,
+        uint256 shares,
+        address controller,
+        address asset
+    ) internal override {
+        // The base implementation has already updated claimableRedeem.assets += assets
+        // We need to correct it to use the actual assets received after fees
+        Fees memory fees = mainVault.fees();
+        uint256 withdrawalFee = fees.withdrawalFee;
+        uint256 actualAssetsReceived = assets - (assets * withdrawalFee / 1e18);
+        
+        // Correct the claimable redeem amounts to use the actual assets received
+        ClaimableRedeem memory claimableRedeem = 
+            requestQueue.getClaimableRedeem(controller, address(this), asset);
+        
+        // The base implementation added 'assets', but we need to correct it to 'actualAssetsReceived'
+        claimableRedeem.assets = claimableRedeem.assets - assets + actualAssetsReceived;
+        
+        requestQueue.setClaimableRedeem(controller, address(this), asset, claimableRedeem);
+    }
+
 
     /// @dev In async vaults it's a privileged function
     function _fulfillRedeemOfAsset(
