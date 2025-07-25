@@ -133,10 +133,10 @@ contract UltraFeeder is BaseControlledAsyncRedeem, UUPSUpgradeable {
     /// @dev Hook for inheriting contracts after fulfill redeem
     /// @dev Correct claimable redeem amounts to account for underlying vault fees
     function afterFulfillRedeem(
+        address asset,
         uint256 assets,
         uint256 shares,
-        address controller,
-        address asset
+        address controller
     ) internal override {
         // The base implementation has already updated claimableRedeem.assets += assets
         // We need to correct it to use the actual assets received after fees
