@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity 0.8.28;
 
+import { Fees } from "../vaults/AsyncVault.sol";
+
 /**
  * @title IUltraVault
  * @notice A simplified interface for use in other contracts
@@ -178,4 +180,9 @@ interface IUltraVault {
      * @dev Returns the value of tokens owned by `account`.
      */
     function balanceOf(address account) external view returns (uint256);
+
+    /**
+     * @dev Returns the current fees configuration.
+     */
+    function fees() external view returns (Fees memory);
 } 
