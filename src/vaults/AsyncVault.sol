@@ -290,7 +290,7 @@ abstract contract AsyncVault is BaseControlledAsyncRedeem {
      * @dev Expected to be overridden in inheriting contracts
      */
     function beforeWithdraw(address, uint256, uint256) internal virtual override {
-        if (!paused) 
+        if (!paused()) 
             _collectFees();
     }
 
