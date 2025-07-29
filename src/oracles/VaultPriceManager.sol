@@ -178,9 +178,7 @@ contract VaultPriceManager is InitializableOwnable {
             priceUpdate.asset
         );
         uint256 highwaterMark = highwaterMarks[priceUpdate.vault];
-        bool paused = IPausable(priceUpdate.vault).paused();
         Limit memory limit = limits[priceUpdate.vault];
-
         if (
             // Sudden drop
             priceUpdate.shareValueInAssets <
@@ -192,8 +190,9 @@ contract VaultPriceManager is InitializableOwnable {
             priceUpdate.shareValueInAssets <
             highwaterMark.mulDivDown(1e18 - limit.drawdown, 1e18)
         ) {
-            if (!paused) {
-                IPausable(priceUpdate.vault).pause();
+            IPausable vault = IPausable(priceUpdate.vault);
+            if (!vault.paused()) {
+                vault.pause();
             }
         } else if (priceUpdate.shareValueInAssets > highwaterMark) {
             highwaterMarks[priceUpdate.vault] = priceUpdate.shareValueInAssets;

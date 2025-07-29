@@ -4,17 +4,18 @@ pragma solidity 0.8.28;
 import { IERC7540Operator } from "ERC-7540/interfaces/IERC7540.sol";
 import { IERC7575, IERC165 } from "ERC-7540/interfaces/IERC7575.sol";
 import { InitializableOwnable } from "src/utils/InitializableOwnable.sol";
-import { Pausable } from "src/utils/Pausable.sol";
+import { IPausable } from "src/interfaces/IPausable.sol";
+import { PausableUpgradeable } from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import { ERC4626Upgradeable } from "@openzeppelin/contracts-upgradeable/token/ERC20/extensions/ERC4626Upgradeable.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 abstract contract BaseERC7540 is
     ERC4626Upgradeable,
     InitializableOwnable,
-    IERC7540Operator,
-    Pausable
+    PausableUpgradeable,
+    IPausable,
+    IERC7540Operator
 {
-
     // Events
     event RoleUpdated(bytes32 role, address account, bool approved);
 
@@ -22,17 +23,26 @@ abstract contract BaseERC7540 is
     error AccessDenied();
     error Misconfigured();
 
+    ///////////////
+    // Constants //
+    ///////////////
+
     // @dev All requests have ID == 0
     uint256 internal constant REQUEST_ID = 0;
-
-    // Roles
     bytes32 public constant PAUSER_ROLE = keccak256("PAUSER_ROLE");
+
+    /////////////
+    // Storage //
+    /////////////
+
+    // V0: 50 in total: role mapping [1], operator mapping [1], gap [48]
     mapping(bytes32 => mapping(address => bool)) public hasRole;
-
     mapping(address => mapping(address => bool)) public isOperator;
-
-    // V0: 2 total: 1 - role mapping, 1 - operator mapping
     uint256[48] private __gap;
+
+    //////////
+    // Init //
+    //////////
 
     /**
      * @notice Constructor for BaseERC7540
@@ -47,8 +57,8 @@ abstract contract BaseERC7540 is
         string memory _name,
         string memory _symbol
     ) public virtual onlyInitializing {
-        if (_asset == address(0))
-            revert Misconfigured(); 
+        require(_asset != address(0), Misconfigured());
+        __Pausable_init();
         __ERC20_init(_name, _symbol);
         __ERC4626_init(IERC20(_asset));
         initOwner(_owner);
@@ -89,7 +99,6 @@ abstract contract BaseERC7540 is
     function deposit(uint256 assets, address receiver) public virtual override returns (uint256) {
         uint256 shares = super.deposit(assets, receiver);
         afterDeposit(asset(), assets, shares);
-
         return shares;
     }
 
@@ -101,7 +110,6 @@ abstract contract BaseERC7540 is
     ) public virtual override returns (uint256) {
         uint256 shares = previewWithdraw(assets);
         beforeWithdraw(asset(), assets, shares);
-
         return super.withdraw(assets, receiver, owner);
     }
 
@@ -122,7 +130,6 @@ abstract contract BaseERC7540 is
     ) public onlyOwner {
         if (hasRole[role][account] != approved) {
             hasRole[role][account] = approved;
-
             emit RoleUpdated(role, account, approved);
         }
     }
@@ -137,15 +144,21 @@ abstract contract BaseERC7540 is
         _;
     }
 
+    /// @notice Check if the contract is paused
+    /// @return True if the contract is paused, false otherwise
+    function paused() public view override(IPausable, PausableUpgradeable) returns (bool) {
+        return super.paused();
+    }
+
     /// @notice Pause vault operations
     /// @dev Caller must be owner or have PAUSER_ROLE
-    function pause() external onlyRoleOrOwner(PAUSER_ROLE) {
+    function pause() external override onlyRoleOrOwner(PAUSER_ROLE) {
         _pause();
     }
 
     /// @notice Unpause vault operations
     /// @dev Caller must be owner or have PAUSER_ROLE
-    function unpause() external onlyRoleOrOwner(PAUSER_ROLE) {
+    function unpause() external override onlyRoleOrOwner(PAUSER_ROLE) {
         _unpause();
     }
 
