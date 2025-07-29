@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity 0.8.28;
 
+import { Fees } from "../vaults/AsyncVault.sol";
+
 /**
  * @title IUltraVault
  * @notice A simplified interface for use in other contracts
@@ -134,6 +136,37 @@ interface IUltraVault {
     ) external returns (uint256 assets);
 
     /**
+     * @notice Cancel redeem request for controller
+     * @param controller Controller address
+     * @dev Transfers pending shares back to msg.sender
+     */
+    function cancelRedeemRequest(address controller) external;
+
+    /**
+     * @notice Cancel redeem request for controller
+     * @param controller Controller address
+     * @param receiver Share recipient
+     * @dev Transfers pending shares back to receiver
+     */
+    function cancelRedeemRequest(
+        address controller,
+        address receiver
+    ) external;
+
+    /**
+     * @notice Cancel redeem request for controller
+     * @param asset Asset
+     * @param controller Controller address
+     * @param receiver Share recipient
+     * @dev Transfers pending shares back to receiver
+     */
+    function cancelRedeemRequestOfAsset(
+        address asset,
+        address controller,
+        address receiver
+    ) external;
+
+    /**
      * @dev Returns the oracle address of the vault.
      */
     function oracle() external view returns (address);
@@ -147,4 +180,9 @@ interface IUltraVault {
      * @dev Returns the value of tokens owned by `account`.
      */
     function balanceOf(address account) external view returns (uint256);
+
+    /**
+     * @dev Returns the current fees configuration.
+     */
+    function fees() external view returns (Fees memory);
 } 
