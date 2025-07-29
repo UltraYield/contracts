@@ -141,16 +141,12 @@ contract UltraFeeder is BaseControlledAsyncRedeem, UUPSUpgradeable {
         // The base implementation has already updated claimableRedeem.assets += assets
         // We need to correct it to use the actual assets received after fees
         Fees memory fees = mainVault.fees();
-        uint256 withdrawalFee = fees.withdrawalFee;
-        uint256 actualAssetsReceived = assets - (assets * withdrawalFee / 1e18);
+        uint256 withdrawalFee = assets * fees.withdrawalFee / 1e18;
         
         // Correct the claimable redeem amounts to use the actual assets received
         ClaimableRedeem memory claimableRedeem = 
             requestQueue.getClaimableRedeem(controller, address(this), asset);
-        
-        // The base implementation added 'assets', but we need to correct it to 'actualAssetsReceived'
-        claimableRedeem.assets = claimableRedeem.assets - assets + actualAssetsReceived;
-        
+        claimableRedeem.assets -= withdrawalFee;
         requestQueue.setClaimableRedeem(controller, address(this), asset, claimableRedeem);
     }
 
