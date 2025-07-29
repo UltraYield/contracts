@@ -546,7 +546,7 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, IERC7540Redeem {
     function previewDeposit(
         uint256 assets
     ) public view virtual override returns (uint256) {
-        return paused ? 0 : super.previewDeposit(assets);
+        return paused() ? 0 : super.previewDeposit(assets);
     }
 
     /**
@@ -562,7 +562,7 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, IERC7540Redeem {
     ) public view virtual returns (uint256) {
         // Convert to underlying for share calculation
         uint256 baseAssets = convertToUnderlying(asset, assets);
-        return paused ? 0 : super.previewDeposit(baseAssets);
+        return paused() ? 0 : super.previewDeposit(baseAssets);
     }
 
     /**
@@ -574,7 +574,7 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, IERC7540Redeem {
     function previewMint(
         uint256 shares
     ) public view virtual override returns (uint256) {
-        return paused ? 0 : super.previewMint(shares);
+        return paused() ? 0 : super.previewMint(shares);
     }
 
     /**
@@ -589,7 +589,7 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, IERC7540Redeem {
     ) public view virtual returns (uint256) {
         // Calculate assets needed in underlying units, then convert to asset units
         uint256 baseAssets = super.previewMint(shares);
-        return paused ? 0 : convertFromUnderlying(asset, baseAssets);
+        return paused() ? 0 : convertFromUnderlying(asset, baseAssets);
     }
 
 
@@ -619,7 +619,7 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, IERC7540Redeem {
     function maxDeposit(
         address
     ) public view virtual override returns (uint256) {
-        return paused ? 0 : type(uint256).max;
+        return paused() ? 0 : type(uint256).max;
     }
 
     /**
@@ -628,7 +628,7 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, IERC7540Redeem {
      * @dev Returns 0 if vault is paused
      */
     function maxMint(address) public view virtual override returns (uint256) {
-        return paused ? 0 : type(uint256).max;
+        return paused() ? 0 : type(uint256).max;
     }
 
     /**
