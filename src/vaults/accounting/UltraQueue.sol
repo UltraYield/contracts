@@ -2,15 +2,12 @@
 pragma solidity 0.8.28;
 
 import { VaultAdminControl } from "../../utils/VaultAdminControl.sol";
-import { Initializable } from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
-import { PendingRedeem, ClaimableRedeem } from "../../interfaces/IUltraQueue.sol";
+import { UUPSUpgradeable } from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
+import { IUltraQueue, PendingRedeem, ClaimableRedeem } from "../../interfaces/IUltraQueue.sol";
 
-/**
- * @title UltraQueue
- * @notice Contract to help manage redeems for async vaults
- */
-contract UltraQueue is VaultAdminControl, Initializable {
-
+/// @title UltraQueue
+/// @notice Contract to help manage redeems for async vaults
+contract UltraQueue is VaultAdminControl, UUPSUpgradeable, IUltraQueue {
     mapping(address => mapping(address => mapping(address => PendingRedeem))) public pendingRedeems;
     mapping(address => mapping(address => mapping(address => ClaimableRedeem))) public claimableRedeems;
 
@@ -19,6 +16,7 @@ contract UltraQueue is VaultAdminControl, Initializable {
     }
 
     function initialize(address _owner) external initializer {
+        __UUPSUpgradeable_init();
         initOwner(_owner);
     }
 
@@ -55,4 +53,11 @@ contract UltraQueue is VaultAdminControl, Initializable {
     ) external onlyAdminOrOwner(vault) {
         claimableRedeems[user][vault][token] = claimableRedeem;
     }
+
+    /*//////////////////////////////////////////////////////////////
+                            UUPS UPGRADABLE
+    //////////////////////////////////////////////////////////////*/
+
+    /// @notice UUPS Upgradable access authorization
+    function _authorizeUpgrade(address newImplementation) internal override onlyOwner {}
 }
