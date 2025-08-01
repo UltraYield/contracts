@@ -214,12 +214,9 @@ contract UltraVaultOracle is IPriceSource, InitializableOwnable {
             diff = price.price - price.targetPrice;
         }
 
-        uint256 changePercentage =
-            (price.timestampForFullVesting - block.timestamp) *
-            DECIMAL_PRECISION /
-            (price.timestampForFullVesting - price.lastUpdatedTimestamp);
-
-        uint256 change = diff - diff * changePercentage / DECIMAL_PRECISION;
+        uint256 timeLeft = price.timestampForFullVesting - block.timestamp;
+        uint256 timeFull = price.timestampForFullVesting - price.lastUpdatedTimestamp;
+        uint256 change = diff - diff * timeLeft * DECIMAL_PRECISION / timeFull / DECIMAL_PRECISION;
  
         return increase ? price.price + change : price.price - change;
     }

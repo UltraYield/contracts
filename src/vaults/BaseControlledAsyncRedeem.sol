@@ -835,6 +835,7 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, IERC7540Redeem {
 
     /*//////////////////////////////////////////////////////////////
                         DEPOSIT FULFILLMENT LOGIC
+                        REDEEM FULFILLMENT LOGIC
     //////////////////////////////////////////////////////////////*/
 
     event RedeemRequestFulfilled(
