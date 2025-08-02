@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0
-pragma solidity 0.8.28;
+pragma solidity >=0.8.0;
 
 /**
  * @dev Concise interface of the ERC-20 token to allow balance fetching
