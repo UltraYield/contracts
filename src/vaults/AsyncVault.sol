@@ -69,7 +69,6 @@ abstract contract AsyncVault is BaseControlledAsyncRedeem {
     /// @param _name Vault name
     /// @param _symbol Vault symbol
     /// @param _rateProvider oracle for assets exchange rate
-    /// @param _requestQueue withdrawal request queue
     /// @param _feeRecipient Fee recipient
     /// @param _fees Fee configuration
     function initialize(
@@ -78,11 +77,10 @@ abstract contract AsyncVault is BaseControlledAsyncRedeem {
         string memory _name,
         string memory _symbol,
         address _rateProvider,
-        address _requestQueue,
         address _feeRecipient,
         Fees memory _fees
     ) public virtual onlyInitializing {
-        super.initialize(_owner, _asset, _name, _symbol, _rateProvider, _requestQueue);
+        super.initialize(_owner, _asset, _name, _symbol, _rateProvider);
 
         require(_feeRecipient != address(0)); 
         _getAsyncVaultStorage().feeRecipient = _feeRecipient;

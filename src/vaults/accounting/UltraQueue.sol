@@ -10,15 +10,15 @@ bytes32 constant ULTRA_QUEUE_STORAGE_LOCATION = 0x38487c1eeb502ff9f43b364c26f88c
 
 /// @title UltraQueue
 /// @notice Contract to help manage redeems for async vaults
-contract UltraQueue is VaultAdminControl, UUPSUpgradeable, IUltraQueue {
+contract UltraQueue {
     /////////////
     // Storage //
     /////////////
 
     /// @custom:storage-location erc7201:ultrayield.storage.UltraQueue
     struct Storage {
-        mapping(address => mapping(address => mapping(address => PendingRedeem))) pendingRedeems;
-        mapping(address => mapping(address => mapping(address => ClaimableRedeem))) claimableRedeems;
+        mapping(address => mapping(address => PendingRedeem)) pendingRedeems;
+        mapping(address => mapping(address => ClaimableRedeem)) claimableRedeems;
     }
 
     function _getUltraQueueStorage() private pure returns (Storage storage $) {
@@ -27,61 +27,37 @@ contract UltraQueue is VaultAdminControl, UUPSUpgradeable, IUltraQueue {
         }
     }
 
-    //////////
-    // Init //
-    //////////
+    //////////////
+    // Internal //
+    //////////////
 
-    constructor() {
-        _disableInitializers();
-    }
-
-    function initialize(address _owner) external initializer {
-        __UUPSUpgradeable_init();
-        initOwner(_owner);
-    }
-
-    ////////////
-    // Public //
-    ////////////
-
-    function getPendingRedeem(
-        address user, 
-        address vault, 
+    function _getPendingRedeem(
+        address user,
         address token
-    ) external view returns (PendingRedeem memory) {
-        return _getUltraQueueStorage().pendingRedeems[user][vault][token];
+    ) internal view returns (PendingRedeem memory) {
+        return _getUltraQueueStorage().pendingRedeems[user][token];
     }
 
-    function getClaimableRedeem(
-        address user, 
-        address vault, 
+    function _getClaimableRedeem(
+        address user,
         address token
-    ) external view returns (ClaimableRedeem memory) {
-        return _getUltraQueueStorage().claimableRedeems[user][vault][token];
+    ) internal view returns (ClaimableRedeem memory) {
+        return _getUltraQueueStorage().claimableRedeems[user][token];
     }
 
-    function setPendingRedeem(
-        address user, 
-        address vault, 
+    function _setPendingRedeem(
+        address user,
         address token,
         PendingRedeem memory pendingRedeem
-    ) external onlyAdminOrOwner(vault) {
-        _getUltraQueueStorage().pendingRedeems[user][vault][token] = pendingRedeem;
+    ) internal {
+        _getUltraQueueStorage().pendingRedeems[user][token] = pendingRedeem;
     }
 
-    function setClaimableRedeem(
-        address user, 
-        address vault, 
+    function _setClaimableRedeem(
+        address user,
         address token,
         ClaimableRedeem memory claimableRedeem
-    ) external onlyAdminOrOwner(vault) {
-        _getUltraQueueStorage().claimableRedeems[user][vault][token] = claimableRedeem;
+    ) internal {
+        _getUltraQueueStorage().claimableRedeems[user][token] = claimableRedeem;
     }
-
-    //////////////////////
-    // UUPS Upgradeable //
-    //////////////////////
-
-    /// @notice UUPS Upgradable access authorization
-    function _authorizeUpgrade(address newImplementation) internal override onlyOwner {}
 }
