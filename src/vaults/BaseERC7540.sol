@@ -9,6 +9,9 @@ import { PausableUpgradeable } from "@openzeppelin/contracts-upgradeable/utils/P
 import { ERC4626Upgradeable } from "@openzeppelin/contracts-upgradeable/token/ERC20/extensions/ERC4626Upgradeable.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
+// keccak256(abi.encode(uint256(keccak256("ultrayield.storage.BaseERC7540")) - 1)) & ~bytes32(uint256(0xff));
+bytes32 constant BASE_ERC7540_STORAGE_LOCATION = 0x7ed40989b9d2239ce36ec9550c05ebed21dbbee7653259cce6262e159951a800;
+
 abstract contract BaseERC7540 is
     ERC4626Upgradeable,
     InitializableOwnable,
@@ -35,22 +38,27 @@ abstract contract BaseERC7540 is
     // Storage //
     /////////////
 
-    // V0: 50 in total: role mapping [1], operator mapping [1], gap [48]
-    mapping(bytes32 => mapping(address => bool)) public hasRole;
-    mapping(address => mapping(address => bool)) public isOperator;
-    uint256[48] private __gap;
+    /// @custom:storage-location erc7201:ultrayield.storage.BaseERC7540
+    struct BaseERC7540Storage {
+        mapping(bytes32 => mapping(address => bool)) hasRole;
+        mapping(address => mapping(address => bool)) isOperator;
+    }
+
+    function _getBaseERC7540Storage() private pure returns (BaseERC7540Storage storage $) {
+        assembly {
+            $.slot := BASE_ERC7540_STORAGE_LOCATION
+        }
+    }
 
     //////////
     // Init //
     //////////
 
-    /**
-     * @notice Constructor for BaseERC7540
-     * @param _owner Owner of the vault
-     * @param _asset Underlying asset address
-     * @param _name Vault name
-     * @param _symbol Vault symbol
-     */
+    /// @notice Constructor for BaseERC7540
+    /// @param _owner Owner of the vault
+    /// @param _asset Underlying asset address
+    /// @param _name Vault name
+    /// @param _symbol Vault symbol
     function initialize(
         address _owner,
         address _asset,
@@ -69,27 +77,33 @@ abstract contract BaseERC7540 is
         return IERC20(asset()).balanceOf(address(this));
     }
 
-    /*//////////////////////////////////////////////////////////////
-                        ERC7540 LOGIC
-    //////////////////////////////////////////////////////////////*/
+    /////////////
+    // ERC7540 //
+    /////////////
 
     function share() public view returns (address) {
         return address(this);
     }
 
-    /**
-     * @notice Set operator approval status
-     * @param operator Operator address
-     * @param approved Status
-     * @dev Allows operations on behalf of vault shares holder
-     */
+    function hasRole(bytes32 role, address account) public view returns (bool) {
+        return _getBaseERC7540Storage().hasRole[role][account];
+    }
+
+    function isOperator(address owner, address operator) public view returns (bool) {
+        return _getBaseERC7540Storage().isOperator[owner][operator];
+    }
+
+    /// @notice Set operator approval status
+    /// @param operator Operator address
+    /// @param approved Status
+    /// @dev Allows operations on behalf of vault shares holder
     function setOperator(
         address operator,
         bool approved
     ) public virtual returns (bool success) {
         require(msg.sender != operator, "ERC7540Vault/cannot-set-self-as-operator");
-        if (isOperator[msg.sender][operator] != approved) {
-            isOperator[msg.sender][operator] = approved;
+        if (isOperator(msg.sender, operator) != approved) {
+            _getBaseERC7540Storage().isOperator[msg.sender][operator] = approved;
             emit OperatorSet(msg.sender, operator, approved);
             success = true;
         }
@@ -113,34 +127,29 @@ abstract contract BaseERC7540 is
         return super.withdraw(assets, receiver, owner);
     }
 
-    /*//////////////////////////////////////////////////////////////
-                            PAUSABLE
-    //////////////////////////////////////////////////////////////*/
+    //////////////
+    // Pausable //
+    //////////////
 
-    /**
-     * @notice Update account role
-     * @param role Role to update
-     * @param account Account address
-     * @param approved Approval status
-     */
+    /// @notice Update account role
+    /// @param role Role to update
+    /// @param account Account address
+    /// @param approved Approval status
     function updateRole(
         bytes32 role,
         address account,
         bool approved
     ) public onlyOwner {
-        if (hasRole[role][account] != approved) {
-            hasRole[role][account] = approved;
+        if (hasRole(role,account) != approved) {
+            _getBaseERC7540Storage().hasRole[role][account] = approved;
             emit RoleUpdated(role, account, approved);
         }
     }
 
-    /**
-     * @notice Check if caller has role or is owner
-     * @param role Role to check
-     */
+    /// @notice Check if caller has role or is owner
+    /// @param role Role to check
     modifier onlyRoleOrOwner(bytes32 role) {
-        if (!hasRole[role][msg.sender] && msg.sender != owner)
-            revert AccessDenied();
+        require(hasRole(role, msg.sender) || msg.sender == owner, AccessDenied());
         _;
     }
 
@@ -162,23 +171,21 @@ abstract contract BaseERC7540 is
         _unpause();
     }
 
-    /*//////////////////////////////////////////////////////////////
-                          INTERNAL HOOKS LOGIC
-    //////////////////////////////////////////////////////////////*/
+    ///////////
+    // Hooks //
+    ///////////
 
     function beforeWithdraw(address asset, uint256 assets, uint256 shares) internal virtual {}
 
     function afterDeposit(address asset, uint256 assets, uint256 shares) internal virtual {}
 
-    /*//////////////////////////////////////////////////////////////
-                        ERC165 LOGIC
-    //////////////////////////////////////////////////////////////*/
+    ////////////
+    // ERC165 //
+    ////////////
 
-    /**
-     * @notice Check interface support
-     * @param interfaceId Interface ID to check
-     * @return True if interface is supported
-     */
+    /// @notice Check interface support
+    /// @param interfaceId Interface ID to check
+    /// @return True if interface is supported
     function supportsInterface(
         bytes4 interfaceId
     ) public pure virtual returns (bool) {

@@ -21,6 +21,9 @@ struct Fees {
     uint256 highwaterMark;
 }
 
+// keccak256(abi.encode(uint256(keccak256("ultrayield.storage.AsyncVault")) - 1)) & ~bytes32(uint256(0xff));
+bytes32 constant ASYNC_VAULT_STORAGE_LOCATION = 0x8b87be01fca60a9d62c55cf3d953b8c6c3db48e53c3aead2b8a9227ba5787400;
+
 /// @title AsyncVault
 /// @notice Base contract for ERC-7540 compliant async redeem vaults
 /// @dev Asset management logic must be implemented by inheriting contracts
@@ -33,31 +36,42 @@ abstract contract AsyncVault is BaseControlledAsyncRedeem {
     event FeesCollected(uint256 shares, uint256 managementFee, uint256 performanceFee);
     event WithdrawalFeeCollected(uint256 shares);
 
-    bytes32 public constant OPERATOR_ROLE = keccak256("OPERATOR_ROLE");
+    ///////////////
+    // Constants //
+    ///////////////
 
+    bytes32 public constant OPERATOR_ROLE = keccak256("OPERATOR_ROLE");
     uint64 public constant MAX_PERFORMANCE_FEE = 3e17;
     uint64 public constant MAX_MANAGEMENT_FEE = 5e16;
     uint64 public constant MAX_WITHDRAWAL_FEE = 1e16;
 
-    /// @notice Fee recipient address
-    address feeRecipient;
-    /// @notice Current fees
-    Fees public fees;
+    /////////////
+    // Storage //
+    /////////////
 
-    // V0: 3 total:  1 - fee recipient, 2 - Fees
-    uint256[47] private __gap;
+    /// @custom:storage-location erc7201:ultrayield.storage.AsyncVault
+    struct AsyncVaultStorage {
+        /// @notice Fee recipient address
+        address feeRecipient;
+        /// @notice Current fees
+        Fees fees;
+    }
 
-    /**
-     * @notice Initialize vault with basic parameters
-     * @param _owner Owner of the vault
-     * @param _asset Underlying asset address
-     * @param _name Vault name
-     * @param _symbol Vault symbol
-     * @param _rateProvider oracle for assets exchange rate
-     * @param _requestQueue withdrawal request queue
-     * @param _feeRecipient Fee recipient
-     * @param _fees Fee configuration
-     */
+    function _getAsyncVaultStorage() internal pure returns (AsyncVaultStorage storage $) {
+        assembly {
+            $.slot := ASYNC_VAULT_STORAGE_LOCATION
+        }
+    }
+
+    /// @notice Initialize vault with basic parameters
+    /// @param _owner Owner of the vault
+    /// @param _asset Underlying asset address
+    /// @param _name Vault name
+    /// @param _symbol Vault symbol
+    /// @param _rateProvider oracle for assets exchange rate
+    /// @param _requestQueue withdrawal request queue
+    /// @param _feeRecipient Fee recipient
+    /// @param _fees Fee configuration
     function initialize(
         address _owner,
         address _asset,
@@ -71,77 +85,65 @@ abstract contract AsyncVault is BaseControlledAsyncRedeem {
         super.initialize(_owner, _asset, _name, _symbol, _rateProvider, _requestQueue);
 
         require(_feeRecipient != address(0)); 
-        feeRecipient = _feeRecipient;
+        _getAsyncVaultStorage().feeRecipient = _feeRecipient;
         emit FeesRecipientUpdated(address(0), _feeRecipient);
 
         _setFees(_fees);
     }
 
-    /*//////////////////////////////////////////////////////////////
-                        DEPOSIT/WITHDRAWAL LOGIC
-    //////////////////////////////////////////////////////////////*/
+    //////////////
+    // ERC-4626 //
+    //////////////
 
-    /**
-     * @notice Helper to deposit assets for msg.sender
-     * @param assets Amount to deposit
-     * @return shares Amount of shares received
-     */
+    /// @notice Helper to deposit assets for msg.sender
+    /// @param assets Amount to deposit
+    /// @return shares Amount of shares received
     function deposit(uint256 assets) external returns (uint256) {
         return deposit(assets, msg.sender);
     }
 
-    /**
-     * @notice Helper to mint shares for msg.sender
-     * @param shares Amount to mint
-     * @return assets Amount of assets required
-     */
+    /// @notice Helper to mint shares for msg.sender
+    /// @param shares Amount to mint
+    /// @return assets Amount of assets required
     function mint(uint256 shares) external returns (uint256) {
         return mint(shares, msg.sender);
     }
 
-    /**
-     * @notice Helper to withdraw assets for msg.sender
-     * @param assets Amount to withdraw
-     * @return shares Amount of shares burned
-     */
+    /// @notice Helper to withdraw assets for msg.sender
+    /// @param assets Amount to withdraw
+    /// @return shares Amount of shares burned
     function withdraw(uint256 assets) external returns (uint256) {
         return withdraw(assets, msg.sender, msg.sender);
     }
 
-    /**
-     * @notice Helper to redeem shares for msg.sender
-     * @param shares Amount to redeem
-     * @return assets Amount of assets received
-     */
+    /// @notice Helper to redeem shares for msg.sender
+    /// @param shares Amount to redeem
+    /// @return assets Amount of assets received
     function redeem(uint256 shares) external returns (uint256) {
         return redeem(shares, msg.sender, msg.sender);
     }
 
-    /*//////////////////////////////////////////////////////////////
-                        REQUEST REDEEM LOGIC
-    //////////////////////////////////////////////////////////////*/
+    //////////////////////////
+    // Request Redeem Logic //
+    //////////////////////////
 
-    /**
-     * @notice Request redeem for msg.sender
-     * @param shares Amount to redeem
-     * @return requestId Request identifier
-     */
+    /// @notice Request redeem for msg.sender
+    /// @param shares Amount to redeem
+    /// @return requestId Request identifier
     function requestRedeem(uint256 shares) external returns (uint256 requestId) {
         return _requestRedeemOfAsset(asset(), shares, msg.sender, msg.sender);
     }
 
-    /*//////////////////////////////////////////////////////////////
-                        FULFILL REDEEM LOGIC
-    //////////////////////////////////////////////////////////////*/
+    ////////////////////////
+    // Redeem Fulfillment //
+    ////////////////////////
 
-    /**
-     * @notice Fulfill redeem request
-     * @param shares Amount to redeem
-     * @param controller Controller to redeem for
-     * @return assets Amount of assets received
-     * @dev Reverts if shares < minAmount
-     * @dev Collects withdrawal fee to incentivize manager
-     */
+    /// @notice Fulfill redeem request
+    /// @param shares Amount to redeem
+    /// @param controller Controller to redeem for
+    /// @return assets Amount of assets received
+    /// @dev Reverts if shares < minAmount
+    /// @dev Collects withdrawal fee to incentivize manager
     function fulfillRedeem(
         uint256 shares,
         address controller
@@ -152,9 +154,8 @@ abstract contract AsyncVault is BaseControlledAsyncRedeem {
         assets = convertToAssets(shares);
 
         // Calculate the withdrawal incentive fee from the assets
-        Fees memory fees_ = fees;
         uint256 feesToCollect = assets.mulDivDown(
-            uint256(fees_.withdrawalFee),
+            uint256(fees().withdrawalFee),
             1e18
         );
 
@@ -169,13 +170,11 @@ abstract contract AsyncVault is BaseControlledAsyncRedeem {
         return assets - feesToCollect;
     }
 
-    /**
-     * @notice Fulfill redeem request
-     * @param asset Asset
-     * @param shares Amount to redeem
-     * @param controller Controller address
-     * @return assets Amount of claimable assets
-     */
+    /// @notice Fulfill redeem request
+    /// @param asset Asset
+    /// @param shares Amount to redeem
+    /// @param controller Controller address
+    /// @return assets Amount of claimable assets
     function fulfillRedeemOfAsset(
         address asset,
         uint256 shares,
@@ -189,9 +188,8 @@ abstract contract AsyncVault is BaseControlledAsyncRedeem {
         assets = convertFromUnderlying(asset, underlyingAssets);
         
         // Calculate the withdrawal incentive fee directly in asset units
-        Fees memory fees_ = fees;
         uint256 feesToCollect = assets.mulDivDown(
-            uint256(fees_.withdrawalFee),
+            uint256(fees().withdrawalFee),
             1e18
         );
 
@@ -208,34 +206,29 @@ abstract contract AsyncVault is BaseControlledAsyncRedeem {
         return assets - feesToCollect;
     }
 
-    /**
-     * @notice Fulfill multiple redeem requests
-     * @param shares Array of share amounts
-     * @param controllers Array of controllers
-     * @return total Total assets received
-     * @dev Reverts if arrays length mismatch
-     * @dev Collects withdrawal fee to incentivize manager
-     */
+    /// @notice Fulfill multiple redeem requests
+    /// @param shares Array of share amounts
+    /// @param controllers Array of controllers
+    /// @return total Total assets received
+    /// @dev Reverts if arrays length mismatch
+    /// @dev Collects withdrawal fee to incentivize manager
     function fulfillMultipleRedeems(
         uint256[] memory shares,
         address[] memory controllers
     ) external returns (uint256 total) {
-        if (shares.length != controllers.length) 
-            revert Misconfigured();
+        require(shares.length == controllers.length, Misconfigured());
 
         _collectFees();
 
-        Fees memory fees_ = fees;
-
+        uint64 withdrawalFee = fees().withdrawalFee;
         uint256 totalShares;
         uint256 totalFees;
-
         for (uint256 i; i < shares.length; i++) {
             uint256 assets = convertToAssets(shares[i]);
 
             // Calculate the withdrawal incentive fee from the assets
             uint256 feesToCollect = assets.mulDivDown(
-                uint256(fees_.withdrawalFee),
+                uint256(withdrawalFee),
                 1e18
             );
 
@@ -266,63 +259,59 @@ abstract contract AsyncVault is BaseControlledAsyncRedeem {
         return super._fulfillRedeemOfAsset(asset, assets, shares, controller);
     }
 
-    /**
-     * @notice Collect withdrawal fee
-     * @param fee Amount to collect
-     * @dev Can be overridden for custom withdrawal logic
-     */
+    /// @notice Collect withdrawal fee
+    /// @param fee Amount to collect
+    /// @dev Can be overridden for custom withdrawal logic
     function collectWithdrawalFeeInAsset(
         address asset,
         uint256 fee
     ) internal virtual {
         if (fee > 0) {
-            SafeERC20.safeTransfer(IERC20(asset), feeRecipient, fee);
+            SafeERC20.safeTransfer(IERC20(asset), feeRecipient(), fee);
             emit WithdrawalFeeCollected(fee);
         }
     }
 
-    /*//////////////////////////////////////////////////////////////
-                            ERC-4626 OVERRIDES
-    //////////////////////////////////////////////////////////////*/
+    /////////////////////
+    // Hooks overrides //
+    /////////////////////
 
-    /**
-     * @notice Collect fees before withdraw
-     * @dev Expected to be overridden in inheriting contracts
-     */
+    /// @notice Collect fees before withdraw
+    /// @dev Expected to be overridden in inheriting contracts
     function beforeWithdraw(address, uint256, uint256) internal virtual override {
         if (!paused()) 
             _collectFees();
     }
 
-    /**
-     * @notice Collect fees before deposit
-     * @dev Expected to be overridden in inheriting contracts
-     */
+    /// @notice Collect fees before deposit
+    /// @dev Expected to be overridden in inheriting contracts
     function beforeDeposit(address, uint256, uint256) internal virtual override {
         _collectFees();
     }
 
-    /*//////////////////////////////////////////////////////////////
-                            FEE LOGIC
-    //////////////////////////////////////////////////////////////*/
+    //////////
+    // Fees //
+    //////////
 
     /// @notice Get vault fee parameters
-    function getFees() public view returns (Fees memory) {
-        return fees;
+    function fees() public view returns (Fees memory) {
+        return _getAsyncVaultStorage().fees;
+    }
+
+    /// @notice Get vault fee recipient
+    function feeRecipient() public view returns (address) {
+        return _getAsyncVaultStorage().feeRecipient;
     }
 
     /// @notice Get total accrued fees
     function accruedFees() public view returns (uint256) {
-        Fees memory fees_ = fees;
-
+        Fees memory fees_ = fees();
         return _accruedPerformanceFee(fees_) + _accruedManagementFee(fees_);
     }
 
-    /**
-     * @notice Calculate accrued performance fee
-     * @return accruedPerformanceFee Fee amount in asset token
-     * @dev Based on high water mark value
-     */
+    /// @notice Calculate accrued performance fee
+    /// @return accruedPerformanceFee Fee amount in asset token
+    /// @dev Based on high water mark value
     function _accruedPerformanceFee(
         Fees memory fees_
     ) internal view returns (uint256) {
@@ -337,11 +326,9 @@ abstract contract AsyncVault is BaseControlledAsyncRedeem {
             0;
     }
 
-    /**
-     * @notice Calculate accrued management fee
-     * @return accruedManagementFee Fee amount in asset token
-     * @dev Annualized per minute, based on 525600 minutes per year
-     */
+    /// @notice Calculate accrued management fee
+    /// @return accruedManagementFee Fee amount in asset token
+    /// @dev Annualized per minute, based on 525600 minutes per year
     function _accruedManagementFee(
         Fees memory fees_
     ) internal view returns (uint256) {
@@ -355,82 +342,75 @@ abstract contract AsyncVault is BaseControlledAsyncRedeem {
             0;
     }
 
-    /**
-     * @notice Update vault's fee recipient
-     * @param newFeeRecipient_ New fee recipient
-     * @dev Collects pending fees before update
-     */
+    /// @notice Update vault's fee recipient
+    /// @param newFeeRecipient_ New fee recipient
+    /// @dev Collects pending fees before update
     function setFeeRecipient(address newFeeRecipient_) public onlyOwner whenNotPaused {
-        if (newFeeRecipient_ == address(0)) 
-            revert Misconfigured();
+        require(newFeeRecipient_ != address(0), Misconfigured());
 
-        if (feeRecipient != newFeeRecipient_) {
+        address currentFeeRecipient = feeRecipient();
+        if (currentFeeRecipient != newFeeRecipient_) {
             _collectFees();
-
-            emit FeesRecipientUpdated(feeRecipient, newFeeRecipient_);
-
-            feeRecipient = newFeeRecipient_;
+            _getAsyncVaultStorage().feeRecipient = newFeeRecipient_;
+            emit FeesRecipientUpdated(currentFeeRecipient, newFeeRecipient_);
         }
     }
 
-    /**
-     * @notice Update vault fees
-     * @param fees_ New fee configuration
-     * @dev Reverts if fees exceed limits (20% performance, 5% management, 5% withdrawal)
-     * @dev Collects pending fees before update
-     */
+    /// @notice Update vault fees
+    /// @param fees_ New fee configuration
+    /// @dev Reverts if fees exceed limits (20% performance, 5% management, 5% withdrawal)
+    /// @dev Collects pending fees before update
     function setFees(Fees memory fees_) public onlyOwner whenNotPaused {
         _collectFees();
-
         _setFees(fees_);
     }
 
     function _setFees(Fees memory fees_) internal {
         // Max value: 30% performance, 5% management, 1% withdrawal
-        if (
-            fees_.performanceFee > MAX_PERFORMANCE_FEE ||
-            fees_.managementFee > MAX_MANAGEMENT_FEE ||
-            fees_.withdrawalFee > MAX_WITHDRAWAL_FEE
-        ) revert Misconfigured();
+        require(
+            fees_.performanceFee <= MAX_PERFORMANCE_FEE &&
+            fees_.managementFee <= MAX_MANAGEMENT_FEE &&
+            fees_.withdrawalFee <= MAX_WITHDRAWAL_FEE,
+            Misconfigured()
+        );
 
         fees_.lastUpdateTimestamp = uint64(block.timestamp);
 
-        if (fees.highwaterMark == 0) {
+        Fees memory currentFees = fees();
+        if (currentFees.highwaterMark == 0) {
             fees_.highwaterMark = 10 ** IERC20Metadata(asset()).decimals();
         } else {
-            fees_.highwaterMark = fees.highwaterMark;
+            fees_.highwaterMark = currentFees.highwaterMark;
         }
 
-        emit FeesUpdated(fees, fees_);
+        emit FeesUpdated(currentFees, fees_);
 
-        fees = fees_;
+        _getAsyncVaultStorage().fees = fees_;
     }
 
-    /**
-     * @notice Mint fees as shares to recipient
-     * @dev Updates fee-related variables
-     */
+    /// @notice Mint fees as shares to recipient
+    /// @dev Updates fee-related variables
     function collectFees() external whenNotPaused {
         _collectFees();
     }
 
     function _collectFees() internal {
-        Fees memory fees_ = fees;
+        Fees memory fees_ = fees();
         uint256 managementFee = _accruedManagementFee(fees_);
         uint256 performanceFee = _accruedPerformanceFee(fees_);
         uint256 shareValue = convertToAssets(10 ** decimals());
 
         if (performanceFee + managementFee > 0) {
+            AsyncVaultStorage storage $ = _getAsyncVaultStorage();
             // Update the high water mark
             if (shareValue > fees_.highwaterMark) 
-                fees.highwaterMark = shareValue;
+                $.fees.highwaterMark = shareValue;
 
-            fees.lastUpdateTimestamp = uint64(block.timestamp);
-
-            uint256 feeShares = convertToShares(managementFee + performanceFee);
+            $.fees.lastUpdateTimestamp = uint64(block.timestamp);
 
             // Mint shares to fee recipient
-            _mint(feeRecipient, feeShares);
+            uint256 feeShares = convertToShares(managementFee + performanceFee);
+            _mint($.feeRecipient, feeShares);
 
             emit FeesCollected(feeShares, managementFee, performanceFee);
         }

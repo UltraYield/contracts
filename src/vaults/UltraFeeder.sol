@@ -14,6 +14,9 @@ import { UUPSUpgradeable } from "@openzeppelin/contracts-upgradeable/proxy/utils
 import { Initializable } from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import { IPriceSource } from "src/interfaces/IPriceSource.sol";
 
+// keccak256(abi.encode(uint256(keccak256("ultrayield.storage.UltraFeeder")) - 1)) & ~bytes32(uint256(0xff));
+bytes32 constant ULTRA_FEEDER_STORAGE_LOCATION = 0x73fc0f32a78274c31085b0032ea471ff6cedefdd8cffdf1dfa84871cdcb59000;
+
 /**
  * @title UltraFeeder
  * @notice ERC-4626 compliant vault that wraps UltraVault for deposits and handles async redeems
@@ -34,10 +37,20 @@ contract UltraFeeder is BaseControlledAsyncRedeem, UUPSUpgradeable {
     error AssetMismatch();
     error ShareNumberMismatch();
 
-    IUltraVault public mainVault;
+    /////////////
+    // Storage //
+    /////////////
 
-    // V0: 1 total: mainVault
-    uint256[49] private __gap;
+    /// @custom:storage-location erc7201:ultrayield.storage.UltraFeeder
+    struct UltraFeederStorage {
+        IUltraVault mainVault;
+    }
+
+    function _getUltraFeederStorage() private pure returns (UltraFeederStorage storage $) {
+        assembly {
+            $.slot := ULTRA_FEEDER_STORAGE_LOCATION
+        }
+    }
 
     /// @notice Disable implementation's initializer
     constructor() {
@@ -62,13 +75,24 @@ contract UltraFeeder is BaseControlledAsyncRedeem, UUPSUpgradeable {
         address _requestQueue
     ) external initializer {
         if (address(_mainVault) == address(0)) revert InvalidMainVault();
-        mainVault = IUltraVault(_mainVault);
+        
+        IUltraVault mainVault_ = IUltraVault(_mainVault);
+        _getUltraFeederStorage().mainVault = mainVault_;
         
         // Validate that the main vault's asset matches our asset
-        if (mainVault.asset() != _asset) revert AssetMismatch();
+        require(mainVault_.asset() == _asset, AssetMismatch());
         
-        super.initialize(_owner, _asset, _name, _symbol, mainVault.rateProvider(), _requestQueue);
+        super.initialize(_owner, _asset, _name, _symbol, mainVault_.rateProvider(), _requestQueue);
         _pause();
+    }
+
+    /////////////
+    // Getters //
+    /////////////
+
+    /// @notice Get the main vault address
+    function mainVault() public view returns (IUltraVault) {
+        return _getUltraFeederStorage().mainVault;
     }
 
     /**
@@ -76,9 +100,9 @@ contract UltraFeeder is BaseControlledAsyncRedeem, UUPSUpgradeable {
      * @return The total assets in the vault
      */
     function totalAssets() public view override returns (uint256) {
-        return IPriceSource(mainVault.oracle()).getQuote(
+        return IPriceSource(mainVault().oracle()).getQuote(
             totalSupply(),
-            address(mainVault),
+            address(mainVault()),
             address(asset())
         );
     }
@@ -90,12 +114,10 @@ contract UltraFeeder is BaseControlledAsyncRedeem, UUPSUpgradeable {
     /// @dev After deposit hook - collect fees and send funds to fundsHolder
     function afterDeposit(address asset, uint256 assets, uint256 shares) internal override {
         // Approve main vault to spend assets
-        SafeERC20.safeIncreaseAllowance(IERC20(asset), address(mainVault), assets);
+        SafeERC20.safeIncreaseAllowance(IERC20(asset), address(mainVault()), assets);
 
-        uint256 mainShares = mainVault.depositAsset(asset, assets, address(this));
-        if (mainShares != shares) {
-            revert ShareNumberMismatch();
-        }
+        uint256 mainShares = mainVault().depositAsset(asset, assets, address(this));
+        require(mainShares == shares, ShareNumberMismatch());
     }
 
     /// @dev Hook for inheriting contracts after request redeem
@@ -106,28 +128,27 @@ contract UltraFeeder is BaseControlledAsyncRedeem, UUPSUpgradeable {
         address owner
     ) internal override {
         // Approve main vault to spend it's shares
-        SafeERC20.safeIncreaseAllowance(IERC20(address(mainVault)), address(mainVault), shares);
+        IUltraVault mainVault_ = mainVault();
+        SafeERC20.safeIncreaseAllowance(IERC20(address(mainVault_)), address(mainVault_), shares);
 
         // Request redeem from main vault
-        mainVault.requestRedeemOfAsset(asset, shares, address(this), address(this));
+        mainVault_.requestRedeemOfAsset(asset, shares, address(this), address(this));
     }
 
     /// @dev Before fulfill redeem - transfer funds from fundsHolder to vault
     /// @dev "assets" will already be correct given the token user requested
     function beforeFulfillRedeem(address asset, uint256 assets, uint256 shares) internal override {
-
+        IUltraVault mainVault_ = mainVault();
         // Fulfill redeem in main vault. Returns asset units
-        mainVault.fulfillRedeemOfAsset(asset, shares, address(this));
-        uint256 mainAssetsClaimed = mainVault.redeemAsset(asset, shares, address(this), address(this));
+        mainVault_.fulfillRedeemOfAsset(asset, shares, address(this));
+        uint256 mainAssetsClaimed = mainVault_.redeemAsset(asset, shares, address(this), address(this));
 
         // Calculate the expected assets after withdrawal fees from the underlying vault
-        Fees memory fees = mainVault.fees();
+        Fees memory fees = mainVault_.fees();
         uint256 withdrawalFee = fees.withdrawalFee;
         uint256 expectedAssetsAfterFees = assets - (assets * withdrawalFee / 1e18);
 
-        if (mainAssetsClaimed != expectedAssetsAfterFees) {
-            revert ShareNumberMismatch();
-        }
+        require(mainAssetsClaimed == expectedAssetsAfterFees, ShareNumberMismatch());
     }
 
     /// @dev Hook for inheriting contracts after fulfill redeem
@@ -140,14 +161,14 @@ contract UltraFeeder is BaseControlledAsyncRedeem, UUPSUpgradeable {
     ) internal override {
         // The base implementation has already updated claimableRedeem.assets += assets
         // We need to correct it to use the actual assets received after fees
-        Fees memory fees = mainVault.fees();
+        Fees memory fees = mainVault().fees();
         uint256 withdrawalFee = assets * fees.withdrawalFee / 1e18;
         
         // Correct the claimable redeem amounts to use the actual assets received
         ClaimableRedeem memory claimableRedeem = 
-            requestQueue.getClaimableRedeem(controller, address(this), asset);
+            requestQueue().getClaimableRedeem(controller, address(this), asset);
         claimableRedeem.assets -= withdrawalFee;
-        requestQueue.setClaimableRedeem(controller, address(this), asset, claimableRedeem);
+        requestQueue().setClaimableRedeem(controller, address(this), asset, claimableRedeem);
     }
 
 
@@ -197,7 +218,7 @@ contract UltraFeeder is BaseControlledAsyncRedeem, UUPSUpgradeable {
     ) public virtual override {
         // First cancel the request in the underlying vault
         // This ensures that the underlying vault's pending redeem is also cleared
-        mainVault.cancelRedeemRequestOfAsset(asset, address(this), address(this));
+        mainVault().cancelRedeemRequestOfAsset(asset, address(this), address(this));
         
         // Then call the internal implementation to handle the feeder's cancellation
         _cancelRedeemRequestOfAsset(asset, controller, receiver);
@@ -213,7 +234,7 @@ contract UltraFeeder is BaseControlledAsyncRedeem, UUPSUpgradeable {
      * @return The amount of shares that would be minted
      */
     function previewDeposit(uint256 assets) public view override returns (uint256) {
-        return mainVault.previewDeposit(assets);
+        return mainVault().previewDeposit(assets);
     }
 
     /**
@@ -222,7 +243,7 @@ contract UltraFeeder is BaseControlledAsyncRedeem, UUPSUpgradeable {
      * @return The amount of assets required
      */
     function previewMint(uint256 shares) public view override returns (uint256) {
-        return mainVault.previewMint(shares);
+        return mainVault().previewMint(shares);
     }
 
     /**
@@ -230,7 +251,7 @@ contract UltraFeeder is BaseControlledAsyncRedeem, UUPSUpgradeable {
      * @return The maximum amount of assets that can be deposited
      */
     function maxDeposit(address) public view override returns (uint256) {
-        return mainVault.maxDeposit(address(this));
+        return mainVault().maxDeposit(address(this));
     }
 
     /**
@@ -238,7 +259,7 @@ contract UltraFeeder is BaseControlledAsyncRedeem, UUPSUpgradeable {
      * @return The maximum amount of shares that can be minted
      */
     function maxMint(address) public view override returns (uint256) {
-        return mainVault.maxMint(address(this));
+        return mainVault().maxMint(address(this));
     }
 
     /*//////////////////////////////////////////////////////////////
