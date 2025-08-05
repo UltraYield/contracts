@@ -64,15 +64,13 @@ contract UltraFeeder is BaseControlledAsyncRedeem, UUPSUpgradeable {
      * @param _name The name of the vault token
      * @param _symbol The symbol of the vault token
      * @param _mainVault The UltraVault to deposit into
-     * @param _requestQueue Request queue for async redeems
      */
     function initialize(
         address _mainVault,
         address _owner,
         address _asset,
         string memory _name,
-        string memory _symbol,
-        address _requestQueue
+        string memory _symbol
     ) external initializer {
         if (address(_mainVault) == address(0)) revert InvalidMainVault();
         
@@ -82,7 +80,7 @@ contract UltraFeeder is BaseControlledAsyncRedeem, UUPSUpgradeable {
         // Validate that the main vault's asset matches our asset
         require(mainVault_.asset() == _asset, AssetMismatch());
         
-        super.initialize(_owner, _asset, _name, _symbol, mainVault_.rateProvider(), _requestQueue);
+        super.initialize(_owner, _asset, _name, _symbol, mainVault_.rateProvider());
         _pause();
     }
 
@@ -166,9 +164,9 @@ contract UltraFeeder is BaseControlledAsyncRedeem, UUPSUpgradeable {
         
         // Correct the claimable redeem amounts to use the actual assets received
         ClaimableRedeem memory claimableRedeem = 
-            requestQueue().getClaimableRedeem(controller, address(this), asset);
+            _getClaimableRedeem(controller, asset);
         claimableRedeem.assets -= withdrawalFee;
-        requestQueue().setClaimableRedeem(controller, address(this), asset, claimableRedeem);
+        _setClaimableRedeem(controller, asset, claimableRedeem);
     }
 
 

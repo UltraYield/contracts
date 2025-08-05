@@ -17,7 +17,6 @@ bytes32 constant ULTRA_VAULT_STORAGE_LOCATION = 0x4a2c313ed01a3f9b3ba2e7d99f5ac7
 /// @param _name Vault name
 /// @param _symbol Vault symbol
 /// @param _rateProvider oracle for assets exchange rate
-/// @param _requestQueue withdrawal request queue
 /// @param _feeRecipient Fee recipient
 /// @param _fees Fee on the vault
 /// @param _oracle The oracle to use for pricing
@@ -28,7 +27,6 @@ struct UltraVaultInitParams {
     string name;
     string symbol;
     address rateProvider;
-    address requestQueue;
     address feeRecipient;
     Fees fees;
     address oracle;
@@ -107,7 +105,6 @@ contract UltraVault is AsyncVault, UUPSUpgradeable {
             params.name,
             params.symbol,
             params.rateProvider,
-            params.requestQueue,
             params.feeRecipient,
             params.fees
         );
