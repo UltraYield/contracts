@@ -112,110 +112,90 @@ contract UltraFeeder is BaseControlledAsyncRedeem, UUPSUpgradeable {
     ///////////////////////////////
 
     /// @dev After deposit hook - collect fees and send funds to fundsHolder
-    function afterDeposit(address asset, uint256 assets, uint256 shares) internal override {
+    function afterDeposit(address _asset, uint256 _assets, uint256 _shares) internal override {
         // Approve main vault to spend assets
-        SafeERC20.safeIncreaseAllowance(IERC20(asset), address(mainVault()), assets);
+        SafeERC20.safeIncreaseAllowance(IERC20(_asset), address(mainVault()), _assets);
 
-        uint256 mainShares = mainVault().depositAsset(asset, assets, address(this));
-        require(mainShares == shares, ShareNumberMismatch());
+        uint256 mainShares = mainVault().depositAsset(_asset, _assets, address(this));
+        require(mainShares == _shares, ShareNumberMismatch());
     }
 
     /// @dev Hook for inheriting contracts after request redeem
     function beforeRequestRedeem(
-        address asset,
-        uint256 shares,
+        address _asset,
+        uint256 _shares,
         address, // controller
         address  // owner
     ) internal override {
         // Approve main vault to spend it's shares
-        IUltraVault mainVault_ = mainVault();
-        SafeERC20.safeIncreaseAllowance(IERC20(address(mainVault_)), address(mainVault_), shares);
+        IUltraVault _mainVault = mainVault();
+        SafeERC20.safeIncreaseAllowance(IERC20(address(_mainVault)), address(_mainVault), _shares);
 
         // Request redeem from main vault
-        mainVault_.requestRedeemOfAsset(asset, shares, address(this), address(this));
+        _mainVault.requestRedeemOfAsset(_asset, _shares, address(this), address(this));
     }
 
     /// @dev Before fulfill redeem - transfer funds from fundsHolder to vault
     /// @dev "assets" will already be correct given the token user requested
-    function beforeFulfillRedeem(address asset, uint256 assets, uint256 shares) internal override {
+    function beforeFulfillRedeem(address _asset, uint256 _assets, uint256 _shares) internal override {
         IUltraVault mainVault_ = mainVault();
         // Fulfill redeem in main vault. Returns asset units
-        mainVault_.fulfillRedeemOfAsset(asset, shares, address(this));
-        uint256 mainAssetsClaimed = mainVault_.redeemAsset(asset, shares, address(this), address(this));
+        mainVault_.fulfillRedeemOfAsset(_asset, _shares, address(this));
+        uint256 mainAssetsClaimed = mainVault_.redeemAsset(_asset, _shares, address(this), address(this));
 
         // Calculate the expected assets after withdrawal fees from the underlying vault
         Fees memory fees = mainVault_.fees();
-        uint256 withdrawalFee = fees.withdrawalFee;
-        uint256 expectedAssetsAfterFees = assets - (assets * withdrawalFee / 1e18);
-
-        require(mainAssetsClaimed == expectedAssetsAfterFees, ShareNumberMismatch());
+        uint256 withdrawalFee = _assets * fees.withdrawalFee / 1e18;
+        uint256 expectedAssetsAfterFees = _assets - withdrawalFee;
+        require(mainAssetsClaimed == expectedAssetsAfterFees, AssetMismatch());
     }
 
     /// @dev Hook for inheriting contracts after fulfill redeem
     /// @dev Correct claimable redeem amounts to account for underlying vault fees
     function afterFulfillRedeem(
-        address asset,
-        uint256 assets,
+        address _asset,
+        uint256 _assets,
         uint256, // shares
-        address controller
+        address _controller
     ) internal override {
         // The base implementation has already updated claimableRedeem.assets += assets
         // We need to correct it to use the actual assets received after fees
         Fees memory fees = mainVault().fees();
-        uint256 withdrawalFee = assets * fees.withdrawalFee / 1e18;
+        uint256 withdrawalFee = _assets * fees.withdrawalFee / 1e18;
         
         // Correct the claimable redeem amounts to use the actual assets received
-        ClaimableRedeem memory claimableRedeem = 
-            _getClaimableRedeem(controller, asset);
+        ClaimableRedeem memory claimableRedeem = _getClaimableRedeem(_controller, _asset);
         claimableRedeem.assets -= withdrawalFee;
-        _setClaimableRedeem(controller, asset, claimableRedeem);
+        _setClaimableRedeem(_controller, _asset, claimableRedeem);
     }
 
 
     /// @dev In async vaults it's a privileged function
     function _fulfillRedeemOfAsset(
-        address asset,
-        uint256 assets,
-        uint256 shares,
-        address controller
+        address _asset,
+        uint256 _assets,
+        uint256 _shares,
+        address _controller
     ) internal override onlyRoleOrOwner(OPERATOR_ROLE) returns (uint256) {
-        return super._fulfillRedeemOfAsset(asset, assets, shares, controller);
+        return super._fulfillRedeemOfAsset(_asset, _assets, _shares, _controller);
     }
 
     /// @notice Cancel redeem request for controller and propagate to underlying vault
-    /// @param controller Controller address
-    /// @dev Transfers pending shares back to msg.sender and cancels underlying vault request
-    function cancelRedeemRequest(address controller) external virtual override {
-        cancelRedeemRequestOfAsset(asset(), controller, msg.sender);
-    }
-
-    /// @notice Cancel redeem request for controller and propagate to underlying vault
-    /// @param controller Controller address
-    /// @param receiver Share recipient
+    /// @param _asset Asset
+    /// @param _controller Controller address
+    /// @param _receiver Share recipient
     /// @dev Transfers pending shares back to receiver and cancels underlying vault request
-    function cancelRedeemRequest(
-        address controller,
-        address receiver
-    ) public virtual override {
-        cancelRedeemRequestOfAsset(asset(), controller, receiver);
-    }
-
-    /// @notice Cancel redeem request for controller and propagate to underlying vault
-    /// @param asset Asset
-    /// @param controller Controller address
-    /// @param receiver Share recipient
-    /// @dev Transfers pending shares back to receiver and cancels underlying vault request
-    function cancelRedeemRequestOfAsset(
-        address asset,
-        address controller,
-        address receiver
-    ) public virtual override {
+    function _cancelRedeemRequestOfAsset(
+        address _asset,
+        address _controller,
+        address _receiver
+    ) internal override {
         // First cancel the request in the underlying vault
         // This ensures that the underlying vault's pending redeem is also cleared
-        mainVault().cancelRedeemRequestOfAsset(asset, address(this), address(this));
+        mainVault().cancelRedeemRequestOfAsset(_asset, address(this), address(this));
         
         // Then call the internal implementation to handle the feeder's cancellation
-        _cancelRedeemRequestOfAsset(asset, controller, receiver);
+        super._cancelRedeemRequestOfAsset(_asset, _controller, _receiver);
     }
 
     ////////////////////////
@@ -253,58 +233,58 @@ contract UltraFeeder is BaseControlledAsyncRedeem, UUPSUpgradeable {
     /////////////////////
 
     /// @notice Helper to deposit assets for msg.sender upon referral
-    /// @param assets Amount to deposit
-    /// @param referralId id of referral
+    /// @param _assets Amount to deposit
+    /// @param _referralId id of referral
     /// @return shares Amount of shares received
     function deposit(
-        uint256 assets,
-        string calldata referralId
+        uint256 _assets,
+        string calldata _referralId
     ) external returns (uint256) {
-        return _depositAssetWithReferral(asset(), assets, msg.sender, referralId);
+        return _depositAssetWithReferral(asset(), _assets, msg.sender, _referralId);
     }
 
     /// @notice Helper to deposit assets for msg.sender upon referral specifying receiver
-    /// @param assets Amount to deposit
-    /// @param receiver receiver of deposit
-    /// @param referralId id of referral
+    /// @param _assets Amount to deposit
+    /// @param _receiver receiver of deposit
+    /// @param _referralId id of referral
     /// @return shares Amount of shares received
     function deposit(
-        uint256 assets,
-        address receiver,
-        string calldata referralId
+        uint256 _assets,
+        address _receiver,
+        string calldata _referralId
     ) external returns (uint256) {
-        return _depositAssetWithReferral(asset(), assets, receiver, referralId);
+        return _depositAssetWithReferral(asset(), _assets, _receiver, _referralId);
     }
 
     /// @notice Helper to deposit particular asset for msg.sender upon referral
-    /// @param asset Asset to deposit
-    /// @param assets Amount to deposit
-    /// @param receiver receiver of deposit
-    /// @param referralId id of referral
+    /// @param _asset Asset to deposit
+    /// @param _assets Amount to deposit
+    /// @param _receiver receiver of deposit
+    /// @param _referralId id of referral
     /// @return shares Amount of shares received
     function depositAsset(
-        address asset,
-        uint256 assets,
-        address receiver,
-        string calldata referralId
+        address _asset,
+        uint256 _assets,
+        address _receiver,
+        string calldata _referralId
     ) external returns (uint256) {
-        return _depositAssetWithReferral(asset, assets, receiver, referralId);
+        return _depositAssetWithReferral(_asset, _assets, _receiver, _referralId);
     }
 
     /// @notice Internal helper to deposit assets for msg.sender upon referral
-    /// @param asset Asset to deposit
-    /// @param assets Amount to deposit
-    /// @param receiver receiver of deposit
-    /// @param referralId id of referral
+    /// @param _asset Asset to deposit
+    /// @param _assets Amount to deposit
+    /// @param _receiver receiver of deposit
+    /// @param _referralId id of referral
     /// @return shares Amount of shares received
     function _depositAssetWithReferral(
-        address asset,
-        uint256 assets,
-        address receiver,
-        string calldata referralId
+        address _asset,
+        uint256 _assets,
+        address _receiver,
+        string calldata _referralId
     ) internal returns (uint256 shares) {
-        shares = _depositAsset(asset, assets, receiver);
-        emit Referral(referralId, msg.sender, shares);
+        shares = _depositAsset(_asset, _assets, _receiver);
+        emit Referral(_referralId, msg.sender, shares);
         return shares;
     }
 
