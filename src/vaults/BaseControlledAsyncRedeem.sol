@@ -682,6 +682,7 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, UltraQueue, IERC7540
         SafeERC20.safeTransferFrom(IERC20(this), _owner, address(this), _shares);
 
         emit RedeemRequested(_controller, _owner, REQUEST_ID, msg.sender, _shares);
+        
         return REQUEST_ID;
     }
 
@@ -692,7 +693,7 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, UltraQueue, IERC7540
     /// @notice Cancel redeem request for controller
     /// @param controller Controller address
     /// @dev Transfers pending shares back to msg.sender
-    function cancelRedeemRequest(address controller) external virtual {
+    function cancelRedeemRequest(address controller) external {
         return _cancelRedeemRequestOfAsset(asset(), controller, msg.sender);
     }
 
@@ -705,7 +706,7 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, UltraQueue, IERC7540
         address _asset,
         address _controller,
         address _receiver
-    ) external virtual {
+    ) external {
         return _cancelRedeemRequestOfAsset(_asset, _controller, _receiver);
     }
 
@@ -716,7 +717,7 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, UltraQueue, IERC7540
     function cancelRedeemRequest(
         address _controller,
         address _receiver
-    ) public virtual {
+    ) public {
         return _cancelRedeemRequestOfAsset(asset(), _controller, _receiver);
     }
 
@@ -726,18 +727,16 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, UltraQueue, IERC7540
         address _receiver
     ) internal virtual checkAccess(_controller) {
         // Get the pending shares
-        PendingRedeem memory pendingRedeem = 
-            _getPendingRedeem(_controller, _asset);
+        PendingRedeem memory pendingRedeem = _getPendingRedeem(_controller, _asset);
         uint256 shares = pendingRedeem.shares;
-
         require(shares != 0, NothingToRedeem());
 
+        // Update pending redeem
         pendingRedeem.shares = 0;
         pendingRedeem.requestTime = 0;
-
         _setPendingRedeem(_controller, _asset, pendingRedeem);
 
-        // Return pending shares
+        // Send pending shares from vault to receiver
         SafeERC20.safeTransfer(IERC20(address(this)), _receiver, shares);
 
         emit RedeemRequestCanceled(_controller, _receiver, shares);
@@ -782,14 +781,10 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, UltraQueue, IERC7540
         uint256 _shares,
         address _controller
     ) internal virtual returns (uint256) {
-        if (_assets == 0 || _shares == 0) 
-            revert InvalidRedeemCall();
+        require(_assets != 0 && _shares != 0, InvalidRedeemCall());
 
-        PendingRedeem memory pendingRedeem = 
-            _getPendingRedeem(_controller, _asset);
-        ClaimableRedeem memory claimableRedeem =
-            _getClaimableRedeem(_controller, _asset);
-
+        PendingRedeem memory pendingRedeem = _getPendingRedeem(_controller, _asset);
+        ClaimableRedeem memory claimableRedeem = _getClaimableRedeem(_controller, _asset);
         require(_shares <= pendingRedeem.shares, NotEnoughPendingShares());
 
         // Before fulfill redeem hook
@@ -799,7 +794,7 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, UltraQueue, IERC7540
         claimableRedeem.assets += _assets;
         pendingRedeem.shares -= _shares;
 
-        // Reset the requestTime if redeem is full
+        // Reset the request time if redeem is full
         if (pendingRedeem.shares == 0) 
             pendingRedeem.requestTime = 0;
 
@@ -842,7 +837,6 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, UltraQueue, IERC7540
         require(block.timestamp >= proposal.timestamp + ADDRESS_UPDATE_TIMELOCK, CanNotAcceptRateProviderYet());
         require(block.timestamp <= proposal.timestamp + MAX_ADDRESS_UPDATE_WAIT, RateProviderUpdateExpired());
 
-        
         $.rateProvider = IUltraVaultRateProvider(proposal.addr);
         delete $.proposedRateProvider;
         emit RateProviderUpdated(address($.rateProvider), proposal.addr);
