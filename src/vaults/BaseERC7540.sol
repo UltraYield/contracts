@@ -89,8 +89,8 @@ abstract contract BaseERC7540 is
         return _getBaseERC7540Storage().hasRole[role][account];
     }
 
-    function isOperator(address owner, address operator) public view returns (bool) {
-        return _getBaseERC7540Storage().isOperator[owner][operator];
+    function isOperator(address _owner, address _operator) public view returns (bool) {
+        return _getBaseERC7540Storage().isOperator[_owner][_operator];
     }
 
     /// @notice Set operator approval status
@@ -107,24 +107,6 @@ abstract contract BaseERC7540 is
             emit OperatorSet(msg.sender, operator, approved);
             success = true;
         }
-    }
-
-    /// @inheritdoc ERC4626Upgradeable
-    function deposit(uint256 assets, address receiver) public virtual override returns (uint256) {
-        uint256 shares = super.deposit(assets, receiver);
-        afterDeposit(asset(), assets, shares);
-        return shares;
-    }
-
-    /// @inheritdoc ERC4626Upgradeable
-    function withdraw(
-        uint256 assets,
-        address receiver,
-        address owner
-    ) public virtual override returns (uint256) {
-        uint256 shares = previewWithdraw(assets);
-        beforeWithdraw(asset(), assets, shares);
-        return super.withdraw(assets, receiver, owner);
     }
 
     //////////////
@@ -170,14 +152,6 @@ abstract contract BaseERC7540 is
     function unpause() external override onlyRoleOrOwner(PAUSER_ROLE) {
         _unpause();
     }
-
-    ///////////
-    // Hooks //
-    ///////////
-
-    function beforeWithdraw(address asset, uint256 assets, uint256 shares) internal virtual {}
-
-    function afterDeposit(address asset, uint256 assets, uint256 shares) internal virtual {}
 
     ////////////
     // ERC165 //
