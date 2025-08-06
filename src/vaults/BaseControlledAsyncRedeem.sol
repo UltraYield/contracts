@@ -1,17 +1,31 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity 0.8.28;
 
-import { BaseERC7540 } from "./BaseERC7540.sol";
+import { BaseERC7540 } from "src/vaults/BaseERC7540.sol";
 import { IERC7540Redeem } from "ERC-7540/interfaces/IERC7540.sol";
 import { FixedPointMathLib } from "src/utils/FixedPointMathLib.sol";
 import { SafeERC20, IERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import { IUltraQueue, PendingRedeem, ClaimableRedeem } from "../interfaces/IUltraQueue.sol";
-import { IUltraVaultRateProvider, AssetData } from "src/interfaces/IUltraVaultRateProvider.sol";
+import { PendingRedeem, ClaimableRedeem } from "src/interfaces/IUltraQueue.sol";
+import { IUltraVaultRateProvider } from "src/interfaces/IUltraVaultRateProvider.sol";
 import { AddressUpdateProposal } from "src/utils/AddressUpdates.sol";
 import { UltraQueue } from "src/vaults/accounting/UltraQueue.sol";
 
 // keccak256(abi.encode(uint256(keccak256("ultrayield.storage.BaseControlledAsyncRedeem")) - 1)) & ~bytes32(uint256(0xff));
 bytes32 constant BASE_ASYNC_REDEEM_STORAGE_LOCATION = 0xaf7389673351d5ab654ae6fb9b324c897ebef437a969ec1524dcc6c7b5ca5400;
+
+/// @dev Initialization parameters for BaseControlledAsyncRedeem
+struct BaseControlledAsyncRedeemInitParams {
+    // Owner of the vault
+    address owner;
+    // Underlying asset address
+    address asset;
+    // Vault name
+    string name;
+    // Vault symbol
+    string symbol;
+    // Oracle for assets exchange rate
+    address rateProvider;
+}
 
 /// @title BaseControlledAsyncRedeem
 /// @notice Base contract for controlled async redeem flows
@@ -91,22 +105,12 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, UltraQueue, IERC7540
     //////////
 
     /// @notice Initialize vault with basic parameters
-    /// @param _owner Owner of the vault
-    /// @param _asset Underlying asset address
-    /// @param _name Vault name
-    /// @param _symbol Vault symbol
-    /// @param _rateProvider oracle for assets exchange rate
+    /// @param params Struct wrapping initialization parameters
     function initialize(
-        address _owner,
-        address _asset,
-        string memory _name,
-        string memory _symbol,
-        address _rateProvider
+        BaseControlledAsyncRedeemInitParams memory params
     ) public virtual onlyInitializing {
-        super.initialize(_owner, _asset, _name, _symbol);
-
-        BaseAsyncRedeemStorage storage $ = _getBaseAsyncRedeemStorage();
-        $.rateProvider = IUltraVaultRateProvider(_rateProvider);
+        super.initialize(params.owner, params.asset, params.name, params.symbol);
+        _getBaseAsyncRedeemStorage().rateProvider = IUltraVaultRateProvider(params.rateProvider);
     }
 
     /////////////////
@@ -121,339 +125,289 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, UltraQueue, IERC7540
         return _getBaseAsyncRedeemStorage().proposedRateProvider;
     }
 
+    //////////////////////
+    // Asset Conversion //
+    //////////////////////
+
     function convertToUnderlying(
-        address asset,
-        uint256 assets
+        address _asset,
+        uint256 _assets
     ) public view virtual returns (uint256 baseAssets) {
         // If asset is the same as base asset, no conversion needed
-        if (asset == this.asset()) {
-            return assets;
+        if (_asset == this.asset()) {
+            return _assets;
         }
-
         // Call reverts if asset not supported
-        return rateProvider().convertToUnderlying(asset, assets);
+        return rateProvider().convertToUnderlying(_asset, _assets);
     }
 
     function convertFromUnderlying(
-        address asset,
-        uint256 baseAssets
+        address _asset,
+        uint256 _baseAssets
     ) public view virtual returns (uint256 assets) {
         // If asset is the same as base asset, no conversion needed
-        if (asset == this.asset()) {
-            return baseAssets;
+        if (_asset == this.asset()) {
+            return _baseAssets;
         }
-
         // Call reverts if asset not supported
-        return rateProvider().convertFromUnderlying(asset, baseAssets);
+        return rateProvider().convertFromUnderlying(_asset, _baseAssets);
     }
 
-    //////////////
-    // ERC4626 //
-    //////////////
+    ////////////////////
+    // Deposit & Mint //
+    ////////////////////
 
-    /// @notice Deposit assets for receiver
-    /// @param assets Amount to deposit
-    /// @param receiver Share recipient
+    /// @notice Deposit exact number of assets in base asset and mint shares to receiver
+    /// @param _assets Amount of assets to deposit
+    /// @param _receiver Share receiver
     /// @return shares Amount of shares received
-    /// @dev Synchronous function, reverts if paused
-    /// @dev Uses claimable balances before transferring assets
+    /// @dev Reverts if paused
     function deposit(
-        uint256 assets,
-        address receiver
-    ) public virtual override returns (uint256 shares) {
-        return _depositAsset(asset(), assets, receiver);
+        uint256 _assets,
+        address _receiver
+    ) public override returns (uint256 shares) {
+        return _depositAsset(asset(), _assets, _receiver);
     }
 
-    /// @notice Deposit assets for receiver
-    /// @param asset Asset to deposit
-    /// @param assets Amount to deposit
-    /// @param receiver Share recipient
+    /// @notice Deposit exact number of assets in specific asset and mint shares to receiver
+    /// @param _asset Asset to deposit in
+    /// @param _assets Amount of assets to deposit
+    /// @param _receiver Share receiver
     /// @return shares Amount of shares received
-    /// @dev Synchronous function, reverts if paused
-    /// @dev Uses claimable balances before transferring assets
+    /// @dev Reverts if paused
     function depositAsset(
-        address asset,
-        uint256 assets,
-        address receiver
+        address _asset,
+        uint256 _assets,
+        address _receiver
     ) public returns (uint256 shares) {
-        return _depositAsset(asset, assets, receiver);
+        return _depositAsset(_asset, _assets, _receiver);
     }
 
-    /// @notice Deposit assets for receiver
-    /// @param asset Asset to deposit
-    /// @param assets Amount to deposit
-    /// @param receiver Share recipient
-    /// @return shares Amount of shares received
-    /// @dev Synchronous function, reverts if paused
-    /// @dev Uses claimable balances before transferring assets
+    /// @dev Internal function for depositing exact number of `assets` in `asset` and minting shares to `receiver`
+    /// @dev Reverts if paused
+    /// @dev `receiver` is validated to be non-zero within ERC20Upgradeable
     function _depositAsset(
-        address asset,
-        uint256 assets,
-        address receiver
-    ) internal virtual whenNotPaused returns (uint256 shares) {
-        shares = previewDepositForAsset(asset, assets);
-
-        if (shares == 0)
-            revert EmptyDeposit();
-
-        // Pre-deposit hook - use the actual asset amount being transferred
-        beforeDeposit(asset, assets, shares);
-
-        // Transfer before mint to avoid reentering
-        SafeERC20.safeTransferFrom(
-            IERC20(asset),
-            msg.sender,
-            address(this),
-            assets
-        );
-
-        _mint(receiver, shares);
-
-        emit Deposit(msg.sender, receiver, assets, shares);
-
-        // After-deposit hook - use the actual asset amount that was transferred
-        afterDeposit(asset, assets, shares);
+        address _asset,
+        uint256 _assets,
+        address _receiver
+    ) internal whenNotPaused returns (uint256 shares) {
+        shares = previewDepositForAsset(_asset, _assets);
+        _performDeposit(_asset, _assets, shares, _receiver);
     }
 
-    /// @notice Mint shares for receiver
-    /// @param shares Amount to mint
-    /// @param receiver Share recipient
+    /// @notice Mint exact number of shares to receiver and deposit in base asset
+    /// @param _shares Amount of shares to mint
+    /// @param _receiver Share receiver
     /// @return assets Amount of assets required
-    /// @dev Synchronous function, reverts if paused
-    /// @dev Uses claimable balances before minting shares
+    /// @dev Reverts if paused
     function mint(
-        uint256 shares,
-        address receiver
-    ) public virtual override returns (uint256 assets) {
-        return _mintWithAsset(asset(), shares, receiver);
+        uint256 _shares,
+        address _receiver
+    ) public override returns (uint256 assets) {
+        return _mintWithAsset(asset(), _shares, _receiver);
     }
 
-    /// @notice Mint shares for receiver with specific asset
-    /// @param asset Asset to mint with
-    /// @param shares Amount to mint
-    /// @param receiver Share recipient
+    /// @notice Mint exact number of shares to receiver and deposit in specific asset
+    /// @param _asset Asset to deposit in
+    /// @param _shares Amount of shares to mint
+    /// @param _receiver Share receiver
     /// @return assets Amount of assets required
-    /// @dev Synchronous function, reverts if paused
-    /// @dev Uses claimable balances before minting shares
+    /// @dev Reverts if paused
     function mintWithAsset(
-        address asset,
-        uint256 shares,
-        address receiver
+        address _asset,
+        uint256 _shares,
+        address _receiver
     ) public returns (uint256 assets) {
-        return _mintWithAsset(asset, shares, receiver);
+        return _mintWithAsset(_asset, _shares, _receiver);
     }
 
-    /// @dev Mint with asset
+    /// @dev Internal function for minting exactly `shares` to `receiver` and depositing in `asset`
+    /// @dev Reverts if paused
+    /// @dev `receiver` is validated to be non-zero within ERC20Upgradeable
     function _mintWithAsset(
-        address asset,
-        uint256 shares,
-        address receiver
-    ) internal virtual whenNotPaused returns (uint256 assets) {
+        address _asset,
+        uint256 _shares,
+        address _receiver
+    ) internal whenNotPaused returns (uint256 assets) {
+        assets = previewMintForAsset(_asset, _shares);
+        _performDeposit(_asset, assets, _shares, _receiver);
+    }
 
-        if (shares == 0)
-            revert NothingToMint();
-
-        assets = previewMintForAsset(asset, shares);
+    function _performDeposit(
+        address _asset,
+        uint256 _assets,
+        uint256 _shares,
+        address _receiver
+    ) internal {
+        // Checks
+        require(_assets != 0, EmptyDeposit());
+        require(_shares != 0, NothingToMint());
 
         // Pre-deposit hook - use the actual asset amount being transferred
-        beforeDeposit(asset, assets, shares);
+        beforeDeposit(_asset, _assets, _shares);
 
         // Need to transfer before minting or ERC777s could reenter
         SafeERC20.safeTransferFrom(
-            IERC20(asset),
+            IERC20(_asset),
             msg.sender,
             address(this),
-            assets
+            _assets
         );
 
-        _mint(receiver, shares);
+        // Mint shares to receiver
+        _mint(_receiver, _shares);
 
-        emit Deposit(msg.sender, receiver, assets, shares);
+        // Emit event
+        emit Deposit(msg.sender, _receiver, _assets, _shares);
 
         // After-deposit hook - use the actual asset amount that was transferred
-        afterDeposit(asset, assets, shares);
+        afterDeposit(_asset, _assets, _shares);
     }
 
+    ///////////////////////
+    // Withdraw & Redeem //
+    ///////////////////////
+
     /// @notice Withdraw assets from fulfilled redeem requests
-    /// @param assets Amount to withdraw
-    /// @param receiver Asset recipient
-    /// @param controller Controller address
+    /// @param _assets Amount to withdraw
+    /// @param _receiver Asset recipient
+    /// @param _controller Controller address
     /// @return shares Amount of shares burned
     /// @dev Asynchronous function, works when paused
     /// @dev Caller must be controller or operator
     /// @dev Requires sufficient claimable assets
     function withdraw(
-        uint256 assets,
-        address receiver,
-        address controller
-    ) public virtual override returns (uint256 shares) {
-        return _withdrawAsset(asset(), assets, receiver, controller);
+        uint256 _assets,
+        address _receiver,
+        address _controller
+    ) public override returns (uint256 shares) {
+        return _withdrawAsset(asset(), _assets, _receiver, _controller);
     }
 
     /// @notice Withdraw assets from fulfilled redeem requests
-    /// @param asset Asset
-    /// @param assets Amount to withdraw
-    /// @param receiver Asset recipient
-    /// @param controller Controller address
+    /// @param _asset Asset
+    /// @param _assets Amount to withdraw
+    /// @param _receiver Asset recipient
+    /// @param _controller Controller address
     /// @return shares Amount of shares burned
     /// @dev Asynchronous function, works when paused
     /// @dev Caller must be controller or operator
     /// @dev Requires sufficient claimable assets
     function withdrawAsset(
-        address asset,
-        uint256 assets,
-        address receiver,
-        address controller
-    ) public virtual returns (uint256 shares) {
-        return _withdrawAsset(asset, assets, receiver, controller);
+        address _asset,
+        uint256 _assets,
+        address _receiver,
+        address _controller
+    ) public returns (uint256 shares) {
+        return _withdrawAsset(_asset, _assets, _receiver, _controller);
     }
 
     function _withdrawAsset(
-        address asset,
-        uint256 assets,
-        address receiver,
-        address controller
-    ) internal virtual checkAccess(controller) returns (uint256 shares) {
-        require(assets != 0, NothingToWithdraw());
+        address _asset,
+        uint256 _assets,
+        address _receiver,
+        address _controller
+    ) internal whenNotPaused checkAccess(_controller) returns (uint256 shares) {
+        require(_assets != 0, NothingToWithdraw());
 
         // Validate that requested assets don't exceed claimable assets
-        ClaimableRedeem memory claimableRedeem = _getClaimableRedeem(controller, asset);
-        require(assets <= claimableRedeem.assets, InsufficientBalance());
+        ClaimableRedeem memory claimableRedeem = _getClaimableRedeem(_controller, _asset);
+        require(_assets <= claimableRedeem.assets, InsufficientBalance());
         
         // Calculate shares to burn based on the claimable redeem ratio
-        shares = assets.mulDivUp(
-            claimableRedeem.shares,
-            claimableRedeem.assets
-        );
+        shares = _assets == claimableRedeem.assets 
+            ? claimableRedeem.shares 
+            : _assets.mulDivUp(claimableRedeem.shares, claimableRedeem.assets);
+        require(shares != 0, NothingToRedeem());
 
-        // Handle - pass asset units directly since claimableRedeem.assets is in asset units
-        _withdrawClaimableBalanceForAsset(asset, controller, assets, claimableRedeem);
-
-        // Before-withdrawal hook - use the actual asset amount being withdrawn
-        beforeWithdraw(asset, assets, shares);
-
-        // Transfer assets to the receiver
-        SafeERC20.safeTransfer(IERC20(asset), receiver, assets);
-
-        emit Withdraw(msg.sender, receiver, controller, assets, shares);
-
-        // After-withdrawal hook - use the actual asset amount that was withdrawn
-        afterWithdraw(asset, assets, shares);
-    }
-
-    function _withdrawClaimableBalanceForAsset(
-        address asset,
-        address controller,
-        uint256 assets,
-        ClaimableRedeem memory claimableRedeem
-    ) internal {
-        // Calculate shares to burn based on the claimable redeem ratio
-        uint256 sharesToBurn = assets.mulDivUp(
-            claimableRedeem.shares,
-            claimableRedeem.assets
-        );
-
-        claimableRedeem.assets = claimableRedeem.assets > assets ? claimableRedeem.assets - assets : 0;
-        claimableRedeem.shares = 
-            claimableRedeem.shares > sharesToBurn ?
-            claimableRedeem.shares - sharesToBurn :
-            0;
-        
-        _setClaimableRedeem(controller, asset, claimableRedeem);
+        // Execute withdraw
+        _performWithdraw(_asset, _assets, shares, _receiver, _controller);
     }
 
     /// @notice Redeem shares from fulfilled requests
-    /// @param shares Amount to redeem
-    /// @param receiver Asset recipient
-    /// @param controller Controller address
+    /// @param _shares Amount to redeem
+    /// @param _receiver Asset recipient
+    /// @param _controller Controller address
     /// @return assets Amount of assets received
     /// @dev Asynchronous function, works when paused
     /// @dev Caller must be controller or operator
     /// @dev Requires sufficient claimable shares
     function redeem(
-        uint256 shares,
-        address receiver,
-        address controller
-    ) public virtual override returns (uint256 assets) {
-        return _redeemAsset(asset(), shares, receiver, controller);
+        uint256 _shares,
+        address _receiver,
+        address _controller
+    ) public override returns (uint256 assets) {
+        return _redeemAsset(asset(), _shares, _receiver, _controller);
     }
 
     /// @notice Redeem shares from fulfilled requests
-    /// @param asset Asset
-    /// @param shares Amount to redeem
-    /// @param receiver Asset recipient
-    /// @param controller Controller address
+    /// @param _asset Asset
+    /// @param _shares Amount to redeem
+    /// @param _receiver Asset recipient
+    /// @param _controller Controller address
     /// @return assets Amount of assets received
     /// @dev Asynchronous function, works when paused
     /// @dev Caller must be controller or operator
     /// @dev Requires sufficient claimable shares
     function redeemAsset(
-        address asset,
-        uint256 shares,
-        address receiver,
-        address controller
-    ) public virtual returns (uint256 assets) {
+        address _asset,
+        uint256 _shares,
+        address _receiver,
+        address _controller
+    ) public returns (uint256 assets) {
         // Shares are already in vault share units, no conversion needed
-        return _redeemAsset(asset, shares, receiver, controller);
+        return _redeemAsset(_asset, _shares, _receiver, _controller);
     }
 
     function _redeemAsset(
-        address asset,
-        uint256 shares,
-        address receiver,
-        address controller
-    ) internal virtual checkAccess(controller) returns (uint256 assets) {
-        require(shares != 0, NothingToRedeem());
-
-        ClaimableRedeem memory claimableRedeem =
-            _getClaimableRedeem(controller, asset);
+        address _asset,
+        uint256 _shares,
+        address _receiver,
+        address _controller
+    ) internal whenNotPaused checkAccess(_controller) returns (uint256 assets) {
+        require(_shares != 0, NothingToRedeem());
         
         // Calculate assets directly in asset units
-        assets = shares.mulDivDown(
-            claimableRedeem.assets,
-            claimableRedeem.shares
-        );
+        ClaimableRedeem memory claimableRedeem = _getClaimableRedeem(_controller, _asset);
+        require(_shares <= claimableRedeem.shares, InsufficientBalance());
+        assets = _shares == claimableRedeem.shares 
+            ? claimableRedeem.assets
+            : _shares.mulDivDown(claimableRedeem.assets, claimableRedeem.shares);
+        require(assets != 0, NothingToWithdraw());
 
-        // Modify the claimableRedeem state accordingly
-        _redeemClaimableBalanceForAsset(asset, controller, shares, claimableRedeem);
-
-        // Before-withdrawal hook - use asset units for the hook
-        beforeWithdraw(asset, assets, shares);
-
-        _setClaimableRedeem(controller, asset, claimableRedeem);
-
-        // Transfer assets to the receiver
-        SafeERC20.safeTransfer(IERC20(asset), receiver, assets);
-
-        emit Withdraw(msg.sender, receiver, controller, assets, shares);
-
-        // After-withdrawal hook - use asset units for the hook
-        afterWithdraw(asset, assets, shares);
+        // Execute withdraw
+        _performWithdraw(_asset, assets, _shares, _receiver, _controller);
     }
 
-    /// @notice Update claimable balance after redeem
-    /// @param shares Shares to redeem
-    /// @param claimableRedeem Claimable redeem of the user
-    /// @dev Handles precision loss in partial claims
-    function _redeemClaimableBalanceForAsset(
-        address asset,
-        address controller,
-        uint256 shares,
-        ClaimableRedeem memory claimableRedeem
+    /// @dev Internal function for performing a withdraw
+    /// @param _asset Asset to withdraw assets in
+    /// @param _assets Amount of assets to withdraw
+    /// @param _shares Amount of shares to burn
+    /// @param _receiver Asset recipient
+    /// @param _controller Controller address
+    function _performWithdraw(
+        address _asset,
+        uint256 _assets,
+        uint256 _shares,
+        address _receiver,
+        address _controller
     ) internal {
-        // Calculate assets to deduct in asset units
-        uint256 assetsRoundedUp = shares.mulDivUp(
-            claimableRedeem.assets,
-            claimableRedeem.shares
-        );
+        // Before-withdrawal hook - use asset units for the hook
+        beforeWithdraw(_asset, _assets, _shares);
 
-        claimableRedeem.assets = 
-            claimableRedeem.assets > assetsRoundedUp ?
-            claimableRedeem.assets - assetsRoundedUp :
-            0;
-        claimableRedeem.shares -= shares;
+        // Update claimable redeem
+        ClaimableRedeem memory claimableRedeem = _getClaimableRedeem(_controller, _asset);
+        claimableRedeem.assets -= _assets;
+        claimableRedeem.shares -= _shares;
+        _setClaimableRedeem(_controller, _asset, claimableRedeem);
 
-        _setClaimableRedeem(controller, asset, claimableRedeem);
+        // Transfer assets to the receiver
+        _burn(address(this), _shares);
+        SafeERC20.safeTransfer(IERC20(_asset), _receiver, _assets);
+        emit Withdraw(msg.sender, _receiver, _controller, _assets, _shares);
+        
+        // After-withdrawal hook - use asset units for the hook
+        afterWithdraw(_asset, _assets, _shares);
     }
 
     ////////////////
@@ -461,129 +415,130 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, UltraQueue, IERC7540
     ////////////////
 
     /// @notice Get the controller's pending redeem
-    /// @param controller Controller address
+    /// @param _controller Controller address
     /// @return pendingRedeem Pending redeem details
     function getPendingRedeem(
-        address controller
+        address _controller
     ) public view returns (PendingRedeem memory) {
-        return _getPendingRedeem(controller, asset());
+        return _getPendingRedeem(_controller, asset());
     }
 
     /// @notice Get the controller's pending redeem
-    /// @param asset Asset
-    /// @param controller Controller address
+    /// @param _asset Asset
+    /// @param _controller Controller address
     /// @return pendingRedeem Pending redeem details
     function getPendingRedeemForAsset(
-        address asset,
-        address controller
+        address _asset,
+        address _controller
     ) public view returns (PendingRedeem memory) {
-        return _getPendingRedeem(controller, asset);
+        return _getPendingRedeem(_controller, _asset);
     }
 
     /// @notice Get claimable redeem request
     function getClaimableRedeem(
-        address controller
+        address _controller
     ) public view returns (ClaimableRedeem memory) {
-        return _getClaimableRedeem(controller, asset());
+        return _getClaimableRedeem(_controller, asset());
     }
 
     /// @notice Get claimable redeem request
     function getClaimableRedeemForAsset(
-        address asset,
-        address controller
+        address _asset,
+        address _controller
     ) public view returns (ClaimableRedeem memory) {
-        return _getClaimableRedeem(controller, asset);
+        return _getClaimableRedeem(_controller, _asset);
     }
 
     /// @notice Get pending shares for controller
-    /// @param controller Controller address
+    /// @param _controller Controller address
     /// @return pendingShares Amount of pending shares
     function pendingRedeemRequest(
-        uint256,
-        address controller
+        uint256, // requestId
+        address _controller
     ) public view returns (uint256) {
-        return _getPendingRedeem(controller, asset()).shares;
+        return _getPendingRedeem(_controller, asset()).shares;
     }
 
     /// @notice Get pending shares for controller
-    /// @param asset Asset
-    /// @param controller Controller address
+    /// @param _asset Asset
+    /// @param _controller Controller address
     /// @return pendingShares Amount of pending shares
     function pendingRedeemRequestForAsset(
-        address asset,
-        uint256,
-        address controller
+        address _asset,
+        uint256, // requestId
+        address _controller
     ) public view returns (uint256) {
-        return _getPendingRedeem(controller, asset).shares;
+        return _getPendingRedeem(_controller, _asset).shares;
     }
 
     /// @notice Get claimable shares for controller
-    /// @param controller Controller address
+    /// @param _controller Controller address
     /// @return claimableShares Amount of claimable shares
     function claimableRedeemRequest(
-        uint256,
-        address controller
+        uint256, // requestId
+        address _controller
     ) public view returns (uint256) {
-        return _getClaimableRedeem(controller, asset()).shares;
+        return _getClaimableRedeem(_controller, asset()).shares;
     }
 
     /// @notice Get claimable shares for controller
-    /// @param asset Asset
-    /// @param controller Controller address
+    /// @param _asset Asset
+    /// @param _controller Controller address
     /// @return claimableShares Amount of claimable shares
     function claimableRedeemRequestForAsset(
-        address asset,
-        uint256,
-        address controller
+        address _asset,
+        uint256, // requestId
+        address _controller
     ) public view returns (uint256) {
-        return _getClaimableRedeem(controller, asset).shares;
+        return _getClaimableRedeem(_controller, _asset).shares;
     }
 
     /// @notice Preview shares for deposit
-    /// @param assets Amount to deposit
+    /// @param _assets Amount to deposit
     /// @return shares Amount of shares received
     /// @dev Returns 0 if vault is paused
     function previewDeposit(
-        uint256 assets
+        uint256 _assets
     ) public view virtual override returns (uint256) {
-        return paused() ? 0 : super.previewDeposit(assets);
+        return paused() ? 0 : super.previewDeposit(_assets);
     }
 
     /// @notice Preview shares for deposit
-    /// @param asset Asset
-    /// @param assets Amount to deposit
+    /// @param _asset Asset
+    /// @param _assets Amount to deposit
     /// @return shares Amount of shares received
     /// @dev Returns 0 if vault is paused
     function previewDepositForAsset(
-        address asset,
-        uint256 assets
+        address _asset,
+        uint256 _assets
     ) public view virtual returns (uint256) {
         // Convert to underlying for share calculation
-        uint256 baseAssets = convertToUnderlying(asset, assets);
+        uint256 baseAssets = convertToUnderlying(_asset, _assets);
         return paused() ? 0 : super.previewDeposit(baseAssets);
     }
 
     /// @notice Preview assets for mint
-    /// @param shares Amount to mint
+    /// @param _shares Amount to mint
     /// @return assets Amount of assets required
     /// @dev Returns 0 if vault is paused
     function previewMint(
-        uint256 shares
+        uint256 _shares
     ) public view virtual override returns (uint256) {
-        return paused() ? 0 : super.previewMint(shares);
+        return paused() ? 0 : super.previewMint(_shares);
     }
 
     /// @notice Preview assets for mint
-    /// @param shares Amount to mint
+    /// @param _asset Asset to deposit in
+    /// @param _shares Amount to mint
     /// @return assets Amount of assets required
     /// @dev Returns 0 if vault is paused
     function previewMintForAsset(
-        address asset,
-        uint256 shares
+        address _asset,
+        uint256 _shares
     ) public view virtual returns (uint256) {
         // Calculate assets needed in underlying units, then convert to asset units
-        uint256 baseAssets = super.previewMint(shares);
-        return paused() ? 0 : convertFromUnderlying(asset, baseAssets);
+        uint256 baseAssets = super.previewMint(_shares);
+        return paused() ? 0 : convertFromUnderlying(_asset, baseAssets);
     }
 
 
@@ -609,7 +564,7 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, UltraQueue, IERC7540
     /// @return assets Maximum deposit amount
     /// @dev Returns 0 if vault is paused
     function maxDeposit(
-        address
+        address // receiver
     ) public view virtual override returns (uint256) {
         return paused() ? 0 : type(uint256).max;
     }
@@ -617,52 +572,54 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, UltraQueue, IERC7540
     /// @notice Get max shares for mint
     /// @return shares Maximum mint amount
     /// @dev Returns 0 if vault is paused
-    function maxMint(address) public view virtual override returns (uint256) {
+    function maxMint(
+        address // receiver
+    ) public view virtual override returns (uint256) {
         return paused() ? 0 : type(uint256).max;
     }
 
     /// @notice Get max assets for withdraw
-    /// @param controller Controller address
+    /// @param _controller Controller address
     /// @return assets Maximum withdraw amount
     /// @dev Returns controller's claimable assets
     function maxWithdraw(
-        address controller
+        address _controller
     ) public view virtual override returns (uint256) {
-        return _getClaimableRedeem(controller, asset()).assets;
+        return _getClaimableRedeem(_controller, asset()).assets;
     }
 
     /// @notice Get max assets for withdraw
-    /// @param asset Asset
-    /// @param controller Controller address
+    /// @param _asset Asset
+    /// @param _controller Controller address
     /// @return assets Maximum withdraw amount
     /// @dev Returns controller's claimable assets
     function maxWithdrawForAsset(
-        address asset,
-        address controller
+        address _asset,
+        address _controller
     ) public view virtual returns (uint256) {
-        return _getClaimableRedeem(controller, asset).assets;
+        return _getClaimableRedeem(_controller, _asset).assets;
     }
 
     /// @notice Get max shares for redeem
-    /// @param controller Controller address
+    /// @param _controller Controller address
     /// @return shares Maximum redeem amount
     /// @dev Returns controller's claimable shares
     function maxRedeem(
-        address controller
+        address _controller
     ) public view virtual override returns (uint256) {
-        return _getClaimableRedeem(controller, asset()).shares;
+        return _getClaimableRedeem(_controller, asset()).shares;
     }
 
     /// @notice Get max shares for redeem
-    /// @param asset Asset
-    /// @param controller Controller address
+    /// @param _asset Asset
+    /// @param _controller Controller address
     /// @return shares Maximum redeem amount
     /// @dev Returns controller's claimable shares
     function maxRedeemForAsset(
-        address asset,
-        address controller
+        address _asset,
+        address _controller
     ) public view virtual returns (uint256) {
-        return _getClaimableRedeem(controller, asset).shares;
+        return _getClaimableRedeem(_controller, _asset).shares;
     }
 
     ////////////////////
@@ -670,62 +627,61 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, UltraQueue, IERC7540
     ////////////////////
 
     /// @notice Request redeem of shares
-    /// @param shares Amount to redeem
-    /// @param controller Share recipient
-    /// @param owner Share owner
+    /// @param _shares Amount to redeem
+    /// @param _controller Share recipient
+    /// @param _owner Share owner
     /// @return requestId Request identifier
     /// @dev Adds to controller's pending redeem requests
     function requestRedeem(
-        uint256 shares,
-        address controller,
-        address owner
-    ) external virtual returns (uint256 requestId) {
-        return _requestRedeemOfAsset(asset(), shares, controller, owner);
+        uint256 _shares,
+        address _controller,
+        address _owner
+    ) external returns (uint256 requestId) {
+        return _requestRedeemOfAsset(asset(), _shares, _controller, _owner);
     }
 
     /// @notice Request redeem of shares
-    /// @param asset Asset
-    /// @param shares Amount to redeem
-    /// @param controller Share recipient
-    /// @param owner Share owner
+    /// @param _asset Asset
+    /// @param _shares Amount to redeem
+    /// @param _controller Share recipient
+    /// @param _owner Share owner
     /// @return requestId Request identifier
     /// @dev Adds to controller's pending redeem requests
     function requestRedeemOfAsset(
-        address asset,
-        uint256 shares,
-        address controller,
-        address owner
-    ) external virtual returns (uint256 requestId) {
-        // Shares are already in vault share units, no conversion needed
-        return _requestRedeemOfAsset(asset, shares, controller, owner);
+        address _asset,
+        uint256 _shares,
+        address _controller,
+        address _owner
+    ) external returns (uint256 requestId) {
+        return _requestRedeemOfAsset(_asset, _shares, _controller, _owner);
     }
 
     function _requestRedeemOfAsset(
-        address asset,
-        uint256 shares,
-        address controller,
-        address owner
-    ) internal virtual checkAccess(owner) returns (uint256 requestId) {
-        require(shares != 0, NothingToRedeem());
-        require(IERC20(address(this)).balanceOf(owner) >= shares, InsufficientBalance());
+        address _asset,
+        uint256 _shares,
+        address _controller,
+        address _owner
+    ) internal checkAccess(_owner) returns (uint256 requestId) {
+        require(_shares != 0, NothingToRedeem());
+        require(IERC20(address(this)).balanceOf(_owner) >= _shares, InsufficientBalance());
 
         // Validate that the asset is supported by the rate provider
         // This prevents users from creating pending redeem requests for unsupported assets
-        require(asset == this.asset() || rateProvider().isSupported(asset), AssetNotSupported());
+        require(_asset == this.asset() || rateProvider().isSupported(_asset), AssetNotSupported());
 
-        beforeRequestRedeem(asset, shares, controller, owner);
+        beforeRequestRedeem(_asset, _shares, _controller, _owner);
 
         PendingRedeem memory pendingRedeem =
-            _getPendingRedeem(controller, asset);
-        pendingRedeem.shares += shares;
+            _getPendingRedeem(_controller, _asset);
+        pendingRedeem.shares += _shares;
         pendingRedeem.requestTime = block.timestamp;
 
-        _setPendingRedeem(controller, asset, pendingRedeem);
+        _setPendingRedeem(_controller, _asset, pendingRedeem);
 
         // Transfer shares to vault for burning later
-        SafeERC20.safeTransferFrom(IERC20(this), owner, address(this), shares);
+        SafeERC20.safeTransferFrom(IERC20(this), _owner, address(this), _shares);
 
-        emit RedeemRequested(controller, owner, REQUEST_ID, msg.sender, shares);
+        emit RedeemRequested(_controller, _owner, REQUEST_ID, msg.sender, _shares);
         return REQUEST_ID;
     }
 
@@ -741,37 +697,37 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, UltraQueue, IERC7540
     }
 
     /// @notice Cancel redeem request for controller
-    /// @param asset Asset
-    /// @param controller Controller address
-    /// @param receiver Share recipient
+    /// @param _asset Asset
+    /// @param _controller Controller address
+    /// @param _receiver Share recipient
     /// @dev Transfers pending shares back to receiver
     function cancelRedeemRequestOfAsset(
-        address asset,
-        address controller,
-        address receiver
+        address _asset,
+        address _controller,
+        address _receiver
     ) external virtual {
-        return _cancelRedeemRequestOfAsset(asset, controller, receiver);
+        return _cancelRedeemRequestOfAsset(_asset, _controller, _receiver);
     }
 
     /// @notice Cancel redeem request for controller
-    /// @param controller Controller address
-    /// @param receiver Share recipient
+    /// @param _controller Controller address
+    /// @param _receiver Share recipient
     /// @dev Transfers pending shares back to receiver
     function cancelRedeemRequest(
-        address controller,
-        address receiver
+        address _controller,
+        address _receiver
     ) public virtual {
-        return _cancelRedeemRequestOfAsset(asset(), controller, receiver);
+        return _cancelRedeemRequestOfAsset(asset(), _controller, _receiver);
     }
 
     function _cancelRedeemRequestOfAsset(
-        address asset,
-        address controller,
-        address receiver
-    ) internal virtual checkAccess(controller) {
+        address _asset,
+        address _controller,
+        address _receiver
+    ) internal virtual checkAccess(_controller) {
         // Get the pending shares
         PendingRedeem memory pendingRedeem = 
-            _getPendingRedeem(controller, asset);
+            _getPendingRedeem(_controller, _asset);
         uint256 shares = pendingRedeem.shares;
 
         require(shares != 0, NothingToRedeem());
@@ -779,12 +735,12 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, UltraQueue, IERC7540
         pendingRedeem.shares = 0;
         pendingRedeem.requestTime = 0;
 
-        _setPendingRedeem(controller, asset, pendingRedeem);
+        _setPendingRedeem(_controller, _asset, pendingRedeem);
 
         // Return pending shares
-        SafeERC20.safeTransfer(IERC20(address(this)), receiver, shares);
+        SafeERC20.safeTransfer(IERC20(address(this)), _receiver, shares);
 
-        emit RedeemRequestCanceled(controller, receiver, shares);
+        emit RedeemRequestCanceled(_controller, _receiver, shares);
     }
 
     ////////////////////////
@@ -792,96 +748,87 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, UltraQueue, IERC7540
     ////////////////////////
 
     /// @notice Fulfill redeem request
-    /// @param shares Amount to redeem
-    /// @param controller Controller address
+    /// @param _shares Amount to redeem
+    /// @param _controller Controller address
     /// @return assets Amount of claimable assets
     function fulfillRedeem(
-        uint256 shares,
-        address controller
+        uint256 _shares,
+        address _controller
     ) external virtual returns (uint256) {
-        uint256 assets = convertToAssets(shares);
-
-        _burn(address(this), shares);
-
-        return _fulfillRedeemOfAsset(asset(), assets, shares, controller);
+        uint256 assets = convertToAssets(_shares);
+        return _fulfillRedeemOfAsset(asset(), assets, _shares, _controller);
     }
 
     /// @notice Fulfill redeem request
-    /// @param asset Asset
-    /// @param shares Amount to redeem
-    /// @param controller Controller address
+    /// @param _asset Asset
+    /// @param _shares Amount to redeem
+    /// @param _controller Controller address
     /// @return assets Amount of claimable assets
     function fulfillRedeemOfAsset(
-        address asset,
-        uint256 shares,
-        address controller
+        address _asset,
+        uint256 _shares,
+        address _controller
     ) external virtual returns (uint256 assets) {
         // Convert shares to underlying assets, then to asset units
-        uint256 underlyingAssets = convertToAssets(shares);
-        assets = convertFromUnderlying(asset, underlyingAssets);
-
-        _burn(address(this), shares);
-
-        return _fulfillRedeemOfAsset(asset, assets, shares, controller);
+        uint256 underlyingAssets = convertToAssets(_shares);
+        assets = convertFromUnderlying(_asset, underlyingAssets);
+        return _fulfillRedeemOfAsset(_asset, assets, _shares, _controller);
     }
 
     /// @dev Internal fulfill redeem request logic
     function _fulfillRedeemOfAsset(
-        address asset,
-        uint256 assets,
-        uint256 shares,
-        address controller
+        address _asset,
+        uint256 _assets,
+        uint256 _shares,
+        address _controller
     ) internal virtual returns (uint256) {
-        if (assets == 0 || shares == 0) 
+        if (_assets == 0 || _shares == 0) 
             revert InvalidRedeemCall();
 
         PendingRedeem memory pendingRedeem = 
-            _getPendingRedeem(controller, asset);
+            _getPendingRedeem(_controller, _asset);
         ClaimableRedeem memory claimableRedeem =
-            _getClaimableRedeem(controller, asset);
+            _getClaimableRedeem(_controller, _asset);
 
-        require(pendingRedeem.shares != 0, NothingToRedeem());
-        require(shares <= pendingRedeem.shares, NotEnoughPendingShares());
-
-        // Assets are already in asset units, no conversion needed
+        require(_shares <= pendingRedeem.shares, NotEnoughPendingShares());
 
         // Before fulfill redeem hook
-        beforeFulfillRedeem(asset, assets, shares);
+        beforeFulfillRedeem(_asset, _assets, _shares);
 
-        claimableRedeem.shares += shares;
-        claimableRedeem.assets += assets;
-        pendingRedeem.shares -= shares;
+        claimableRedeem.shares += _shares;
+        claimableRedeem.assets += _assets;
+        pendingRedeem.shares -= _shares;
 
         // Reset the requestTime if redeem is full
         if (pendingRedeem.shares == 0) 
             pendingRedeem.requestTime = 0;
 
-        _setPendingRedeem(controller, asset, pendingRedeem);
-        _setClaimableRedeem(controller, asset, claimableRedeem);
+        _setPendingRedeem(_controller, _asset, pendingRedeem);
+        _setClaimableRedeem(_controller, _asset, claimableRedeem);
 
-        emit RedeemRequestFulfilled(controller, msg.sender, shares, assets);
+        emit RedeemRequestFulfilled(_controller, msg.sender, _shares, _assets);
 
         // After fulfill redeem hook
-        afterFulfillRedeem(asset, assets, shares, controller);
+        afterFulfillRedeem(_asset, _assets, _shares, _controller);
 
-        return assets;
+        return _assets;
     }
 
-    /*//////////////////////////////////////////////////////////////
-                            RATE PROVIDER UPDATES
-    //////////////////////////////////////////////////////////////*/
+    ///////////////////////////
+    // Rate Provider Updates //
+    ///////////////////////////
 
     /// @notice Propose new rate provider for owner acceptance after delay
-    /// @param newRateProvider Address of the new rate provider
-    function proposeRateProvider(address newRateProvider) external onlyOwner {
-        require(newRateProvider != address(0), MissingRateProvider());
+    /// @param _newRateProvider Address of the new rate provider
+    function proposeRateProvider(address _newRateProvider) external onlyOwner {
+        require(_newRateProvider != address(0), MissingRateProvider());
 
         _getBaseAsyncRedeemStorage().proposedRateProvider = AddressUpdateProposal({
-            addr: newRateProvider,
+            addr: _newRateProvider,
             timestamp: block.timestamp
         });
 
-        emit RateProviderProposed(newRateProvider);
+        emit RateProviderProposed(_newRateProvider);
     }
 
     /// @notice Accept proposed rate provider
@@ -908,42 +855,26 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, UltraQueue, IERC7540
     // Hooks //
     ///////////
 
-    /// @dev Hook for inheriting contracts before deposit
-    function beforeDeposit(
-        address asset,
-        uint256 assets, 
-        uint256 shares
-    ) internal virtual {}
+    /// @dev Hook for executing custom logic right before deposit/mint
+    function beforeDeposit(address asset, uint256 assets, uint256 shares) internal virtual {}
 
-    /// @dev Hook for inheriting contracts after withdrawal
-    function afterWithdraw(
-        address asset,
-        uint256 assets, 
-        uint256 shares
-    ) internal virtual {}
+    /// @dev Hook for executing custom logic right after deposit/mint
+    function afterDeposit(address asset, uint256 assets, uint256 shares) internal virtual {}
+
+    /// @dev Hook for executing custom logic right before withdraw/redeem
+    function beforeWithdraw(address asset, uint256 assets, uint256 shares) internal virtual {}
+
+    /// @dev Hook for executing custom logic right after withdraw/redeem
+    function afterWithdraw(address asset, uint256 assets, uint256 shares) internal virtual {}
 
     /// @dev Hook for inheriting contracts after request redeem
-    function beforeRequestRedeem(
-        address asset,
-        uint256 shares,
-        address controller,
-        address owner
-    ) internal virtual {}
+    function beforeRequestRedeem(address asset, uint256 shares, address controller, address owner) internal virtual {}
 
     /// @dev Hook for inheriting contracts before fulfill
-    function beforeFulfillRedeem(
-        address asset,
-        uint256 assets,
-        uint256 shares
-    ) internal virtual {}
+    function beforeFulfillRedeem(address asset, uint256 assets, uint256 shares) internal virtual {}
 
     /// @dev Hook for inheriting contracts after fulfill
-    function afterFulfillRedeem(
-        address asset,
-        uint256 assets,
-        uint256 shares,
-        address controller
-    ) internal virtual {}
+    function afterFulfillRedeem(address asset, uint256 assets, uint256 shares, address controller) internal virtual {}
 
     ////////////
     // ERC165 //
@@ -960,8 +891,12 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, UltraQueue, IERC7540
             super.supportsInterface(interfaceId);
     }
 
-    modifier checkAccess(address controller) {
-        require(controller == msg.sender || isOperator(controller, msg.sender), AccessDenied());
+    ////////////////////
+    // Access Control //
+    ////////////////////
+
+    modifier checkAccess(address _controller) {
+        require(_controller == msg.sender || isOperator(_controller, msg.sender), AccessDenied());
         _;
     }
 }
