@@ -2,29 +2,34 @@
 pragma solidity 0.8.28;
 
 import { IUltraVault, Fees } from "../interfaces/IUltraVault.sol";
-import { 
-    BaseControlledAsyncRedeem, 
-    PendingRedeem, 
-    ClaimableRedeem,
-    FixedPointMathLib
-} from "./BaseControlledAsyncRedeem.sol";
+import { BaseControlledAsyncRedeem, BaseControlledAsyncRedeemInitParams } from "./BaseControlledAsyncRedeem.sol";
+import { PendingRedeem, ClaimableRedeem } from "src/interfaces/IUltraQueue.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import { UUPSUpgradeable } from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
-import { Initializable } from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import { IPriceSource } from "src/interfaces/IPriceSource.sol";
+
+/// @dev Initialization parameters for UltraFeeder
+struct UltraFeederInitParams {
+    // The UltraVault to deposit into
+    address mainVault;
+    // Owner of the vault
+    address owner;
+    // Underlying asset address
+    address asset;
+    // The name of the vault token
+    string name;
+    // The symbol of the vault token
+    string symbol;
+}
 
 // keccak256(abi.encode(uint256(keccak256("ultrayield.storage.UltraFeeder")) - 1)) & ~bytes32(uint256(0xff));
 bytes32 constant ULTRA_FEEDER_STORAGE_LOCATION = 0x73fc0f32a78274c31085b0032ea471ff6cedefdd8cffdf1dfa84871cdcb59000;
 
-/**
- * @title UltraFeeder
- * @notice ERC-4626 compliant vault that wraps UltraVault for deposits and handles async redeems
- * @dev This vault only handles deposits into the main UltraVault and manages async redeems
- */
+/// @title UltraFeeder
+/// @notice ERC-4626 compliant vault that wraps UltraVault for deposits and handles async redeems
+/// @dev This vault only handles deposits into the main UltraVault and manages async redeems
 contract UltraFeeder is BaseControlledAsyncRedeem, UUPSUpgradeable {
-    using FixedPointMathLib for uint256;
-
     bytes32 public constant OPERATOR_ROLE = keccak256("OPERATOR_ROLE");
 
     event Referral(string indexed referralId, address user, uint256 shares);
@@ -57,30 +62,29 @@ contract UltraFeeder is BaseControlledAsyncRedeem, UUPSUpgradeable {
         _disableInitializers();
     }
 
-    /**
-     * @notice Initializes the vault
-     * @param _owner Owner of the vault
-     * @param _asset Underlying asset address
-     * @param _name The name of the vault token
-     * @param _symbol The symbol of the vault token
-     * @param _mainVault The UltraVault to deposit into
-     */
+    /// @notice Initialize UltraFeeder vault
+    /// @param params Initialization parameters struct
     function initialize(
-        address _mainVault,
-        address _owner,
-        address _asset,
-        string memory _name,
-        string memory _symbol
+        UltraFeederInitParams memory params
     ) external initializer {
-        if (address(_mainVault) == address(0)) revert InvalidMainVault();
-        
-        IUltraVault mainVault_ = IUltraVault(_mainVault);
+        // Validate main vault and base asset
+        require(params.mainVault != address(0), InvalidMainVault());
+        IUltraVault mainVault_ = IUltraVault(params.mainVault);
+        require(mainVault_.asset() == params.asset, AssetMismatch());
+
+        // Store main vault
         _getUltraFeederStorage().mainVault = mainVault_;
         
-        // Validate that the main vault's asset matches our asset
-        require(mainVault_.asset() == _asset, AssetMismatch());
-        
-        super.initialize(_owner, _asset, _name, _symbol, mainVault_.rateProvider());
+        // Init BaseControlledAsyncRedeem
+        super.initialize(BaseControlledAsyncRedeemInitParams({
+            owner: params.owner,
+            asset: params.asset,
+            name: params.name,
+            symbol: params.symbol,
+            rateProvider: address(mainVault_.rateProvider())
+        }));
+
+        // Pause vault in order to be manually checked by the operator
         _pause();
     }
 
@@ -93,10 +97,8 @@ contract UltraFeeder is BaseControlledAsyncRedeem, UUPSUpgradeable {
         return _getUltraFeederStorage().mainVault;
     }
 
-    /**
-     * @notice Returns the total assets in the vault
-     * @return The total assets in the vault
-     */
+    /// @notice Returns the total assets in the vault
+    /// @return The total assets in the vault
     function totalAssets() public view override returns (uint256) {
         return IPriceSource(mainVault().oracle()).getQuote(
             totalSupply(),
@@ -105,9 +107,9 @@ contract UltraFeeder is BaseControlledAsyncRedeem, UUPSUpgradeable {
         );
     }
 
-    /*//////////////////////////////////////////////////////////////
-                    BaseControlledAsyncRedeem OVERRIDES
-    //////////////////////////////////////////////////////////////*/
+    ///////////////////////////////
+    // BaseControlledAsyncRedeem //
+    ///////////////////////////////
 
     /// @dev After deposit hook - collect fees and send funds to fundsHolder
     function afterDeposit(address asset, uint256 assets, uint256 shares) internal override {
@@ -122,8 +124,8 @@ contract UltraFeeder is BaseControlledAsyncRedeem, UUPSUpgradeable {
     function beforeRequestRedeem(
         address asset,
         uint256 shares,
-        address controller,
-        address owner
+        address, // controller
+        address  // owner
     ) internal override {
         // Approve main vault to spend it's shares
         IUltraVault mainVault_ = mainVault();
@@ -154,7 +156,7 @@ contract UltraFeeder is BaseControlledAsyncRedeem, UUPSUpgradeable {
     function afterFulfillRedeem(
         address asset,
         uint256 assets,
-        uint256 shares,
+        uint256, // shares
         address controller
     ) internal override {
         // The base implementation has already updated claimableRedeem.assets += assets
@@ -180,21 +182,17 @@ contract UltraFeeder is BaseControlledAsyncRedeem, UUPSUpgradeable {
         return super._fulfillRedeemOfAsset(asset, assets, shares, controller);
     }
 
-    /**
-     * @notice Cancel redeem request for controller and propagate to underlying vault
-     * @param controller Controller address
-     * @dev Transfers pending shares back to msg.sender and cancels underlying vault request
-     */
+    /// @notice Cancel redeem request for controller and propagate to underlying vault
+    /// @param controller Controller address
+    /// @dev Transfers pending shares back to msg.sender and cancels underlying vault request
     function cancelRedeemRequest(address controller) external virtual override {
         cancelRedeemRequestOfAsset(asset(), controller, msg.sender);
     }
 
-    /**
-     * @notice Cancel redeem request for controller and propagate to underlying vault
-     * @param controller Controller address
-     * @param receiver Share recipient
-     * @dev Transfers pending shares back to receiver and cancels underlying vault request
-     */
+    /// @notice Cancel redeem request for controller and propagate to underlying vault
+    /// @param controller Controller address
+    /// @param receiver Share recipient
+    /// @dev Transfers pending shares back to receiver and cancels underlying vault request
     function cancelRedeemRequest(
         address controller,
         address receiver
@@ -202,13 +200,11 @@ contract UltraFeeder is BaseControlledAsyncRedeem, UUPSUpgradeable {
         cancelRedeemRequestOfAsset(asset(), controller, receiver);
     }
 
-    /**
-     * @notice Cancel redeem request for controller and propagate to underlying vault
-     * @param asset Asset
-     * @param controller Controller address
-     * @param receiver Share recipient
-     * @dev Transfers pending shares back to receiver and cancels underlying vault request
-     */
+    /// @notice Cancel redeem request for controller and propagate to underlying vault
+    /// @param asset Asset
+    /// @param controller Controller address
+    /// @param receiver Share recipient
+    /// @dev Transfers pending shares back to receiver and cancels underlying vault request
     function cancelRedeemRequestOfAsset(
         address asset,
         address controller,
@@ -222,54 +218,44 @@ contract UltraFeeder is BaseControlledAsyncRedeem, UUPSUpgradeable {
         _cancelRedeemRequestOfAsset(asset, controller, receiver);
     }
 
-    /*//////////////////////////////////////////////////////////////
-                        ACCOUNTING OVERRIDES
-    //////////////////////////////////////////////////////////////*/
+    ////////////////////////
+    // ERC-4626 Overrides //
+    ////////////////////////
 
-    /**
-     * @notice Returns the amount of shares that would be minted for a given amount of assets
-     * @param assets The amount of assets to convert
-     * @return The amount of shares that would be minted
-     */
+    /// @notice Returns the amount of shares that would be minted for a given amount of assets
+    /// @param assets The amount of assets to convert
+    /// @return The amount of shares that would be minted
     function previewDeposit(uint256 assets) public view override returns (uint256) {
         return mainVault().previewDeposit(assets);
     }
 
-    /**
-     * @notice Returns the amount of assets required for a given amount of shares
-     * @param shares The amount of shares to convert
-     * @return The amount of assets required
-     */
+    /// @notice Returns the amount of assets required for a given amount of shares
+    /// @param shares The amount of shares to convert
+    /// @return The amount of assets required
     function previewMint(uint256 shares) public view override returns (uint256) {
         return mainVault().previewMint(shares);
     }
 
-    /**
-     * @notice Returns the maximum amount of assets that can be deposited
-     * @return The maximum amount of assets that can be deposited
-     */
+    /// @notice Returns the maximum amount of assets that can be deposited
+    /// @return The maximum amount of assets that can be deposited
     function maxDeposit(address) public view override returns (uint256) {
         return mainVault().maxDeposit(address(this));
     }
 
-    /**
-     * @notice Returns the maximum amount of shares that can be minted
-     * @return The maximum amount of shares that can be minted
-     */
+    /// @notice Returns the maximum amount of shares that can be minted
+    /// @return The maximum amount of shares that can be minted
     function maxMint(address) public view override returns (uint256) {
         return mainVault().maxMint(address(this));
     }
 
-    /*//////////////////////////////////////////////////////////////
-                        REFERRALS LOGIC
-    //////////////////////////////////////////////////////////////*/
+    /////////////////////
+    // Referrals Logic //
+    /////////////////////
 
-    /**
-     * @notice Helper to deposit assets for msg.sender upon referral
-     * @param assets Amount to deposit
-     * @param referralId id of referral
-     * @return shares Amount of shares received
-     */
+    /// @notice Helper to deposit assets for msg.sender upon referral
+    /// @param assets Amount to deposit
+    /// @param referralId id of referral
+    /// @return shares Amount of shares received
     function deposit(
         uint256 assets,
         string calldata referralId
@@ -277,13 +263,11 @@ contract UltraFeeder is BaseControlledAsyncRedeem, UUPSUpgradeable {
         return _depositAssetWithReferral(asset(), assets, msg.sender, referralId);
     }
 
-    /**
-     * @notice Helper to deposit assets for msg.sender upon referral specifying receiver
-     * @param assets Amount to deposit
-     * @param receiver receiver of deposit
-     * @param referralId id of referral
-     * @return shares Amount of shares received
-     */
+    /// @notice Helper to deposit assets for msg.sender upon referral specifying receiver
+    /// @param assets Amount to deposit
+    /// @param receiver receiver of deposit
+    /// @param referralId id of referral
+    /// @return shares Amount of shares received
     function deposit(
         uint256 assets,
         address receiver,
@@ -292,14 +276,12 @@ contract UltraFeeder is BaseControlledAsyncRedeem, UUPSUpgradeable {
         return _depositAssetWithReferral(asset(), assets, receiver, referralId);
     }
 
-    /**
-     * @notice Helper to deposit particular asset for msg.sender upon referral
-     * @param asset Asset to deposit
-     * @param assets Amount to deposit
-     * @param receiver receiver of deposit
-     * @param referralId id of referral
-     * @return shares Amount of shares received
-     */
+    /// @notice Helper to deposit particular asset for msg.sender upon referral
+    /// @param asset Asset to deposit
+    /// @param assets Amount to deposit
+    /// @param receiver receiver of deposit
+    /// @param referralId id of referral
+    /// @return shares Amount of shares received
     function depositAsset(
         address asset,
         uint256 assets,
@@ -309,14 +291,12 @@ contract UltraFeeder is BaseControlledAsyncRedeem, UUPSUpgradeable {
         return _depositAssetWithReferral(asset, assets, receiver, referralId);
     }
 
-    /**
-     * @notice Internal helper to deposit assets for msg.sender upon referral
-     * @param asset Asset to deposit
-     * @param assets Amount to deposit
-     * @param receiver receiver of deposit
-     * @param referralId id of referral
-     * @return shares Amount of shares received
-     */
+    /// @notice Internal helper to deposit assets for msg.sender upon referral
+    /// @param asset Asset to deposit
+    /// @param assets Amount to deposit
+    /// @param receiver receiver of deposit
+    /// @param referralId id of referral
+    /// @return shares Amount of shares received
     function _depositAssetWithReferral(
         address asset,
         uint256 assets,
@@ -328,13 +308,11 @@ contract UltraFeeder is BaseControlledAsyncRedeem, UUPSUpgradeable {
         return shares;
     }
 
-    /*//////////////////////////////////////////////////////////////
-                            UPGRADES
-    //////////////////////////////////////////////////////////////*/
+    //////////////////////
+    // UUPS Upgradeable //
+    //////////////////////
 
-    /**
-     * @notice Authorizes an upgrade to a new implementation
-     * @param newImplementation The address of the new implementation
-     */
+    /// @notice Authorizes an upgrade to a new implementation
+    /// @param newImplementation The address of the new implementation
     function _authorizeUpgrade(address newImplementation) internal override onlyOwner {}
 }
