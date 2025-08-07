@@ -1,12 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity 0.8.28;
 
-import { BaseERC7540 } from "src/vaults/BaseERC7540.sol";
-import { IERC7540Redeem } from "ERC-7540/interfaces/IERC7540.sol";
-import { FixedPointMathLib } from "src/utils/FixedPointMathLib.sol";
+import { IERC165, IERC7575 } from "ERC-7540/interfaces/IERC7575.sol";
+import { IERC7540Redeem, IERC7540Operator } from "ERC-7540/interfaces/IERC7540.sol";
+import { PausableUpgradeable } from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
+import { ERC4626Upgradeable } from "@openzeppelin/contracts-upgradeable/token/ERC20/extensions/ERC4626Upgradeable.sol";
 import { SafeERC20, IERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import { PendingRedeem, ClaimableRedeem } from "src/interfaces/IUltraQueue.sol";
 import { IUltraVaultRateProvider } from "src/interfaces/IUltraVaultRateProvider.sol";
+import { IPausable } from "src/interfaces/IPausable.sol";
+import { InitializableOwnable } from "src/utils/InitializableOwnable.sol";
+import { FixedPointMathLib } from "src/utils/FixedPointMathLib.sol";
 import { AddressUpdateProposal } from "src/utils/AddressUpdates.sol";
 import { UltraQueue } from "src/vaults/accounting/UltraQueue.sol";
 
@@ -30,13 +34,22 @@ struct BaseControlledAsyncRedeemInitParams {
 /// @title BaseControlledAsyncRedeem
 /// @notice Base contract for controlled async redeem flows
 /// @dev Based on ERC-7540 Reference Implementation
-abstract contract BaseControlledAsyncRedeem is BaseERC7540, UltraQueue, IERC7540Redeem {
+abstract contract BaseControlledAsyncRedeem is 
+    ERC4626Upgradeable,
+    InitializableOwnable,
+    PausableUpgradeable,
+    UltraQueue,
+    IERC7540Operator,
+    IERC7540Redeem,
+    IPausable
+{
     using FixedPointMathLib for uint256;
 
     ////////////
     // Events //
     ////////////
 
+    event RoleUpdated(bytes32 role, address account, bool approved);
     event RateProviderProposed(address indexed proposedProvider);
     event RateProviderUpdated(address indexed oldProvider, address indexed newProvider);
     event RedeemRequestFulfilled(
@@ -62,6 +75,8 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, UltraQueue, IERC7540
     // Errors //
     ////////////
 
+    error AccessDenied();
+    error Misconfigured();
     error CanNotPreviewWithdrawInAsyncVault();
     error CanNotPreviewRedeemInAsyncVault();
     error NotEnoughPendingShares();
@@ -81,6 +96,8 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, UltraQueue, IERC7540
     // Constants //
     ///////////////
 
+    uint256 internal constant REQUEST_ID = 0;
+    bytes32 public constant PAUSER_ROLE = keccak256("PAUSER_ROLE");
     uint256 public constant ADDRESS_UPDATE_TIMELOCK = 3 days;
     uint256 public constant MAX_ADDRESS_UPDATE_WAIT = 7 days;
 
@@ -90,6 +107,8 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, UltraQueue, IERC7540
 
     /// @custom:storage-location erc7201:ultrayield.storage.BaseControlledAsyncRedeem
     struct BaseAsyncRedeemStorage {
+        mapping(bytes32 => mapping(address => bool)) hasRole;
+        mapping(address => mapping(address => bool)) isOperator;
         IUltraVaultRateProvider rateProvider;
         AddressUpdateProposal proposedRateProvider;
     }
@@ -109,7 +128,11 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, UltraQueue, IERC7540
     function initialize(
         BaseControlledAsyncRedeemInitParams memory params
     ) public virtual onlyInitializing {
-        super.initialize(params.owner, params.asset, params.name, params.symbol);
+        require(params.asset != address(0), Misconfigured());
+        __Pausable_init();
+        __ERC20_init(params.name, params.symbol);
+        __ERC4626_init(IERC20(params.asset));
+        initOwner(params.owner);
         _getBaseAsyncRedeemStorage().rateProvider = IUltraVaultRateProvider(params.rateProvider);
     }
 
@@ -123,6 +146,42 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, UltraQueue, IERC7540
 
     function proposedRateProvider() public view returns (AddressUpdateProposal memory) {
         return _getBaseAsyncRedeemStorage().proposedRateProvider;
+    }
+
+    //////////////
+    // IERC7575 //
+    //////////////
+
+    function share() public view returns (address) {
+        return address(this);
+    }
+
+    //////////////////////
+    // IERC7540Operator //
+    //////////////////////
+
+    /// @notice Check whether the `operator` is approved as an operator for the `_controller`
+    /// @param controller Address of the controller (owner)
+    /// @param operator Address of the operator
+    /// @return status The approval status
+    function isOperator(address controller, address operator) public view returns (bool) {
+        return _getBaseAsyncRedeemStorage().isOperator[controller][operator];
+    }
+
+    /// @notice Set operator approval status
+    /// @param operator Address of the operator
+    /// @param approved Status to be set
+    /// @dev Allows operations on behalf of vault shares holder
+    function setOperator(
+        address operator,
+        bool approved
+    ) public virtual returns (bool success) {
+        require(msg.sender != operator, "ERC7540Vault/cannot-set-self-as-operator");
+        if (isOperator(msg.sender, operator) != approved) {
+            _getBaseAsyncRedeemStorage().isOperator[msg.sender][operator] = approved;
+            emit OperatorSet(msg.sender, operator, approved);
+            success = true;
+        }
     }
 
     //////////////////////
@@ -873,6 +932,50 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, UltraQueue, IERC7540
     /// @dev Hook for inheriting contracts after fulfill
     function afterFulfillRedeem(address asset, uint256 assets, uint256 shares, address controller) internal virtual {}
 
+    //////////////
+    // Pausable //
+    //////////////
+
+    /// @notice Update account role
+    /// @param role Role to update
+    /// @param account Account address
+    /// @param approved Approval status
+    function updateRole(
+        bytes32 role,
+        address account,
+        bool approved
+    ) public onlyOwner {
+        if (hasRole(role,account) != approved) {
+            _getBaseAsyncRedeemStorage().hasRole[role][account] = approved;
+            emit RoleUpdated(role, account, approved);
+        }
+    }
+
+    /// @notice Check if caller has role or is owner
+    /// @param role Role to check
+    modifier onlyRoleOrOwner(bytes32 role) {
+        require(hasRole(role, msg.sender) || msg.sender == owner, AccessDenied());
+        _;
+    }
+
+    /// @notice Check if the contract is paused
+    /// @return True if the contract is paused, false otherwise
+    function paused() public view override(IPausable, PausableUpgradeable) returns (bool) {
+        return super.paused();
+    }
+
+    /// @notice Pause vault operations
+    /// @dev Caller must be owner or have PAUSER_ROLE
+    function pause() external override onlyRoleOrOwner(PAUSER_ROLE) {
+        _pause();
+    }
+
+    /// @notice Unpause vault operations
+    /// @dev Caller must be owner or have PAUSER_ROLE
+    function unpause() external override onlyRoleOrOwner(PAUSER_ROLE) {
+        _unpause();
+    }
+
     ////////////
     // ERC165 //
     ////////////
@@ -882,15 +985,21 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, UltraQueue, IERC7540
     /// @return exists True if interface is supported
     function supportsInterface(
         bytes4 interfaceId
-    ) public pure virtual override returns (bool) {
+    ) public pure virtual returns (bool) {
         return
+            interfaceId == type(IERC165).interfaceId ||
             interfaceId == type(IERC7540Redeem).interfaceId ||
-            super.supportsInterface(interfaceId);
+            interfaceId == type(IERC7575).interfaceId ||
+            interfaceId == type(IERC7540Operator).interfaceId;
     }
 
     ////////////////////
     // Access Control //
     ////////////////////
+
+    function hasRole(bytes32 role, address account) public view returns (bool) {
+        return _getBaseAsyncRedeemStorage().hasRole[role][account];
+    }
 
     modifier checkAccess(address _controller) {
         require(_controller == msg.sender || isOperator(_controller, msg.sender), AccessDenied());
