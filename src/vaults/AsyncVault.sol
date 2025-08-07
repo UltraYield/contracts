@@ -172,6 +172,9 @@ abstract contract AsyncVault is BaseControlledAsyncRedeem {
         // Fulfill request
         _fulfillRedeemOfAsset(asset(), assets - feesToCollect, shares, controller);
 
+        // Burn shares
+        _burn(address(this), shares);
+
         collectWithdrawalFeeInAsset(asset(), feesToCollect);
 
         return assets - feesToCollect;
@@ -202,6 +205,9 @@ abstract contract AsyncVault is BaseControlledAsyncRedeem {
 
         // Fulfill request with asset units (base contract expects asset units)
         _fulfillRedeemOfAsset(asset, assets - feesToCollect, shares, controller);
+
+        // Burn shares
+        _burn(address(this), shares);
 
         // Collect withdrawal fee in asset units
         collectWithdrawalFeeInAsset(asset, feesToCollect);
@@ -243,6 +249,9 @@ abstract contract AsyncVault is BaseControlledAsyncRedeem {
             totalFees += feesToCollect;
             totalShares += shares[i];
         }
+
+        // Burn shares
+        _burn(address(this), totalShares);
 
         collectWithdrawalFeeInAsset(asset(), totalFees);
 

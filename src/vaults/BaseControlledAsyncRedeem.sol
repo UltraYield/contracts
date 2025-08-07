@@ -402,7 +402,6 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, UltraQueue, IERC7540
         _setClaimableRedeem(_controller, _asset, claimableRedeem);
 
         // Transfer assets to the receiver
-        _burn(address(this), _shares);
         SafeERC20.safeTransfer(IERC20(_asset), _receiver, _assets);
         emit Withdraw(msg.sender, _receiver, _controller, _assets, _shares);
         
@@ -755,6 +754,7 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, UltraQueue, IERC7540
         address _controller
     ) external virtual returns (uint256) {
         uint256 assets = convertToAssets(_shares);
+        _burn(address(this), _shares);
         return _fulfillRedeemOfAsset(asset(), assets, _shares, _controller);
     }
 
@@ -771,6 +771,7 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, UltraQueue, IERC7540
         // Convert shares to underlying assets, then to asset units
         uint256 underlyingAssets = convertToAssets(_shares);
         assets = convertFromUnderlying(_asset, underlyingAssets);
+        _burn(address(this), _shares);
         return _fulfillRedeemOfAsset(_asset, assets, _shares, _controller);
     }
 
