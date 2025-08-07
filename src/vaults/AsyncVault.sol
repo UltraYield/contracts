@@ -2,7 +2,6 @@
 pragma solidity 0.8.28;
 
 import { BaseControlledAsyncRedeem, BaseControlledAsyncRedeemInitParams } from "./BaseControlledAsyncRedeem.sol";
-import { BaseERC7540 } from "./BaseERC7540.sol";
 import { FixedPointMathLib } from "../utils/FixedPointMathLib.sol";
 import { SafeERC20, IERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import { IERC20Metadata } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
