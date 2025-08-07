@@ -936,28 +936,6 @@ abstract contract BaseControlledAsyncRedeem is
     // Pausable //
     //////////////
 
-    /// @notice Update account role
-    /// @param role Role to update
-    /// @param account Account address
-    /// @param approved Approval status
-    function updateRole(
-        bytes32 role,
-        address account,
-        bool approved
-    ) public onlyOwner {
-        if (hasRole(role,account) != approved) {
-            _getBaseAsyncRedeemStorage().hasRole[role][account] = approved;
-            emit RoleUpdated(role, account, approved);
-        }
-    }
-
-    /// @notice Check if caller has role or is owner
-    /// @param role Role to check
-    modifier onlyRoleOrOwner(bytes32 role) {
-        require(hasRole(role, msg.sender) || msg.sender == owner, AccessDenied());
-        _;
-    }
-
     /// @notice Check if the contract is paused
     /// @return True if the contract is paused, false otherwise
     function paused() public view override(IPausable, PausableUpgradeable) returns (bool) {
@@ -976,6 +954,48 @@ abstract contract BaseControlledAsyncRedeem is
         _unpause();
     }
 
+    ////////////////////
+    // Access Control //
+    ////////////////////
+
+    /// @notice Check if account has role
+    /// @param role Role to check
+    /// @param account Account address
+    /// @return True if account has role, false otherwise
+    function hasRole(bytes32 role, address account) public view returns (bool) {
+        return _getBaseAsyncRedeemStorage().hasRole[role][account];
+    }
+
+    /// @notice Check if caller has role or is owner
+    /// @param role Role to check
+    modifier onlyRoleOrOwner(bytes32 role) {
+        require(hasRole(role, msg.sender) || msg.sender == owner, AccessDenied());
+        _;
+    }
+
+    /// @notice Ensure that controller is authorized
+    /// @param controller Controller address
+    /// @dev Checks if controller is msg.sender or has operator approval
+    modifier checkAccess(address controller) {
+        require(controller == msg.sender || isOperator(controller, msg.sender), AccessDenied());
+        _;
+    }
+
+    /// @notice Update account role
+    /// @param role Role to update
+    /// @param account Account address
+    /// @param approved Approval status
+    function updateRole(
+        bytes32 role,
+        address account,
+        bool approved
+    ) public onlyOwner {
+        if (hasRole(role,account) != approved) {
+            _getBaseAsyncRedeemStorage().hasRole[role][account] = approved;
+            emit RoleUpdated(role, account, approved);
+        }
+    }
+
     ////////////
     // ERC165 //
     ////////////
@@ -991,18 +1011,5 @@ abstract contract BaseControlledAsyncRedeem is
             interfaceId == type(IERC7540Redeem).interfaceId ||
             interfaceId == type(IERC7575).interfaceId ||
             interfaceId == type(IERC7540Operator).interfaceId;
-    }
-
-    ////////////////////
-    // Access Control //
-    ////////////////////
-
-    function hasRole(bytes32 role, address account) public view returns (bool) {
-        return _getBaseAsyncRedeemStorage().hasRole[role][account];
-    }
-
-    modifier checkAccess(address _controller) {
-        require(_controller == msg.sender || isOperator(_controller, msg.sender), AccessDenied());
-        _;
     }
 }
