@@ -782,15 +782,16 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, UltraQueue, IERC7540
         uint256 _shares,
         address _controller
     ) internal virtual returns (uint256) {
+        // Checks
         require(_assets != 0 && _shares != 0, InvalidRedeemCall());
-
-        PendingRedeem memory pendingRedeem = _getPendingRedeem(_controller, _asset);
-        ClaimableRedeem memory claimableRedeem = _getClaimableRedeem(_controller, _asset);
-        require(_shares <= pendingRedeem.shares, NotEnoughPendingShares());
+        require(_shares <= _getPendingRedeem(_controller, _asset).shares, NotEnoughPendingShares());
 
         // Before fulfill redeem hook
         beforeFulfillRedeem(_asset, _assets, _shares);
 
+        // Update pending and claimable redeems
+        PendingRedeem memory pendingRedeem = _getPendingRedeem(_controller, _asset);
+        ClaimableRedeem memory claimableRedeem = _getClaimableRedeem(_controller, _asset);
         claimableRedeem.shares += _shares;
         claimableRedeem.assets += _assets;
         pendingRedeem.shares -= _shares;
@@ -802,6 +803,7 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, UltraQueue, IERC7540
         _setPendingRedeem(_controller, _asset, pendingRedeem);
         _setClaimableRedeem(_controller, _asset, claimableRedeem);
 
+        // Emit event
         emit RedeemRequestFulfilled(_controller, msg.sender, _shares, _assets);
 
         // After fulfill redeem hook
