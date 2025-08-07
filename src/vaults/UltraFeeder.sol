@@ -114,9 +114,10 @@ contract UltraFeeder is BaseControlledAsyncRedeem, UUPSUpgradeable {
     /// @dev After deposit hook - collect fees and send funds to fundsHolder
     function afterDeposit(address _asset, uint256 _assets, uint256 _shares) internal override {
         // Approve main vault to spend assets
-        SafeERC20.safeIncreaseAllowance(IERC20(_asset), address(mainVault()), _assets);
+        IUltraVault _mainVault = mainVault();
+        SafeERC20.safeIncreaseAllowance(IERC20(_asset), address(_mainVault), _assets);
 
-        uint256 mainShares = mainVault().depositAsset(_asset, _assets, address(this));
+        uint256 mainShares = _mainVault.depositAsset(_asset, _assets, address(this));
         require(mainShares == _shares, ShareNumberMismatch());
     }
 

@@ -307,7 +307,7 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, UltraQueue, IERC7540
         uint256 _assets,
         address _receiver,
         address _controller
-    ) internal whenNotPaused checkAccess(_controller) returns (uint256 shares) {
+    ) internal checkAccess(_controller) returns (uint256 shares) {
         require(_assets != 0, NothingToWithdraw());
 
         // Validate that requested assets don't exceed claimable assets
@@ -364,7 +364,7 @@ abstract contract BaseControlledAsyncRedeem is BaseERC7540, UltraQueue, IERC7540
         uint256 _shares,
         address _receiver,
         address _controller
-    ) internal whenNotPaused checkAccess(_controller) returns (uint256 assets) {
+    ) internal checkAccess(_controller) returns (uint256 assets) {
         require(_shares != 0, NothingToRedeem());
         
         // Calculate assets directly in asset units
