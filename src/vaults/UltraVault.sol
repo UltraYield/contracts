@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity 0.8.28;
 
-import { AsyncVault, Fees } from "./AsyncVault.sol";
+import { AsyncVault, Fees, AsyncVaultInitParams } from "./AsyncVault.sol";
 import { PendingRedeem, ClaimableRedeem } from "./BaseControlledAsyncRedeem.sol";
 import { AddressUpdateProposal } from "../utils/AddressUpdates.sol";
 import { IPriceSource } from "src/interfaces/IPriceSource.sol";
@@ -11,25 +11,25 @@ import { UUPSUpgradeable } from "@openzeppelin/contracts-upgradeable/proxy/utils
 // keccak256(abi.encode(uint256(keccak256("ultrayield.storage.UltraVault")) - 1)) & ~bytes32(uint256(0xff));
 bytes32 constant ULTRA_VAULT_STORAGE_LOCATION = 0x4a2c313ed01a3f9b3ba2e7d99f5ac7985ad5a3c0482c127738b38df017064300;
 
-/// @notice Initialization parameters for UltraVault
-/// @param _owner Owner of the vault
-/// @param _asset Underlying asset address
-/// @param _name Vault name
-/// @param _symbol Vault symbol
-/// @param _rateProvider oracle for assets exchange rate
-/// @param _feeRecipient Fee recipient
-/// @param _fees Fee on the vault
-/// @param _oracle The oracle to use for pricing
-/// @param _fundsHolder The fundsHolder which will manage the assets
+/// @dev Initialization parameters for UltraVault
 struct UltraVaultInitParams {
+    // Owner of the vault
     address owner;
+    // Underlying asset address
     address asset;
+    // Vault name
     string name;
+    // Vault symbol
     string symbol;
+    // Oracle for assets exchange rate
     address rateProvider;
+    // Fee recipient
     address feeRecipient;
+    // Fee configuration
     Fees fees;
+    // Oracle to use for pricing
     address oracle;
+    // FundsHolder which will manage the assets
     address fundsHolder;
 }
 
@@ -89,7 +89,7 @@ contract UltraVault is AsyncVault, UUPSUpgradeable {
 
     /// @param params Initialization parameters struct
     function initialize(
-        UltraVaultInitParams calldata params
+        UltraVaultInitParams memory params
     ) external initializer {
         require(params.fundsHolder != address(0) && params.oracle != address(0), Misconfigured());
 
@@ -99,15 +99,15 @@ contract UltraVault is AsyncVault, UUPSUpgradeable {
         _pause();
         
         // Calling at the very end since we need oracle to be setup
-        super.initialize(
-            params.owner,
-            params.asset,
-            params.name,
-            params.symbol,
-            params.rateProvider,
-            params.feeRecipient,
-            params.fees
-        );
+        super.initialize(AsyncVaultInitParams({
+            owner: params.owner,
+            asset: params.asset,
+            name: params.name,
+            symbol: params.symbol,
+            rateProvider: params.rateProvider,
+            feeRecipient: params.feeRecipient,
+            fees: params.fees
+        }));
     }
 
     /////////////

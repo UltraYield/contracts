@@ -1,24 +1,42 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity 0.8.28;
 
-import { BaseControlledAsyncRedeem } from "./BaseControlledAsyncRedeem.sol";
+import { BaseControlledAsyncRedeem, BaseControlledAsyncRedeemInitParams } from "./BaseControlledAsyncRedeem.sol";
 import { BaseERC7540 } from "./BaseERC7540.sol";
 import { FixedPointMathLib } from "../utils/FixedPointMathLib.sol";
 import { SafeERC20, IERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import { IERC20Metadata } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 
-/// @notice Vault fee configuration
+/// @dev Vault fee configuration
 struct Fees {
-    /// @notice Performance fee rate (100% = 1e18)
+    // Performance fee rate (100% = 1e18)
     uint64 performanceFee;
-    /// @notice Management fee rate (100% = 1e18)
+    // Management fee rate (100% = 1e18)
     uint64 managementFee;
-    /// @notice Withdrawal fee rate (100% = 1e18)
+    // Withdrawal fee rate (100% = 1e18)
     uint64 withdrawalFee;
-    /// @notice Last fee update timestamp
+    // Last fee update timestamp
     uint64 lastUpdateTimestamp;
-    /// @notice High water mark for performance fees
+    // High water mark for performance fees
     uint256 highwaterMark;
+}
+
+/// @dev Struct wrapping initialization parameters for AsyncVault
+struct AsyncVaultInitParams {
+    // Owner of the vault
+    address owner;
+    // Underlying asset address
+    address asset;
+    // Vault name
+    string name;
+    // Vault symbol
+    string symbol;
+    // Oracle for assets exchange rate
+    address rateProvider;
+    // Fee recipient
+    address feeRecipient;
+    // Fee configuration
+    Fees fees;
 }
 
 // keccak256(abi.encode(uint256(keccak256("ultrayield.storage.AsyncVault")) - 1)) & ~bytes32(uint256(0xff));
@@ -64,29 +82,23 @@ abstract contract AsyncVault is BaseControlledAsyncRedeem {
     }
 
     /// @notice Initialize vault with basic parameters
-    /// @param _owner Owner of the vault
-    /// @param _asset Underlying asset address
-    /// @param _name Vault name
-    /// @param _symbol Vault symbol
-    /// @param _rateProvider oracle for assets exchange rate
-    /// @param _feeRecipient Fee recipient
-    /// @param _fees Fee configuration
+    /// @param params Struct wrapping initialization parameters
     function initialize(
-        address _owner,
-        address _asset,
-        string memory _name,
-        string memory _symbol,
-        address _rateProvider,
-        address _feeRecipient,
-        Fees memory _fees
+        AsyncVaultInitParams memory params
     ) public virtual onlyInitializing {
-        super.initialize(_owner, _asset, _name, _symbol, _rateProvider);
+        super.initialize(BaseControlledAsyncRedeemInitParams({
+            owner: params.owner,
+            asset: params.asset,
+            name: params.name,
+            symbol: params.symbol,
+            rateProvider: params.rateProvider
+        }));
 
-        require(_feeRecipient != address(0)); 
-        _getAsyncVaultStorage().feeRecipient = _feeRecipient;
-        emit FeesRecipientUpdated(address(0), _feeRecipient);
+        require(params.feeRecipient != address(0)); 
+        _getAsyncVaultStorage().feeRecipient = params.feeRecipient;
+        emit FeesRecipientUpdated(address(0), params.feeRecipient);
 
-        _setFees(_fees);
+        _setFees(params.fees);
     }
 
     //////////////
@@ -97,28 +109,28 @@ abstract contract AsyncVault is BaseControlledAsyncRedeem {
     /// @param assets Amount to deposit
     /// @return shares Amount of shares received
     function deposit(uint256 assets) external returns (uint256) {
-        return deposit(assets, msg.sender);
+        return super.deposit(assets, msg.sender);
     }
 
     /// @notice Helper to mint shares for msg.sender
     /// @param shares Amount to mint
     /// @return assets Amount of assets required
     function mint(uint256 shares) external returns (uint256) {
-        return mint(shares, msg.sender);
+        return super.mint(shares, msg.sender);
     }
 
     /// @notice Helper to withdraw assets for msg.sender
     /// @param assets Amount to withdraw
     /// @return shares Amount of shares burned
     function withdraw(uint256 assets) external returns (uint256) {
-        return withdraw(assets, msg.sender, msg.sender);
+        return super.withdraw(assets, msg.sender, msg.sender);
     }
 
     /// @notice Helper to redeem shares for msg.sender
     /// @param shares Amount to redeem
     /// @return assets Amount of assets received
     function redeem(uint256 shares) external returns (uint256) {
-        return redeem(shares, msg.sender, msg.sender);
+        return super.redeem(shares, msg.sender, msg.sender);
     }
 
     //////////////////////////
@@ -160,7 +172,7 @@ abstract contract AsyncVault is BaseControlledAsyncRedeem {
         // Fulfill request
         _fulfillRedeemOfAsset(asset(), assets - feesToCollect, shares, controller);
 
-        // Burn the shares
+        // Burn shares
         _burn(address(this), shares);
 
         collectWithdrawalFeeInAsset(asset(), feesToCollect);
@@ -194,7 +206,7 @@ abstract contract AsyncVault is BaseControlledAsyncRedeem {
         // Fulfill request with asset units (base contract expects asset units)
         _fulfillRedeemOfAsset(asset, assets - feesToCollect, shares, controller);
 
-        // Burn the shares
+        // Burn shares
         _burn(address(this), shares);
 
         // Collect withdrawal fee in asset units
@@ -238,7 +250,7 @@ abstract contract AsyncVault is BaseControlledAsyncRedeem {
             totalShares += shares[i];
         }
 
-        // Burn the shares
+        // Burn shares
         _burn(address(this), totalShares);
 
         collectWithdrawalFeeInAsset(asset(), totalFees);
@@ -380,10 +392,9 @@ abstract contract AsyncVault is BaseControlledAsyncRedeem {
         } else {
             fees_.highwaterMark = currentFees.highwaterMark;
         }
+        _getAsyncVaultStorage().fees = fees_;
 
         emit FeesUpdated(currentFees, fees_);
-
-        _getAsyncVaultStorage().fees = fees_;
     }
 
     /// @notice Mint fees as shares to recipient
