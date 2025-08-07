@@ -3,7 +3,7 @@ pragma solidity 0.8.28;
 
 import { IUltraVault, Fees } from "../interfaces/IUltraVault.sol";
 import { BaseControlledAsyncRedeem, BaseControlledAsyncRedeemInitParams } from "./BaseControlledAsyncRedeem.sol";
-import { PendingRedeem, ClaimableRedeem } from "src/interfaces/IUltraQueue.sol";
+import { PendingRedeem, ClaimableRedeem } from "src/interfaces/IRedeemQueue.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import { UUPSUpgradeable } from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";

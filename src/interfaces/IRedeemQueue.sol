@@ -11,7 +11,7 @@ struct ClaimableRedeem {
     uint256 shares;
 }
 
-interface IUltraQueue {
+interface IRedeemQueue {
     function getPendingRedeem(
         address user, 
         address vault, 

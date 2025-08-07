@@ -6,13 +6,13 @@ import { IERC7540Redeem, IERC7540Operator } from "ERC-7540/interfaces/IERC7540.s
 import { PausableUpgradeable } from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import { ERC4626Upgradeable } from "@openzeppelin/contracts-upgradeable/token/ERC20/extensions/ERC4626Upgradeable.sol";
 import { SafeERC20, IERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import { PendingRedeem, ClaimableRedeem } from "src/interfaces/IUltraQueue.sol";
+import { PendingRedeem, ClaimableRedeem } from "src/interfaces/IRedeemQueue.sol";
 import { IUltraVaultRateProvider } from "src/interfaces/IUltraVaultRateProvider.sol";
 import { IPausable } from "src/interfaces/IPausable.sol";
 import { InitializableOwnable } from "src/utils/InitializableOwnable.sol";
 import { FixedPointMathLib } from "src/utils/FixedPointMathLib.sol";
 import { AddressUpdateProposal } from "src/utils/AddressUpdates.sol";
-import { UltraQueue } from "src/vaults/accounting/UltraQueue.sol";
+import { RedeemQueue } from "src/vaults/accounting/RedeemQueue.sol";
 
 // keccak256(abi.encode(uint256(keccak256("ultrayield.storage.BaseControlledAsyncRedeem")) - 1)) & ~bytes32(uint256(0xff));
 bytes32 constant BASE_ASYNC_REDEEM_STORAGE_LOCATION = 0xaf7389673351d5ab654ae6fb9b324c897ebef437a969ec1524dcc6c7b5ca5400;
@@ -38,7 +38,7 @@ abstract contract BaseControlledAsyncRedeem is
     ERC4626Upgradeable,
     InitializableOwnable,
     PausableUpgradeable,
-    UltraQueue,
+    RedeemQueue,
     IERC7540Operator,
     IERC7540Redeem,
     IPausable
