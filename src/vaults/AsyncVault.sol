@@ -51,7 +51,7 @@ abstract contract AsyncVault is BaseControlledAsyncRedeem {
     event FeesRecipientUpdated(address oldRecipient, address newRecipient);
     event FeesUpdated(Fees oldFees, Fees newFees);
     event FeesCollected(uint256 shares, uint256 managementFee, uint256 performanceFee);
-    event WithdrawalFeeCollected(uint256 shares);
+    event WithdrawalFeeCollected(uint256 amount);
 
     ///////////////
     // Constants //
@@ -164,7 +164,7 @@ abstract contract AsyncVault is BaseControlledAsyncRedeem {
         assets = convertToAssets(shares);
 
         // Calculate the withdrawal incentive fee from the assets
-        uint256 withdrawalFee = assets.mulDivDown(fees().withdrawalFee, 1e18);
+        uint256 withdrawalFee = assets.mulDivDown(getFees().withdrawalFee, 1e18);
 
         // Fulfill request
         uint256 withdrawalAmount = assets - withdrawalFee;
@@ -196,7 +196,7 @@ abstract contract AsyncVault is BaseControlledAsyncRedeem {
         assets = convertFromUnderlying(asset, underlyingAssets);
         
         // Calculate the withdrawal incentive fee directly in asset units
-        uint256 withdrawalFee = assets.mulDivDown(fees().withdrawalFee, 1e18);
+        uint256 withdrawalFee = assets.mulDivDown(getFees().withdrawalFee, 1e18);
 
         // Fulfill request with asset units (base contract expects asset units)
         uint256 withdrawalAmount = assets - withdrawalFee;
@@ -226,7 +226,7 @@ abstract contract AsyncVault is BaseControlledAsyncRedeem {
 
         _collectFees();
 
-        uint256 _withdrawalFeeRate = fees().withdrawalFee;
+        uint256 withdrawalFeeRate = getFees().withdrawalFee;
         uint256 totalShares;
         uint256 totalFees;
         address _asset = asset();
@@ -236,7 +236,7 @@ abstract contract AsyncVault is BaseControlledAsyncRedeem {
             uint256 assets = _optimizedConvertToAssets(shares[i], _totalAssets, _totalSupply);
 
             // Calculate the withdrawal incentive fee from the assets
-            uint256 withdrawalFee = assets.mulDivDown(_withdrawalFeeRate, 1e18);
+            uint256 withdrawalFee = assets.mulDivDown(withdrawalFeeRate, 1e18);
 
             // Fulfill redeem
             _fulfillRedeemOfAsset(_asset, assets - withdrawalFee, shares[i], controllers[i]);
@@ -295,8 +295,15 @@ abstract contract AsyncVault is BaseControlledAsyncRedeem {
     // Fees //
     //////////
 
+    /// @dev Struct wrapping total assets, supply and share value to optimize fee calculations
+    struct Totals {
+        uint256 totalAssets;
+        uint256 totalSupply;
+        uint256 shareValue;
+    }
+
     /// @notice Get vault fee parameters
-    function fees() public view returns (Fees memory) {
+    function getFees() public view returns (Fees memory) {
         return _getAsyncVaultStorage().fees;
     }
 
@@ -307,89 +314,82 @@ abstract contract AsyncVault is BaseControlledAsyncRedeem {
 
     /// @notice Get total accrued fees
     function accruedFees() public view returns (uint256) {
-        Fees memory _fees = fees();
-        uint256 _totalAssets = totalAssets();
-        uint256 _totalSupply = totalSupply();
-        return _accruedPerformanceFee(_fees, _totalAssets, _totalSupply) + _accruedManagementFee(_fees, _totalAssets);
+        Fees memory fees = getFees();
+        Totals memory totals = _snapshotTotals();
+        return _calculateAccruedPerformanceFee(fees, totals) + _calculateAccruedManagementFee(fees, totals);
     }
 
     /// @notice Calculate accrued performance fee
     /// @return accruedPerformanceFee Fee amount in asset token
     /// @dev Based on high water mark value
-    function _accruedPerformanceFee(
-        Fees memory _fees, 
-        uint256 _totalAssets, 
-        uint256 _totalSupply
+    function _calculateAccruedPerformanceFee(
+        Fees memory fees, 
+        Totals memory totals
     ) internal view returns (uint256) {
-        uint256 performanceFee = _fees.performanceFee;
-        if (performanceFee == 0) {
-            return 0;
-        }
-        uint8 _decimals = decimals();
-        uint256 shareValue = _optimizedConvertToAssets(10 ** _decimals, _totalAssets, _totalSupply);
-        if (shareValue <= _fees.highwaterMark) {
+        uint256 performanceFee = fees.performanceFee;
+        if (performanceFee == 0 || totals.shareValue <= fees.highwaterMark) {
             return 0;
         }
         return performanceFee.mulDivDown(
-            (shareValue - _fees.highwaterMark) * _totalSupply,
-            (10 ** (18 + _decimals))
+            (totals.shareValue - fees.highwaterMark) * totals.totalSupply,
+            (10 ** (18 + decimals()))
         );
     }
 
     /// @notice Calculate accrued management fee
     /// @return accruedManagementFee Fee amount in asset token
     /// @dev Annualized per minute, based on 525_600 minutes or 31_536_000 seconds per year
-    function _accruedManagementFee(Fees memory _fees, uint256 _totalAssets) internal view returns (uint256) {
-        uint256 managementFee = _fees.managementFee;
+    function _calculateAccruedManagementFee(Fees memory fees, Totals memory totals) internal view returns (uint256) {
+        uint256 managementFee = fees.managementFee;
         if (managementFee == 0) {
             return 0;
         }
-        uint256 timePassed = block.timestamp - _fees.lastUpdateTimestamp;
-        return managementFee.mulDivDown(_totalAssets * timePassed, ONE_YEAR) / 1e18;
+        uint256 timePassed = block.timestamp - fees.lastUpdateTimestamp;
+        return managementFee.mulDivDown(totals.totalAssets * timePassed, ONE_YEAR) / 1e18;
     }
 
     /// @notice Update vault's fee recipient
-    /// @param newFeeRecipient_ New fee recipient
+    /// @param newFeeRecipient New fee recipient
     /// @dev Collects pending fees before update
-    function setFeeRecipient(address newFeeRecipient_) public onlyOwner whenNotPaused {
-        require(newFeeRecipient_ != address(0), Misconfigured());
+    function setFeeRecipient(address newFeeRecipient) public onlyOwner whenNotPaused {
+        require(newFeeRecipient != address(0), Misconfigured());
 
         address currentFeeRecipient = feeRecipient();
-        if (currentFeeRecipient != newFeeRecipient_) {
+        if (currentFeeRecipient != newFeeRecipient) {
             _collectFees();
-            _getAsyncVaultStorage().feeRecipient = newFeeRecipient_;
-            emit FeesRecipientUpdated(currentFeeRecipient, newFeeRecipient_);
+            _getAsyncVaultStorage().feeRecipient = newFeeRecipient;
+            emit FeesRecipientUpdated(currentFeeRecipient, newFeeRecipient);
         }
     }
 
     /// @notice Update vault fees
-    /// @param fees_ New fee configuration
+    /// @param fees New fee configuration
     /// @dev Reverts if fees exceed limits (30% performance, 5% management, 1% withdrawal)
     /// @dev Collects pending fees before update
-    function setFees(Fees memory fees_) public onlyOwner whenNotPaused {
+    function setFees(Fees memory fees) public onlyOwner whenNotPaused {
         _collectFees();
-        _setFees(fees_);
+        _setFees(fees);
     }
 
-    function _setFees(Fees memory fees_) internal {
+    function _setFees(Fees memory fees) internal {
         require(
-            fees_.performanceFee <= MAX_PERFORMANCE_FEE &&
-            fees_.managementFee <= MAX_MANAGEMENT_FEE &&
-            fees_.withdrawalFee <= MAX_WITHDRAWAL_FEE,
+            fees.performanceFee <= MAX_PERFORMANCE_FEE &&
+            fees.managementFee <= MAX_MANAGEMENT_FEE &&
+            fees.withdrawalFee <= MAX_WITHDRAWAL_FEE,
             Misconfigured()
         );
 
-        fees_.lastUpdateTimestamp = uint64(block.timestamp);
+        fees.lastUpdateTimestamp = uint64(block.timestamp);
 
-        Fees memory currentFees = fees();
+        Fees memory currentFees = getFees();
         if (currentFees.highwaterMark == 0) {
-            fees_.highwaterMark = 10 ** IERC20Metadata(asset()).decimals();
+            fees.highwaterMark = 10 ** IERC20Metadata(asset()).decimals();
         } else {
-            fees_.highwaterMark = currentFees.highwaterMark;
+            fees.highwaterMark = currentFees.highwaterMark;
         }
-        _getAsyncVaultStorage().fees = fees_;
+        _getAsyncVaultStorage().fees = fees;
 
-        emit FeesUpdated(currentFees, fees_);
+        emit FeesUpdated(currentFees, fees);
     }
 
     /// @notice Mint fees as shares to recipient
@@ -398,27 +398,41 @@ abstract contract AsyncVault is BaseControlledAsyncRedeem {
         _collectFees();
     }
 
-    function _collectFees() internal {
-        Fees memory _fees = fees();
+    function _snapshotTotals() internal view returns (Totals memory) {
         uint256 _totalAssets = totalAssets();
         uint256 _totalSupply = totalSupply();
-        uint256 managementFee = _accruedManagementFee(_fees, _totalAssets);
-        uint256 performanceFee = _accruedPerformanceFee(_fees, _totalAssets, _totalSupply);
-        uint256 shareValue = _optimizedConvertToAssets(10 ** decimals(), _totalAssets, _totalSupply);
+        return Totals({
+            totalAssets: _totalAssets,
+            totalSupply: _totalSupply,
+            shareValue: _optimizedConvertToAssets(10 ** decimals(), _totalAssets, _totalSupply)
+        });
+    }
 
-        if (performanceFee + managementFee > 0) {
-            AsyncVaultStorage storage $ = _getAsyncVaultStorage();
-            // Update the high water mark
-            if (shareValue > _fees.highwaterMark) {
-                $.fees.highwaterMark = shareValue;
-            }
-            $.fees.lastUpdateTimestamp = uint64(block.timestamp);
+    function _collectFees() internal {
+        // Prepare inputs for calculations
+        Fees memory fees = getFees();
+        Totals memory totals = _snapshotTotals();
+
+        // Calculate fees
+        uint256 managementFee = _calculateAccruedManagementFee(fees, totals);
+        uint256 performanceFee = _calculateAccruedPerformanceFee(fees, totals);
+        uint256 totalFeesInAssets = managementFee + performanceFee;
+
+        // Update timestamp and highwater mark in storage
+        _getAsyncVaultStorage().fees.lastUpdateTimestamp = uint64(block.timestamp);
+        if (totals.shareValue > fees.highwaterMark) {
+            _getAsyncVaultStorage().fees.highwaterMark = totals.shareValue;
+        }
+
+        // Collect fees as shares if non-zero
+        if (totalFeesInAssets > 0) {
+            // Convert fees to shares
+            uint256 feesInShares = _optimizedConvertToShares(totalFeesInAssets, totals.totalAssets, totals.totalSupply);
 
             // Mint shares to fee recipient
-            uint256 feeShares = _optimizedConvertToShares(managementFee + performanceFee, _totalAssets, _totalSupply);
-            _mint($.feeRecipient, feeShares);
+            _mint(feeRecipient(), feesInShares);
 
-            emit FeesCollected(feeShares, managementFee, performanceFee);
+            emit FeesCollected(feesInShares, managementFee, performanceFee);
         }
     }
 }

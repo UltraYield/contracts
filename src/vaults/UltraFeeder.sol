@@ -145,7 +145,7 @@ contract UltraFeeder is BaseControlledAsyncRedeem, UUPSUpgradeable {
         uint256 mainAssetsClaimed = mainVault_.redeemAsset(_asset, _shares, address(this), address(this));
 
         // Calculate the expected assets after withdrawal fees from the underlying vault
-        Fees memory fees = mainVault_.fees();
+        Fees memory fees = mainVault_.getFees();
         uint256 withdrawalFee = _assets * fees.withdrawalFee / 1e18;
         uint256 expectedAssetsAfterFees = _assets - withdrawalFee;
         require(mainAssetsClaimed == expectedAssetsAfterFees, AssetMismatch());
@@ -161,7 +161,7 @@ contract UltraFeeder is BaseControlledAsyncRedeem, UUPSUpgradeable {
     ) internal override {
         // The base implementation has added `_assets` to the claimable assets
         // We need to calculate the withdrawal fee and deduct it from the claimable assets
-        Fees memory fees = mainVault().fees();
+        Fees memory fees = mainVault().getFees();
         uint256 withdrawalFee = _assets * fees.withdrawalFee / 1e18;
         _consumeClaimableRedeem(_controller, _asset, withdrawalFee, 0);
     }
