@@ -112,12 +112,9 @@ contract UltraVault is BaseControlledAsyncRedeem, UUPSUpgradeable {
         UltraVaultInitParams memory params
     ) external initializer {
         require(params.fundsHolder != address(0) && params.oracle != address(0), Misconfigured());
+        require(params.feeRecipient != address(0), Misconfigured());
 
         UltraVaultStorage storage $ = _getUltraVaultStorage();
-        require(params.feeRecipient != address(0), Misconfigured()); 
-        $.feeRecipient = params.feeRecipient;
-        emit FeesRecipientUpdated(address(0), params.feeRecipient);
-        _setFees(params.fees);
         $.fundsHolder = params.fundsHolder;
         $.oracle = IPriceSource(params.oracle);
         _pause();
@@ -130,6 +127,10 @@ contract UltraVault is BaseControlledAsyncRedeem, UUPSUpgradeable {
             symbol: params.symbol,
             rateProvider: params.rateProvider
         }));
+
+        $.feeRecipient = params.feeRecipient;
+        emit FeesRecipientUpdated(address(0), params.feeRecipient);
+        _setFees(params.fees);
     }
 
     /////////////
