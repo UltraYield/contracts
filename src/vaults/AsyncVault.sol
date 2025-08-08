@@ -418,14 +418,15 @@ abstract contract AsyncVault is BaseControlledAsyncRedeem {
         uint256 performanceFee = _calculateAccruedPerformanceFee(fees, totals);
         uint256 totalFeesInAssets = managementFee + performanceFee;
 
-        // Update timestamp and highwater mark in storage
-        _getAsyncVaultStorage().fees.lastUpdateTimestamp = uint64(block.timestamp);
+        // Update highwater mark
         if (totals.shareValue > fees.highwaterMark) {
             _getAsyncVaultStorage().fees.highwaterMark = totals.shareValue;
         }
-
         // Collect fees as shares if non-zero
         if (totalFeesInAssets > 0) {
+            // Update timestamp
+            _getAsyncVaultStorage().fees.lastUpdateTimestamp = uint64(block.timestamp);
+
             // Convert fees to shares
             uint256 feesInShares = _optimizedConvertToShares(totalFeesInAssets, totals.totalAssets, totals.totalSupply);
 
