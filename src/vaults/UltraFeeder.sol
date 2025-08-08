@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity 0.8.28;
 
-import { IUltraVault, Fees } from "../interfaces/IUltraVault.sol";
-import { BaseControlledAsyncRedeem, BaseControlledAsyncRedeemInitParams } from "./BaseControlledAsyncRedeem.sol";
-import { PendingRedeem, ClaimableRedeem } from "src/interfaces/IRedeemQueue.sol";
+import { IUltraVault, Fees } from "src/interfaces/IUltraVault.sol";
+import { BaseControlledAsyncRedeem, BaseControlledAsyncRedeemInitParams } from "src/vaults/BaseControlledAsyncRedeem.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import { UUPSUpgradeable } from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
@@ -34,12 +33,8 @@ contract UltraFeeder is BaseControlledAsyncRedeem, UUPSUpgradeable {
 
     event Referral(string indexed referralId, address user, uint256 shares);
 
-    error VaultPaused();
     error InvalidMainVault();
-    error NoPendingRedeem();
-    error NoClaimableAssets();
-    error InvalidRedeemRequest();
-    error AssetMismatch();
+    error AssetNumberMismatch();
     error ShareNumberMismatch();
 
     /////////////
@@ -70,7 +65,7 @@ contract UltraFeeder is BaseControlledAsyncRedeem, UUPSUpgradeable {
         // Validate main vault and base asset
         require(params.mainVault != address(0), InvalidMainVault());
         IUltraVault mainVault_ = IUltraVault(params.mainVault);
-        require(mainVault_.asset() == params.asset, AssetMismatch());
+        require(mainVault_.asset() == params.asset, Misconfigured());
 
         // Store main vault
         _getUltraFeederStorage().mainVault = mainVault_;
@@ -148,7 +143,7 @@ contract UltraFeeder is BaseControlledAsyncRedeem, UUPSUpgradeable {
         Fees memory fees = mainVault_.getFees();
         uint256 withdrawalFee = _assets * fees.withdrawalFee / 1e18;
         uint256 expectedAssetsAfterFees = _assets - withdrawalFee;
-        require(mainAssetsClaimed == expectedAssetsAfterFees, AssetMismatch());
+        require(mainAssetsClaimed == expectedAssetsAfterFees, AssetNumberMismatch());
     }
 
     /// @dev Hook for inheriting contracts after fulfill redeem
