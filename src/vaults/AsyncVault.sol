@@ -58,9 +58,10 @@ abstract contract AsyncVault is BaseControlledAsyncRedeem {
     ///////////////
 
     bytes32 public constant OPERATOR_ROLE = keccak256("OPERATOR_ROLE");
-    uint64 public constant MAX_PERFORMANCE_FEE = 3e17;
-    uint64 public constant MAX_MANAGEMENT_FEE = 5e16;
-    uint64 public constant MAX_WITHDRAWAL_FEE = 1e16;
+    uint64 public constant MAX_PERFORMANCE_FEE = 3e17; // 30%
+    uint64 public constant MAX_MANAGEMENT_FEE = 5e16; // 5%
+    uint64 public constant MAX_WITHDRAWAL_FEE = 1e16; // 1%
+    uint256 internal constant ONE_YEAR = 365 * 24 * 60 * 60; // 31_536_000 seconds
 
     /////////////
     // Storage //
@@ -163,20 +164,18 @@ abstract contract AsyncVault is BaseControlledAsyncRedeem {
         assets = convertToAssets(shares);
 
         // Calculate the withdrawal incentive fee from the assets
-        uint256 feesToCollect = assets.mulDivDown(
-            uint256(fees().withdrawalFee),
-            1e18
-        );
+        uint256 withdrawalFee = assets.mulDivDown(fees().withdrawalFee, 1e18);
 
         // Fulfill request
-        _fulfillRedeemOfAsset(asset(), assets - feesToCollect, shares, controller);
+        uint256 withdrawalAmount = assets - withdrawalFee;
+        _fulfillRedeemOfAsset(asset(), withdrawalAmount, shares, controller);
 
         // Burn shares
         _burn(address(this), shares);
 
-        collectWithdrawalFeeInAsset(asset(), feesToCollect);
+        _transferWithdrawalFeeInAsset(asset(), withdrawalFee);
 
-        return assets - feesToCollect;
+        return withdrawalAmount;
     }
 
     /// @notice Fulfill redeem request
@@ -197,22 +196,20 @@ abstract contract AsyncVault is BaseControlledAsyncRedeem {
         assets = convertFromUnderlying(asset, underlyingAssets);
         
         // Calculate the withdrawal incentive fee directly in asset units
-        uint256 feesToCollect = assets.mulDivDown(
-            uint256(fees().withdrawalFee),
-            1e18
-        );
+        uint256 withdrawalFee = assets.mulDivDown(fees().withdrawalFee, 1e18);
 
         // Fulfill request with asset units (base contract expects asset units)
-        _fulfillRedeemOfAsset(asset, assets - feesToCollect, shares, controller);
+        uint256 withdrawalAmount = assets - withdrawalFee;
+        _fulfillRedeemOfAsset(asset, withdrawalAmount, shares, controller);
 
         // Burn shares
         _burn(address(this), shares);
 
         // Collect withdrawal fee in asset units
-        collectWithdrawalFeeInAsset(asset, feesToCollect);
+        _transferWithdrawalFeeInAsset(asset, withdrawalFee);
 
         // Return the amount in asset units for consistency with base contract
-        return assets - feesToCollect;
+        return withdrawalAmount;
     }
 
     /// @notice Fulfill multiple redeem requests
@@ -229,30 +226,33 @@ abstract contract AsyncVault is BaseControlledAsyncRedeem {
 
         _collectFees();
 
-        uint64 withdrawalFee = fees().withdrawalFee;
+        uint256 _withdrawalFeeRate = fees().withdrawalFee;
         uint256 totalShares;
         uint256 totalFees;
-        for (uint256 i; i < shares.length; i++) {
-            uint256 assets = convertToAssets(shares[i]);
+        address _asset = asset();
+        uint256 _totalAssets = totalAssets();
+        uint256 _totalSupply = totalSupply();
+        for (uint256 i; i < shares.length; ) {
+            uint256 assets = _optimizedConvertToAssets(shares[i], _totalAssets, _totalSupply);
 
             // Calculate the withdrawal incentive fee from the assets
-            uint256 feesToCollect = assets.mulDivDown(
-                uint256(withdrawalFee),
-                1e18
-            );
+            uint256 withdrawalFee = assets.mulDivDown(_withdrawalFeeRate, 1e18);
 
             // Fulfill redeem
-            _fulfillRedeemOfAsset(asset(), assets - feesToCollect, shares[i], controllers[i]);
+            _fulfillRedeemOfAsset(_asset, assets - withdrawalFee, shares[i], controllers[i]);
 
             total += assets;
-            totalFees += feesToCollect;
+            totalFees += withdrawalFee;
             totalShares += shares[i];
+
+            unchecked { ++i; }
         }
 
         // Burn shares
         _burn(address(this), totalShares);
 
-        collectWithdrawalFeeInAsset(asset(), totalFees);
+        // Transfer withdrawal fees
+        _transferWithdrawalFeeInAsset(_asset, totalFees);
 
         return total - totalFees;
     }
@@ -271,7 +271,7 @@ abstract contract AsyncVault is BaseControlledAsyncRedeem {
     /// @notice Collect withdrawal fee
     /// @param fee Amount to collect
     /// @dev Can be overridden for custom withdrawal logic
-    function collectWithdrawalFeeInAsset(
+    function _transferWithdrawalFeeInAsset(
         address asset,
         uint256 fee
     ) internal virtual {
@@ -284,13 +284,6 @@ abstract contract AsyncVault is BaseControlledAsyncRedeem {
     /////////////////////
     // Hooks overrides //
     /////////////////////
-
-    /// @notice Collect fees before withdraw
-    /// @dev Expected to be overridden in inheriting contracts
-    function beforeWithdraw(address, uint256, uint256) internal virtual override {
-        if (!paused()) 
-            _collectFees();
-    }
 
     /// @notice Collect fees before deposit
     /// @dev Expected to be overridden in inheriting contracts
@@ -314,41 +307,45 @@ abstract contract AsyncVault is BaseControlledAsyncRedeem {
 
     /// @notice Get total accrued fees
     function accruedFees() public view returns (uint256) {
-        Fees memory fees_ = fees();
-        return _accruedPerformanceFee(fees_) + _accruedManagementFee(fees_);
+        Fees memory _fees = fees();
+        uint256 _totalAssets = totalAssets();
+        uint256 _totalSupply = totalSupply();
+        return _accruedPerformanceFee(_fees, _totalAssets, _totalSupply) + _accruedManagementFee(_fees, _totalAssets);
     }
 
     /// @notice Calculate accrued performance fee
     /// @return accruedPerformanceFee Fee amount in asset token
     /// @dev Based on high water mark value
     function _accruedPerformanceFee(
-        Fees memory fees_
+        Fees memory _fees, 
+        uint256 _totalAssets, 
+        uint256 _totalSupply
     ) internal view returns (uint256) {
-        uint256 shareValue = convertToAssets(10 ** decimals());
-        uint256 performanceFee = uint256(fees_.performanceFee);
-
-        return performanceFee > 0 && shareValue > fees_.highwaterMark ?
-            performanceFee.mulDivDown(
-                (shareValue - fees_.highwaterMark) * totalSupply(),
-                (10 ** (18 + decimals()))
-            ) :
-            0;
+        uint256 performanceFee = _fees.performanceFee;
+        if (performanceFee == 0) {
+            return 0;
+        }
+        uint8 _decimals = decimals();
+        uint256 shareValue = _optimizedConvertToAssets(10 ** _decimals, _totalAssets, _totalSupply);
+        if (shareValue <= _fees.highwaterMark) {
+            return 0;
+        }
+        return performanceFee.mulDivDown(
+            (shareValue - _fees.highwaterMark) * _totalSupply,
+            (10 ** (18 + _decimals))
+        );
     }
 
     /// @notice Calculate accrued management fee
     /// @return accruedManagementFee Fee amount in asset token
-    /// @dev Annualized per minute, based on 525600 minutes per year
-    function _accruedManagementFee(
-        Fees memory fees_
-    ) internal view returns (uint256) {
-        uint256 managementFee = uint256(fees_.managementFee);
-
-        return managementFee > 0 ? 
-            managementFee.mulDivDown(
-                totalAssets() * (block.timestamp - fees_.lastUpdateTimestamp),
-                31536000 // one year
-            ) / 1e18 : 
-            0;
+    /// @dev Annualized per minute, based on 525_600 minutes or 31_536_000 seconds per year
+    function _accruedManagementFee(Fees memory _fees, uint256 _totalAssets) internal view returns (uint256) {
+        uint256 managementFee = _fees.managementFee;
+        if (managementFee == 0) {
+            return 0;
+        }
+        uint256 timePassed = block.timestamp - _fees.lastUpdateTimestamp;
+        return managementFee.mulDivDown(_totalAssets * timePassed, ONE_YEAR) / 1e18;
     }
 
     /// @notice Update vault's fee recipient
@@ -367,7 +364,7 @@ abstract contract AsyncVault is BaseControlledAsyncRedeem {
 
     /// @notice Update vault fees
     /// @param fees_ New fee configuration
-    /// @dev Reverts if fees exceed limits (20% performance, 5% management, 5% withdrawal)
+    /// @dev Reverts if fees exceed limits (30% performance, 5% management, 1% withdrawal)
     /// @dev Collects pending fees before update
     function setFees(Fees memory fees_) public onlyOwner whenNotPaused {
         _collectFees();
@@ -375,7 +372,6 @@ abstract contract AsyncVault is BaseControlledAsyncRedeem {
     }
 
     function _setFees(Fees memory fees_) internal {
-        // Max value: 30% performance, 5% management, 1% withdrawal
         require(
             fees_.performanceFee <= MAX_PERFORMANCE_FEE &&
             fees_.managementFee <= MAX_MANAGEMENT_FEE &&
@@ -403,21 +399,23 @@ abstract contract AsyncVault is BaseControlledAsyncRedeem {
     }
 
     function _collectFees() internal {
-        Fees memory fees_ = fees();
-        uint256 managementFee = _accruedManagementFee(fees_);
-        uint256 performanceFee = _accruedPerformanceFee(fees_);
-        uint256 shareValue = convertToAssets(10 ** decimals());
+        Fees memory _fees = fees();
+        uint256 _totalAssets = totalAssets();
+        uint256 _totalSupply = totalSupply();
+        uint256 managementFee = _accruedManagementFee(_fees, _totalAssets);
+        uint256 performanceFee = _accruedPerformanceFee(_fees, _totalAssets, _totalSupply);
+        uint256 shareValue = _optimizedConvertToAssets(10 ** decimals(), _totalAssets, _totalSupply);
 
         if (performanceFee + managementFee > 0) {
             AsyncVaultStorage storage $ = _getAsyncVaultStorage();
             // Update the high water mark
-            if (shareValue > fees_.highwaterMark) 
+            if (shareValue > _fees.highwaterMark) {
                 $.fees.highwaterMark = shareValue;
-
+            }
             $.fees.lastUpdateTimestamp = uint64(block.timestamp);
 
             // Mint shares to fee recipient
-            uint256 feeShares = convertToShares(managementFee + performanceFee);
+            uint256 feeShares = _optimizedConvertToShares(managementFee + performanceFee, _totalAssets, _totalSupply);
             _mint($.feeRecipient, feeShares);
 
             emit FeesCollected(feeShares, managementFee, performanceFee);
