@@ -159,15 +159,11 @@ contract UltraFeeder is BaseControlledAsyncRedeem, UUPSUpgradeable {
         uint256, // shares
         address _controller
     ) internal override {
-        // The base implementation has already updated claimableRedeem.assets += assets
-        // We need to correct it to use the actual assets received after fees
+        // The base implementation has added `_assets` to the claimable assets
+        // We need to calculate the withdrawal fee and deduct it from the claimable assets
         Fees memory fees = mainVault().fees();
         uint256 withdrawalFee = _assets * fees.withdrawalFee / 1e18;
-        
-        // Correct the claimable redeem amounts to use the actual assets received
-        ClaimableRedeem memory claimableRedeem = _getClaimableRedeem(_controller, _asset);
-        claimableRedeem.assets -= withdrawalFee;
-        _setClaimableRedeem(_controller, _asset, claimableRedeem);
+        _consumeClaimableRedeem(_controller, _asset, withdrawalFee, 0);
     }
 
 
@@ -286,7 +282,6 @@ contract UltraFeeder is BaseControlledAsyncRedeem, UUPSUpgradeable {
     ) internal returns (uint256 shares) {
         shares = _depositAsset(_asset, _assets, _receiver);
         emit Referral(_referralId, msg.sender, shares);
-        return shares;
     }
 
     //////////////////////

@@ -11,30 +11,56 @@ struct ClaimableRedeem {
     uint256 shares;
 }
 
-interface IRedeemQueue {
-    function getPendingRedeem(
-        address user, 
-        address vault, 
-        address token
-    ) external view returns (PendingRedeem memory);
+interface IRedeemQueueErrors {
+    error InsufficientPendingShares(uint256 available, uint256 requested);
+    error InsufficientClaimableShares(uint256 available, uint256 requested);
+    error InsufficientClaimableAssets(uint256 available, uint256 requested);
+    error TooManyShares(uint256 shares);
+    error TooManyAssets(uint256 assets);
+}
 
-    function getClaimableRedeem(
-        address user, 
-        address vault, 
-        address token
-    ) external view returns (ClaimableRedeem memory);
+interface IRedeemAccounting {
+    /// @notice Get controller's pending redeem for the base asset
+    /// @param _controller Controller address
+    /// @return pendingRedeem Pending redeem details
+    function getPendingRedeem(address _controller) external view returns (PendingRedeem memory);
 
-    function setPendingRedeem(
-        address user, 
-        address vault, 
-        address token,
-        PendingRedeem memory pendingRedeem
-    ) external;
+    /// @notice Get controller's pending redeem for the given asset
+    /// @param _asset Asset
+    /// @param _controller Controller address
+    /// @return pendingRedeem Pending redeem details
+    function getPendingRedeemForAsset(address _asset, address _controller) external view returns (PendingRedeem memory);
 
-    function setClaimableRedeem(
-        address user, 
-        address vault, 
-        address token,
-        ClaimableRedeem memory claimableRedeem
-    ) external;
+    /// @notice Get controller's claimable redeem for the base asset
+    /// @param _controller Controller address
+    /// @return claimableRedeem Claimable redeem details
+    function getClaimableRedeem(address _controller) external view returns (ClaimableRedeem memory);
+
+    /// @notice Get controller's claimable redeem for the given asset
+    /// @param _asset Asset
+    /// @param _controller Controller address
+    /// @return claimableRedeem Claimable redeem details
+    function getClaimableRedeemForAsset(address _asset, address _controller) external view returns (ClaimableRedeem memory);
+
+    /// @notice Get controller's pending shares for the base asset
+    /// @param _controller Controller address
+    /// @return pendingShares Amount of pending shares
+    function pendingRedeemRequest(uint256 /* requestId */, address _controller) external view returns (uint256);
+
+    /// @notice Get controller's pending shares for the given asset
+    /// @param _asset Asset
+    /// @param _controller Controller address
+    /// @return pendingShares Amount of pending shares
+    function pendingRedeemRequestForAsset(address _asset, uint256 /* requestId */, address _controller) external view returns (uint256);
+
+    /// @notice Get controller's claimable shares for the base asset
+    /// @param _controller Controller address
+    /// @return claimableShares Amount of claimable shares
+    function claimableRedeemRequest(uint256 /* requestId */, address _controller) external view returns (uint256);
+
+    /// @notice Get controller's claimable shares for the given asset
+    /// @param _asset Asset
+    /// @param _controller Controller address
+    /// @return claimableShares Amount of claimable shares
+    function claimableRedeemRequestForAsset(address _asset, uint256 /* requestId */, address _controller) external view returns (uint256);
 }
