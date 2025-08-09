@@ -131,6 +131,7 @@ abstract contract BaseControlledAsyncRedeem is
         require(params.asset != address(0), ZeroAssetAddress());
 
         // Init OZ contracts
+        __AccessControl_init();
         __AccessControlDefaultAdminRules_init(0, params.owner);
         __Pausable_init();
         __ERC20_init(params.name, params.symbol);
