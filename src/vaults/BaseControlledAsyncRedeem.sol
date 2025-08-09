@@ -175,7 +175,7 @@ abstract contract BaseControlledAsyncRedeem is
     function setOperator(
         address operator,
         bool approved
-    ) public virtual returns (bool success) {
+    ) public returns (bool success) {
         require(msg.sender != operator, "ERC7540Vault/cannot-set-self-as-operator");
         if (isOperator(msg.sender, operator) != approved) {
             _getBaseAsyncRedeemStorage().isOperator[msg.sender][operator] = approved;
@@ -191,7 +191,7 @@ abstract contract BaseControlledAsyncRedeem is
     function convertToUnderlying(
         address _asset,
         uint256 _assets
-    ) public view virtual returns (uint256 baseAssets) {
+    ) public view returns (uint256 baseAssets) {
         // If asset is the same as base asset, no conversion needed
         if (_asset == this.asset()) {
             return _assets;
@@ -203,7 +203,7 @@ abstract contract BaseControlledAsyncRedeem is
     function convertFromUnderlying(
         address _asset,
         uint256 _baseAssets
-    ) public view virtual returns (uint256 assets) {
+    ) public view returns (uint256 assets) {
         // If asset is the same as base asset, no conversion needed
         if (_asset == this.asset()) {
             return _baseAssets;
@@ -235,6 +235,13 @@ abstract contract BaseControlledAsyncRedeem is
     ////////////////////
     // Deposit & Mint //
     ////////////////////
+
+    /// @notice Helper to deposit assets for msg.sender
+    /// @param assets Amount to deposit
+    /// @return shares Amount of shares received
+    function deposit(uint256 assets) external returns (uint256) {
+        return _depositAsset(asset(), assets, msg.sender);
+    }
 
     /// @notice Deposit exact number of assets in base asset and mint shares to receiver
     /// @param _assets Amount of assets to deposit
@@ -272,6 +279,13 @@ abstract contract BaseControlledAsyncRedeem is
     ) internal whenNotPaused returns (uint256 shares) {
         shares = previewDepositForAsset(_asset, _assets);
         _performDeposit(_asset, _assets, shares, _receiver);
+    }
+
+    /// @notice Helper to mint shares for msg.sender
+    /// @param shares Amount to mint
+    /// @return assets Amount of assets required
+    function mint(uint256 shares) external returns (uint256) {
+        return _mintWithAsset(asset(), shares, msg.sender);
     }
 
     /// @notice Mint exact number of shares to receiver and deposit in base asset
@@ -347,6 +361,13 @@ abstract contract BaseControlledAsyncRedeem is
     // Withdraw & Redeem //
     ///////////////////////
 
+    /// @notice Helper to withdraw assets for msg.sender
+    /// @param assets Amount to withdraw
+    /// @return shares Amount of shares burned
+    function withdraw(uint256 assets) external returns (uint256) {
+        return _withdrawAsset(asset(), assets, msg.sender, msg.sender);
+    }
+
     /// @notice Withdraw assets from fulfilled redeem requests
     /// @param _assets Amount to withdraw
     /// @param _receiver Asset recipient
@@ -395,6 +416,13 @@ abstract contract BaseControlledAsyncRedeem is
 
         // Execute withdraw
         _performWithdraw(_asset, _assets, shares, _receiver, _controller);
+    }
+
+    /// @notice Helper to redeem shares for msg.sender
+    /// @param shares Amount to redeem
+    /// @return assets Amount of assets received
+    function redeem(uint256 shares) external returns (uint256) {
+        return _redeemAsset(asset(), shares, msg.sender, msg.sender);
     }
 
     /// @notice Redeem shares from fulfilled requests
@@ -694,6 +722,13 @@ abstract contract BaseControlledAsyncRedeem is
     ////////////////////
     // Request Redeem //
     ////////////////////
+
+    /// @notice Request redeem for msg.sender
+    /// @param shares Amount to redeem
+    /// @return requestId Request identifier
+    function requestRedeem(uint256 shares) external returns (uint256 requestId) {
+        return _requestRedeemOfAsset(asset(), shares, msg.sender, msg.sender);
+    }
 
     /// @notice Request redeem of shares
     /// @param _shares Amount to redeem
