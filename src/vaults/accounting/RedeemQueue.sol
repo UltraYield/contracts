@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity 0.8.28;
 
-import { VaultAdminControl } from "src/utils/VaultAdminControl.sol";
 import { UUPSUpgradeable } from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import { IRedeemQueueErrors, PendingRedeem, ClaimableRedeem } from "src/interfaces/IRedeemQueue.sol";
 import { FixedPointMathLib } from "src/utils/FixedPointMathLib.sol";
