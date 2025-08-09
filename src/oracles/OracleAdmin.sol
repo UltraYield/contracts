@@ -1,14 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity 0.8.28;
 
-import { InitializableOwnable } from "src/utils/InitializableOwnable.sol";
+import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
+import { Ownable2Step } from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import { IUltraVaultOracle } from "src/interfaces/IUltraVaultOracle.sol";
 import { IOwnable } from "src/interfaces/IOwnable.sol";
 
 /// @title OracleAdmin
 /// @notice Owner contract for managing UltraVaultOracle prices
 /// @dev Allows owner and admin to update oracle prices
-contract OracleAdmin is InitializableOwnable {
+contract OracleAdmin is Ownable2Step {
     ////////////
     // Events //
     ////////////
@@ -39,14 +40,13 @@ contract OracleAdmin is InitializableOwnable {
     /// @notice Initialize owner and oracle
     /// @param _oracle Oracle contract address
     /// @param _owner Owner address
-    constructor(address _oracle, address _owner) {
-        initOwner(_owner);
+    constructor(address _oracle, address _owner) Ownable(_owner) {
         oracle = IUltraVaultOracle(_oracle);
     }
 
-    /////////////////////
-    // Set Price Logic //
-    /////////////////////
+    ///////////////////
+    // Price Updates //
+    ///////////////////
 
     /// @notice Set base/quote pair price
     /// @param base The base asset
@@ -112,23 +112,29 @@ contract OracleAdmin is InitializableOwnable {
         );
     }
 
-    /*//////////////////////////////////////////////////////////////
-                            MANAGEMENT LOGIC
-    //////////////////////////////////////////////////////////////*/
+    ////////////////////
+    // Oracle Updates //
+    ////////////////////
 
     function setOracle(
-        address _newOracle
+        address newOracle
     ) external onlyOwner {
-        if (address(oracle) != _newOracle) {
-            emit OracleUpdated(address(oracle), _newOracle);
-            oracle = IUltraVaultOracle(_newOracle);
+        address currentOracle = address(oracle);
+        if (newOracle != currentOracle) {
+            emit OracleUpdated(currentOracle, newOracle);
+            oracle = IUltraVaultOracle(newOracle);
         }
     }
 
-    function setAdmin(address _admin) external onlyOwner {
-        if (admin != _admin) {
-            emit AdminUpdated(admin, _admin);
-            admin = _admin;
+    ////////////////////
+    // Access Control //
+    ////////////////////
+
+    function setAdmin(address newAdmin) external onlyOwner {
+        address currentAdmin = admin;
+        if (newAdmin != currentAdmin) {
+            emit AdminUpdated(currentAdmin, newAdmin);
+            admin = newAdmin;
         }
     }
 
@@ -136,13 +142,8 @@ contract OracleAdmin is InitializableOwnable {
         IOwnable(address(oracle)).acceptOwnership();
     }
 
-    /*//////////////////////////////////////////////////////////////
-                            MODIFIERS
-    //////////////////////////////////////////////////////////////*/
-
     modifier onlyAdminOrOwner() {
-        if (msg.sender != owner && msg.sender != admin)
-            revert NotAdminOrOwner();
+        require(msg.sender == owner() || msg.sender == admin, NotAdminOrOwner());
         _;
     }
 }

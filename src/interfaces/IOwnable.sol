@@ -2,10 +2,30 @@
 pragma solidity >=0.8.0;
 
 interface IOwnable {
+    ////////////
+    // Events //
+    ////////////
+
+    /// @dev Emitted when ownership is transferred.
+    event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
+
+    ////////////
+    // Errors //
+    ////////////
+
+    /// @dev The caller account is not authorized to perform an operation.
+    error OwnableUnauthorizedAccount(address account);
+
+    /// @dev The owner is not a valid owner account. (eg. `address(0)`)
+    error OwnableInvalidOwner(address owner);
+
+    ///////////////
+    // Functions //
+    ///////////////
+
     /// @dev Returns the address of the current owner.
     function owner() external view returns (address);
 
-    /// @dev Returns the address of the pending owner.
     /// @dev Returns the address of the pending owner.
     function pendingOwner() external view returns (address);
 
