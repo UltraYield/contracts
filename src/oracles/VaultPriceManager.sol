@@ -2,9 +2,10 @@
 pragma solidity 0.8.28;
 
 import { InitializableOwnable } from "src/utils/InitializableOwnable.sol";
-import { FixedPointMathLib } from "../utils/FixedPointMathLib.sol";
+import { FixedPointMathLib } from "src/utils/FixedPointMathLib.sol";
 import { IERC4626 } from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import { IUltraVaultOracle, Price } from "src/interfaces/IUltraVaultOracle.sol";
+import { IOwnable } from "src/interfaces/IOwnable.sol";
 import { IERC20Supply } from "src/interfaces/IERC20Supply.sol";
 import { IPausable } from "src/interfaces/IPausable.sol";
 
@@ -275,6 +276,6 @@ contract VaultPriceManager is InitializableOwnable {
 
     /// @notice Claim oracle ownership
     function claimOracleOwnership() external onlyOwner {
-        InitializableOwnable(address(oracle)).claimOwnership();
+        IOwnable(address(oracle)).acceptOwnership();
     }
 }

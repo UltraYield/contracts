@@ -3,6 +3,7 @@ pragma solidity 0.8.28;
 
 import { InitializableOwnable } from "src/utils/InitializableOwnable.sol";
 import { IUltraVaultOracle } from "src/interfaces/IUltraVaultOracle.sol";
+import { IOwnable } from "src/interfaces/IOwnable.sol";
 
 /// @title OracleAdmin
 /// @notice Owner contract for managing UltraVaultOracle prices
@@ -132,7 +133,7 @@ contract OracleAdmin is InitializableOwnable {
     }
 
     function claimOracleOwnership() external onlyOwner {
-        InitializableOwnable(address(oracle)).claimOwnership();
+        IOwnable(address(oracle)).acceptOwnership();
     }
 
     /*//////////////////////////////////////////////////////////////
