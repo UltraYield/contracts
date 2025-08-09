@@ -1,36 +1,37 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity 0.8.28;
 
-import { InitializableOwnable } from "src/utils/InitializableOwnable.sol";
 import { FixedPointMathLib } from "src/utils/FixedPointMathLib.sol";
 import { IERC4626 } from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import { IUltraVaultOracle, Price } from "src/interfaces/IUltraVaultOracle.sol";
 import { IOwnable } from "src/interfaces/IOwnable.sol";
 import { IERC20Supply } from "src/interfaces/IERC20Supply.sol";
 import { IPausable } from "src/interfaces/IPausable.sol";
+import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
+import { Ownable2Step } from "@openzeppelin/contracts/access/Ownable2Step.sol";
 
 /// @notice Price update struct
 struct PriceUpdate {
-    /// @notice The vault to update the price for
+    // The vault to update the price for
     address vault;
-    /// @notice The asset to update the price for (the asset the vault is denominated in)
+    // The asset to update the price for (the asset the vault is denominated in)
     address asset;
-    /// @notice The share value in assets
+    // The share value in assets
     uint256 shareValueInAssets;
 }
 
 /// @notice Safety limits for price updates
 struct Limit {
-    /// @notice Maximum allowed price jump from one update to the next (1e18 = 100%)
-    uint256 jump; // 1e18 = 100%
-    /// @notice Maximum allowed drawdown from the highwaterMark (1e18 = 100%)
-    uint256 drawdown; // 1e18 = 100%
+    // Maximum allowed price jump from one update to the next (1e18 = 100%)
+    uint256 jump;
+    // Maximum allowed drawdown from the highwaterMark (1e18 = 100%)
+    uint256 drawdown;
 }
 
 /// @title VaultPriceManager
 /// @notice Contract managing vault price updates with limits
 /// @dev Has built in safety mechanisms to pause vault upon sudden moves
-contract VaultPriceManager is InitializableOwnable {
+contract VaultPriceManager is Ownable2Step {
     using FixedPointMathLib for uint256;
 
     ////////////
@@ -46,6 +47,7 @@ contract VaultPriceManager is InitializableOwnable {
     // Errors //
     ////////////
 
+    error ZeroOracleAddress();
     error CannotAddNonEmptyVault();
     error InputLengthMismatch();
     error NotAdminOrOwner();
@@ -67,9 +69,8 @@ contract VaultPriceManager is InitializableOwnable {
     /// @notice Initialize controller with oracle and owner
     /// @param _oracle Oracle contract address
     /// @param _owner Owner address
-    constructor(address _oracle, address _owner) {
-        require(_oracle != address(0));
-        initOwner(_owner);
+    constructor(address _oracle, address _owner) Ownable(_owner) {
+        require(_oracle != address(0), ZeroOracleAddress());
         oracle = IUltraVaultOracle(_oracle);
     }
 
@@ -228,7 +229,7 @@ contract VaultPriceManager is InitializableOwnable {
     /// @notice Modifier for admin/owner access
     /// @param _vault Vault to check access for
     modifier onlyAdminOrOwner(address _vault) {
-        require(msg.sender == owner || isAdmin[_vault][msg.sender], NotAdminOrOwner());
+        require(msg.sender == owner() || isAdmin[_vault][msg.sender], NotAdminOrOwner());
         _;
     }
 

@@ -61,21 +61,22 @@ contract UltraVaultRateProvider is Ownable2StepUpgradeable, UUPSUpgradeable, IUl
     // IUltraVaultRateProvider //
     /////////////////////////////
 
+    /// @inheritdoc IUltraVaultRateProvider
     function baseAsset() public view returns (address) {
         return _getStorage().baseAsset;
     }
 
+    /// @inheritdoc IUltraVaultRateProvider
     function decimals() public view returns (uint8) {
         return _getStorage().decimals;
     }
 
+    /// @inheritdoc IUltraVaultRateProvider
     function supportedAssets(address asset) public view returns (AssetData memory) {
         return _getStorage().supportedAssets[asset];
     }
 
-    /// @notice Check if an asset is supported
-    /// @param asset The asset to check
-    /// @return True if asset is supported
+    /// @inheritdoc IUltraVaultRateProvider
     function isSupported(address asset) external view returns (bool) {
         AssetData memory data = _getStorage().supportedAssets[asset];
         if (data.isPegged) {
@@ -84,10 +85,7 @@ contract UltraVaultRateProvider is Ownable2StepUpgradeable, UUPSUpgradeable, IUl
         return data.rateProvider != address(0);
     }
 
-    /// @notice Add a new supported asset
-    /// @param asset The asset to add
-    /// @param isPegged Whether the asset is pegged to base asset
-    /// @param rateProvider External rate provider if not pegged
+    /// @inheritdoc IUltraVaultRateProvider
     function addAsset(address asset, bool isPegged, address rateProvider) external onlyOwner {
         // Checks
         AssetData memory data = supportedAssets(asset);
@@ -112,17 +110,14 @@ contract UltraVaultRateProvider is Ownable2StepUpgradeable, UUPSUpgradeable, IUl
         }
     }
 
-    /// @notice Remove a supported asset
-    /// @param asset The asset to remove
+    /// @inheritdoc IUltraVaultRateProvider
     function removeAsset(address asset) external onlyOwner {
         require(asset != baseAsset(), CannotUpdateBaseAsset());
         delete _getStorage().supportedAssets[asset];
         emit AssetRemoved(asset);
     }
 
-    /// @notice Update rate provider for an asset
-    /// @param asset The asset to update
-    /// @param rateProvider New rate provider
+    /// @inheritdoc IUltraVaultRateProvider
     function updateRateProvider(address asset, address rateProvider) external onlyOwner {
         require(asset != baseAsset(), CannotUpdateBaseAsset());
         require(!supportedAssets(asset).isPegged, AssetNotSupported());
@@ -132,10 +127,7 @@ contract UltraVaultRateProvider is Ownable2StepUpgradeable, UUPSUpgradeable, IUl
         emit RateProviderUpdated(address(asset), rateProvider);
     }
 
-    /// @notice Convert from specific asset to base asset
-    /// @param asset The asset to get rate for
-    /// @param assets Amount to covert
-    /// @return result The rate in terms of base asset (18 decimals)
+    /// @inheritdoc IUltraVaultRateProvider
     function convertToUnderlying(address asset, uint256 assets) external view returns (uint256 result) {
         AssetData memory data = supportedAssets(asset);
         uint8 baseDecimals = decimals();
@@ -153,10 +145,7 @@ contract UltraVaultRateProvider is Ownable2StepUpgradeable, UUPSUpgradeable, IUl
         }
     }
 
-    /// @notice Convert from base asset to specific asset
-    /// @param asset The asset to convert to
-    /// @param baseAssets Amount in base asset units
-    /// @return result The amount in asset units
+    /// @inheritdoc IUltraVaultRateProvider
     function convertFromUnderlying(address asset, uint256 baseAssets) external view returns (uint256 result) {
         AssetData memory data = supportedAssets(asset);
         uint8 baseDecimals = decimals();
@@ -174,7 +163,11 @@ contract UltraVaultRateProvider is Ownable2StepUpgradeable, UUPSUpgradeable, IUl
         }
     }
 
-    /// @notice Help account for decimals
+    //////////////////////
+    // Internal Helpers //
+    //////////////////////
+
+    /// @dev Helps with decimals accounting
     function _convertDecimals(
         uint256 amount, 
         uint8 fromDecimals, 
