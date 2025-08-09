@@ -6,12 +6,12 @@ import { IERC7540Redeem, IERC7540Operator } from "ERC-7540/interfaces/IERC7540.s
 import { PausableUpgradeable } from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import { ERC4626Upgradeable } from "@openzeppelin/contracts-upgradeable/token/ERC20/extensions/ERC4626Upgradeable.sol";
 import { SafeERC20, IERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
 import { PendingRedeem, ClaimableRedeem } from "src/interfaces/IRedeemQueue.sol";
 import { IRedeemAccounting } from "src/interfaces/IRedeemAccounting.sol";
 import { IUltraVaultRateProvider } from "src/interfaces/IUltraVaultRateProvider.sol";
 import { IPausable } from "src/interfaces/IPausable.sol";
 import { InitializableOwnable } from "src/utils/InitializableOwnable.sol";
-import { FixedPointMathLib } from "src/utils/FixedPointMathLib.sol";
 import { AddressUpdateProposal } from "src/utils/AddressUpdates.sol";
 import { RedeemQueue } from "src/vaults/accounting/RedeemQueue.sol";
 
@@ -44,8 +44,8 @@ abstract contract BaseControlledAsyncRedeem is
     IERC7540Operator,
     IPausable
 {
-    using FixedPointMathLib for uint256;
-
+    using Math for uint256;
+    
     ////////////
     // Events //
     ////////////
@@ -210,6 +210,26 @@ abstract contract BaseControlledAsyncRedeem is
         }
         // Call reverts if asset not supported
         return rateProvider().convertFromUnderlying(_asset, _baseAssets);
+    }
+
+    /// @dev Optimized function mirroring `convertToAssets` in OZ ERC4626 v5.4.0
+    /// @dev Uses pre-fetched totals. Always rounds down like `convertToAssets` does in the OZ implementation
+    function _optimizedConvertToAssets(
+        uint256 _shares,
+        uint256 _totalAssets,
+        uint256 _totalSupply
+    ) internal view returns (uint256 assets) {
+        return _shares.mulDiv(_totalAssets + 1, _totalSupply + 10 ** _decimalsOffset(), Math.Rounding.Floor);
+    }
+
+    /// @dev Optimized function mirroring `convertToShares` in OZ ERC4626 v5.4.0
+    /// @dev Uses pre-fetched totals. Always rounds down like `convertToShares` does in the OZ implementation
+    function _optimizedConvertToShares(
+        uint256 _assets,
+        uint256 _totalAssets,
+        uint256 _totalSupply
+    ) internal view returns (uint256 shares) {
+        return _assets.mulDiv(_totalSupply + 10 ** _decimalsOffset(), _totalAssets + 1, Math.Rounding.Floor);
     }
 
     ////////////////////

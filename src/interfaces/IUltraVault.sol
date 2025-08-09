@@ -184,5 +184,5 @@ interface IUltraVault {
     /**
      * @dev Returns the current fees configuration.
      */
-    function fees() external view returns (Fees memory);
+    function getFees() external view returns (Fees memory);
 } 
