@@ -58,21 +58,22 @@ contract UltraVault is BaseControlledAsyncRedeem, UUPSUpgradeable {
     // Errors //
     ////////////
 
-    error InvalidFundsHolder();
+    error ZeroFundsHolderAddress();
+    error ZeroOracleAddress();
+    error ZeroFeeRecipientAddress();
     error NoPendingFundsHolderUpdate();
-    error CanNotAcceptFundsHolderYet();
+    error CannotAcceptFundsHolderYet();
     error FundsHolderUpdateExpired();
-    error MissingOracle();
     error NoOracleProposed();
-    error CanNotAcceptOracleYet();
+    error CannotAcceptOracleYet();
     error OracleUpdateExpired();
-    error CantSetBalancesInNonEmptyVault();
+    error CannotSetBalancesInNonEmptyVault();
+    error InvalidFees();
 
     ///////////////
     // Constants //
     ///////////////
 
-    bytes32 public constant OPERATOR_ROLE = keccak256("OPERATOR_ROLE");
     uint64 public constant MAX_PERFORMANCE_FEE = 3e17; // 30%
     uint64 public constant MAX_MANAGEMENT_FEE = 5e16; // 5%
     uint64 public constant MAX_WITHDRAWAL_FEE = 1e16; // 1%
@@ -111,8 +112,9 @@ contract UltraVault is BaseControlledAsyncRedeem, UUPSUpgradeable {
     function initialize(
         UltraVaultInitParams memory params
     ) external initializer {
-        require(params.fundsHolder != address(0) && params.oracle != address(0), Misconfigured());
-        require(params.feeRecipient != address(0), Misconfigured());
+        require(params.fundsHolder != address(0), ZeroFundsHolderAddress());
+        require(params.oracle != address(0), ZeroOracleAddress());
+        require(params.feeRecipient != address(0), ZeroFeeRecipientAddress());
 
         UltraVaultStorage storage $ = _getUltraVaultStorage();
         $.fundsHolder = params.fundsHolder;
@@ -232,8 +234,8 @@ contract UltraVault is BaseControlledAsyncRedeem, UUPSUpgradeable {
         address[] memory users,
         uint256[] memory shares
     ) external onlyOwner {
-        require(totalSupply() == 0, CantSetBalancesInNonEmptyVault());
-        require(users.length == shares.length, Misconfigured());
+        require(totalSupply() == 0, CannotSetBalancesInNonEmptyVault());
+        require(users.length == shares.length, InputLengthMismatch());
 
         for (uint256 i; i < users.length; i++) {
             _mint(users[i], shares[i]);
@@ -349,7 +351,7 @@ contract UltraVault is BaseControlledAsyncRedeem, UUPSUpgradeable {
         uint256[] memory shares,
         address[] memory controllers
     ) external returns (uint256 total) {
-        require(shares.length == controllers.length, Misconfigured());
+        require(shares.length == controllers.length, InputLengthMismatch());
 
         _collectFees();
 
@@ -384,17 +386,6 @@ contract UltraVault is BaseControlledAsyncRedeem, UUPSUpgradeable {
         return total - totalFees;
     }
 
-    /// @dev Internal fulfill redeem request logic
-    /// @dev In async vaults it's a privileged function
-    function _fulfillRedeemOfAsset(
-        address asset,
-        uint256 assets,
-        uint256 shares,
-        address controller
-    ) internal virtual onlyRoleOrOwner(OPERATOR_ROLE) override returns (uint256) {
-        return super._fulfillRedeemOfAsset(asset, assets, shares, controller);
-    }
-
     //////////////////////////
     // Funds Holder Updates //
     //////////////////////////
@@ -403,7 +394,7 @@ contract UltraVault is BaseControlledAsyncRedeem, UUPSUpgradeable {
     /// @param newFundsHolder New fundsHolder address
     /// @dev changing the holder should be used only in case of multisig upgrade after funds transfer
     function proposeFundsHolder(address newFundsHolder) external onlyOwner {
-        require(newFundsHolder != address(0), InvalidFundsHolder());
+        require(newFundsHolder != address(0), ZeroFundsHolderAddress());
 
         _getUltraVaultStorage().proposedFundsHolder = AddressUpdateProposal({
             addr: newFundsHolder,
@@ -420,7 +411,7 @@ contract UltraVault is BaseControlledAsyncRedeem, UUPSUpgradeable {
         (address proposedHolder, uint256 proposalTimestamp) = proposedFundsHolder();
 
         require(proposedHolder != address(0), NoPendingFundsHolderUpdate());
-        require(block.timestamp >= proposalTimestamp + ADDRESS_UPDATE_TIMELOCK, CanNotAcceptFundsHolderYet());
+        require(block.timestamp >= proposalTimestamp + ADDRESS_UPDATE_TIMELOCK, CannotAcceptFundsHolderYet());
         require(block.timestamp <= proposalTimestamp + MAX_ADDRESS_UPDATE_WAIT, FundsHolderUpdateExpired());
 
         emit FundsHolderChanged(fundsHolder(), proposedHolder);
@@ -440,7 +431,7 @@ contract UltraVault is BaseControlledAsyncRedeem, UUPSUpgradeable {
     /// @notice Propose new oracle for owner acceptance after delay
     /// @param newOracle Address of the new oracle
     function proposeOracle(address newOracle) external onlyOwner {
-        require(newOracle != address(0), MissingOracle());
+        require(newOracle != address(0), ZeroOracleAddress());
 
         _getUltraVaultStorage().proposedOracle = AddressUpdateProposal({
             addr: newOracle,
@@ -457,7 +448,7 @@ contract UltraVault is BaseControlledAsyncRedeem, UUPSUpgradeable {
         (address newOracle, uint256 proposalTimestamp) = proposedOracle();
 
         require(newOracle != address(0), NoOracleProposed());
-        require(block.timestamp >= proposalTimestamp + ADDRESS_UPDATE_TIMELOCK, CanNotAcceptOracleYet());
+        require(block.timestamp >= proposalTimestamp + ADDRESS_UPDATE_TIMELOCK, CannotAcceptOracleYet());
         require(block.timestamp <= proposalTimestamp + MAX_ADDRESS_UPDATE_WAIT, OracleUpdateExpired());
 
         emit OracleUpdated(address(oracle()), newOracle);
@@ -531,7 +522,7 @@ contract UltraVault is BaseControlledAsyncRedeem, UUPSUpgradeable {
     /// @param newFeeRecipient New fee recipient
     /// @dev Collects pending fees before update
     function setFeeRecipient(address newFeeRecipient) public onlyOwner whenNotPaused {
-        require(newFeeRecipient != address(0), Misconfigured());
+        require(newFeeRecipient != address(0), ZeroFeeRecipientAddress());
 
         address currentFeeRecipient = feeRecipient();
         if (currentFeeRecipient != newFeeRecipient) {
@@ -555,7 +546,7 @@ contract UltraVault is BaseControlledAsyncRedeem, UUPSUpgradeable {
             fees.performanceFee <= MAX_PERFORMANCE_FEE &&
             fees.managementFee <= MAX_MANAGEMENT_FEE &&
             fees.withdrawalFee <= MAX_WITHDRAWAL_FEE,
-            Misconfigured()
+            InvalidFees()
         );
 
         fees.lastUpdateTimestamp = uint64(block.timestamp);

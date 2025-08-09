@@ -29,11 +29,18 @@ bytes32 constant ULTRA_FEEDER_STORAGE_LOCATION = 0x73fc0f32a78274c31085b0032ea47
 /// @notice ERC-4626 compliant vault that wraps UltraVault for deposits and handles async redeems
 /// @dev This vault only handles deposits into the main UltraVault and manages async redeems
 contract UltraFeeder is BaseControlledAsyncRedeem, UUPSUpgradeable {
-    bytes32 public constant OPERATOR_ROLE = keccak256("OPERATOR_ROLE");
+    ////////////
+    // Events //
+    ////////////
 
     event Referral(string indexed referralId, address user, uint256 shares);
 
-    error InvalidMainVault();
+    ////////////
+    // Errors //
+    ////////////
+
+    error ZeroMainVaultAddress();
+    error AssetAddressesMismatch();
     error AssetNumberMismatch();
     error ShareNumberMismatch();
 
@@ -63,9 +70,9 @@ contract UltraFeeder is BaseControlledAsyncRedeem, UUPSUpgradeable {
         UltraFeederInitParams memory params
     ) external initializer {
         // Validate main vault and base asset
-        require(params.mainVault != address(0), InvalidMainVault());
+        require(params.mainVault != address(0), ZeroMainVaultAddress());
         IUltraVault mainVault_ = IUltraVault(params.mainVault);
-        require(mainVault_.asset() == params.asset, Misconfigured());
+        require(mainVault_.asset() == params.asset, AssetAddressesMismatch());
 
         // Store main vault
         _getUltraFeederStorage().mainVault = mainVault_;
@@ -159,17 +166,6 @@ contract UltraFeeder is BaseControlledAsyncRedeem, UUPSUpgradeable {
         Fees memory fees = mainVault().getFees();
         uint256 withdrawalFee = _assets * fees.withdrawalFee / 1e18;
         _consumeClaimableRedeem(_controller, _asset, withdrawalFee, 0);
-    }
-
-
-    /// @dev In async vaults it's a privileged function
-    function _fulfillRedeemOfAsset(
-        address _asset,
-        uint256 _assets,
-        uint256 _shares,
-        address _controller
-    ) internal override onlyRoleOrOwner(OPERATOR_ROLE) returns (uint256) {
-        return super._fulfillRedeemOfAsset(_asset, _assets, _shares, _controller);
     }
 
     /// @notice Cancel redeem request for controller and propagate to underlying vault

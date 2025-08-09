@@ -4,47 +4,53 @@ pragma solidity 0.8.28;
 import { InitializableOwnable } from "src/utils/InitializableOwnable.sol";
 import { IUltraVaultOracle } from "src/interfaces/IUltraVaultOracle.sol";
 
-/**
- * @title OracleAdmin
- * @notice Owner contract for managing UltraVaultOracle prices
- * @dev Allows owner and admin to update oracle prices
- */
+/// @title OracleAdmin
+/// @notice Owner contract for managing UltraVaultOracle prices
+/// @dev Allows owner and admin to update oracle prices
 contract OracleAdmin is InitializableOwnable {
+    ////////////
+    // Events //
+    ////////////
+
+    event OracleUpdated(address indexed oldOracle, address indexed newOracle);
+    event AdminUpdated(address indexed oldAdmin, address indexed newAdmin);
+
+    ////////////
+    // Errors //
+    ////////////
+
+    error NotAdminOrOwner();
+
+    /////////////
+    // Storage //
+    /////////////
+
     /// @notice Oracle contract to manage
     IUltraVaultOracle public oracle;
 
     /// @notice Address authorized to update prices
     address public admin;
 
-    /// @notice Emitted when oracle is updated
-    event OracleUpdated(address oldOracle, address newOracle);
+    /////////////////
+    // Constructor //
+    /////////////////
 
-    /// @notice Emitted when admin is updated
-    event AdminUpdated(address oldAdmin, address newAdmin);
-
-    /// @notice Error when caller is not admin or owner
-    error NotAdminOrOwner();
-
-    /**
-     * @notice Initialize owner and oracle
-     * @param _oracle Oracle contract address
-     * @param _owner Owner address
-     */
+    /// @notice Initialize owner and oracle
+    /// @param _oracle Oracle contract address
+    /// @param _owner Owner address
     constructor(address _oracle, address _owner) {
         initOwner(_owner);
         oracle = IUltraVaultOracle(_oracle);
     }
 
-    /*//////////////////////////////////////////////////////////////
-                            SET PRICE LOGIC
-    //////////////////////////////////////////////////////////////*/
+    /////////////////////
+    // Set Price Logic //
+    /////////////////////
 
-    /**
-     * @notice Set base/quote pair price
-     * @param base The base asset
-     * @param quote The quote asset
-     * @param price The price of the base in terms of the quote
-     */
+    /// @notice Set base/quote pair price
+    /// @param base The base asset
+    /// @param quote The quote asset
+    /// @param price The price of the base in terms of the quote
     function setPrice(
         address base,
         address quote,
@@ -53,13 +59,11 @@ contract OracleAdmin is InitializableOwnable {
         oracle.setPrice(base, quote, price);
     }
 
-    /**
-     * @notice Set multiple base/quote pair prices
-     * @param bases The base assets
-     * @param quotes The quote assets
-     * @param prices The prices of the bases in terms of the quotes
-     * @dev Array lengths must match
-     */
+    /// @notice Set multiple base/quote pair prices
+    /// @param bases The base assets
+    /// @param quotes The quote assets
+    /// @param prices The prices of the bases in terms of the quotes
+    /// @dev Array lengths must match
     function setPrices(
         address[] calldata bases,
         address[] calldata quotes,
@@ -68,13 +72,11 @@ contract OracleAdmin is InitializableOwnable {
         oracle.setPrices(bases, quotes, prices);
     }
 
-    /**
-     * @notice Set base/quote pair price with gradual change
-     * @param base The base asset
-     * @param quote The quote asset
-     * @param targetPrice The target price of the base in terms of the quote
-     * @param vestingTime The time over which vesting would occur
-     */
+    /// @notice Set base/quote pair price with gradual change
+    /// @param base The base asset
+    /// @param quote The quote asset
+    /// @param targetPrice The target price of the base in terms of the quote
+    /// @param vestingTime The time over which vesting would occur
     function scheduleLinearPriceUpdate(
         address base,
         address quote,
@@ -89,14 +91,12 @@ contract OracleAdmin is InitializableOwnable {
         );
     }
 
-    /**
-     * @notice Set multiple base/quote pair prices with gradual changes
-     * @param bases The base assets
-     * @param quotes The quote assets
-     * @param prices The prices of the bases in terms of the quotes
-     * @param vestingTimes Vesting times over which the updates occur
-     * @dev Array lengths must match
-     */
+    /// @notice Set multiple base/quote pair prices with gradual changes
+    /// @param bases The base assets
+    /// @param quotes The quote assets
+    /// @param prices The prices of the bases in terms of the quotes
+    /// @param vestingTimes Vesting times over which the updates occur
+    /// @dev Array lengths must match
     function scheduleLinearPricesUpdates(
         address[] calldata bases,
         address[] calldata quotes,
