@@ -18,7 +18,6 @@ struct Fees {
 /// @title IUltraVault
 /// @notice A simplified interface for use in other contracts
 interface IUltraVault {
-
     /// @notice Returns the address of the underlying token used for the Vault
     /// @return assetTokenAddress The address of the underlying asset
     function asset() external view returns (address);

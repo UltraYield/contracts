@@ -91,6 +91,7 @@ abstract contract BaseControlledAsyncRedeem is
     error AssetNotSupported();
     error MissingRateProvider();
     error NoRateProviderProposed();
+    error ProposedRateProviderMismatch();
     error CannotAcceptRateProviderYet();
     error RateProviderUpdateExpired();
 
@@ -647,7 +648,6 @@ abstract contract BaseControlledAsyncRedeem is
         return paused() ? 0 : convertFromUnderlying(_asset, baseAssets);
     }
 
-
     /// @dev Preview withdraw not supported for async flows
     function previewWithdraw(
         uint256
@@ -929,11 +929,12 @@ abstract contract BaseControlledAsyncRedeem is
     /// @notice Accept proposed rate provider
     /// @dev Pauses vault to ensure provider setup and prevent deposits with faulty prices
     /// @dev Oracle must be switched before unpausing
-    function acceptProposedRateProvider() external onlyOwner {
+    function acceptProposedRateProvider(address newRateProvider) external onlyOwner {
         BaseAsyncRedeemStorage storage $ = _getBaseAsyncRedeemStorage();
         AddressUpdateProposal memory proposal = $.proposedRateProvider;
 
         require(proposal.addr != address(0), NoRateProviderProposed());
+        require(proposal.addr == newRateProvider, ProposedRateProviderMismatch());
         require(block.timestamp >= proposal.timestamp + ADDRESS_UPDATE_TIMELOCK, CannotAcceptRateProviderYet());
         require(block.timestamp <= proposal.timestamp + MAX_ADDRESS_UPDATE_WAIT, RateProviderUpdateExpired());
 

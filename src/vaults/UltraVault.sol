@@ -62,9 +62,11 @@ contract UltraVault is BaseControlledAsyncRedeem, UUPSUpgradeable {
     error ZeroOracleAddress();
     error ZeroFeeRecipientAddress();
     error NoPendingFundsHolderUpdate();
+    error ProposedFundsHolderMismatch();
     error CannotAcceptFundsHolderYet();
     error FundsHolderUpdateExpired();
     error NoOracleProposed();
+    error ProposedOracleMismatch();
     error CannotAcceptOracleYet();
     error OracleUpdateExpired();
     error CannotSetBalancesInNonEmptyVault();
@@ -407,17 +409,17 @@ contract UltraVault is BaseControlledAsyncRedeem, UUPSUpgradeable {
     /// @notice Accept proposed fundsHolder
     /// @dev Pauses vault to ensure oracle setup and prevent deposits with faulty prices
     /// @dev Oracle must be switched before unpausing
-    function acceptFundsHolder() external onlyOwner {
+    function acceptFundsHolder(address newFundsHolder) external onlyOwner {
         (address proposedHolder, uint256 proposalTimestamp) = proposedFundsHolder();
-
         require(proposedHolder != address(0), NoPendingFundsHolderUpdate());
+        require(proposedHolder == newFundsHolder, ProposedFundsHolderMismatch());
         require(block.timestamp >= proposalTimestamp + ADDRESS_UPDATE_TIMELOCK, CannotAcceptFundsHolderYet());
         require(block.timestamp <= proposalTimestamp + MAX_ADDRESS_UPDATE_WAIT, FundsHolderUpdateExpired());
 
-        emit FundsHolderChanged(fundsHolder(), proposedHolder);
+        emit FundsHolderChanged(fundsHolder(), newFundsHolder);
 
         UltraVaultStorage storage $ = _getUltraVaultStorage();
-        $.fundsHolder = proposedHolder;
+        $.fundsHolder = newFundsHolder;
         delete $.proposedFundsHolder;
 
         // Pause to manually check the setup by operators
@@ -444,10 +446,10 @@ contract UltraVault is BaseControlledAsyncRedeem, UUPSUpgradeable {
     /// @notice Accept proposed oracle
     /// @dev Pauses vault to ensure oracle setup and prevent deposits with faulty prices
     /// @dev Oracle must be switched before unpausing
-    function acceptProposedOracle() external onlyOwner {
-        (address newOracle, uint256 proposalTimestamp) = proposedOracle();
-
-        require(newOracle != address(0), NoOracleProposed());
+    function acceptProposedOracle(address newOracle) external onlyOwner {
+        (address pendingOracle, uint256 proposalTimestamp) = proposedOracle();
+        require(pendingOracle != address(0), NoOracleProposed());
+        require(pendingOracle == newOracle, ProposedOracleMismatch());
         require(block.timestamp >= proposalTimestamp + ADDRESS_UPDATE_TIMELOCK, CannotAcceptOracleYet());
         require(block.timestamp <= proposalTimestamp + MAX_ADDRESS_UPDATE_WAIT, OracleUpdateExpired());
 
@@ -465,13 +467,6 @@ contract UltraVault is BaseControlledAsyncRedeem, UUPSUpgradeable {
     // Fees //
     //////////
 
-    /// @dev Struct wrapping total assets, supply and share value to optimize fee calculations
-    struct Totals {
-        uint256 totalAssets;
-        uint256 totalSupply;
-        uint256 shareValue;
-    }
-
     /// @notice Get vault fee parameters
     function getFees() public view returns (Fees memory) {
         return _getUltraVaultStorage().fees;
@@ -487,35 +482,6 @@ contract UltraVault is BaseControlledAsyncRedeem, UUPSUpgradeable {
         Fees memory fees = getFees();
         Totals memory totals = _snapshotTotals();
         return _calculateAccruedPerformanceFee(fees, totals) + _calculateAccruedManagementFee(fees, totals);
-    }
-
-    /// @notice Calculate accrued performance fee
-    /// @return accruedPerformanceFee Fee amount in asset token
-    /// @dev Based on high water mark value
-    function _calculateAccruedPerformanceFee(
-        Fees memory fees, 
-        Totals memory totals
-    ) internal view returns (uint256) {
-        uint256 performanceFee = fees.performanceFee;
-        if (performanceFee == 0 || totals.shareValue <= fees.highwaterMark) {
-            return 0;
-        }
-        return performanceFee.mulDivDown(
-            (totals.shareValue - fees.highwaterMark) * totals.totalSupply,
-            (10 ** (18 + decimals()))
-        );
-    }
-
-    /// @notice Calculate accrued management fee
-    /// @return accruedManagementFee Fee amount in asset token
-    /// @dev Annualized per minute, based on 525_600 minutes or 31_536_000 seconds per year
-    function _calculateAccruedManagementFee(Fees memory fees, Totals memory totals) internal view returns (uint256) {
-        uint256 managementFee = fees.managementFee;
-        if (managementFee == 0) {
-            return 0;
-        }
-        uint256 timePassed = block.timestamp - fees.lastUpdateTimestamp;
-        return managementFee.mulDivDown(totals.totalAssets * timePassed, ONE_YEAR) / 1e18;
     }
 
     /// @notice Update vault's fee recipient
@@ -541,6 +507,23 @@ contract UltraVault is BaseControlledAsyncRedeem, UUPSUpgradeable {
         _setFees(fees);
     }
 
+    /// @notice Mint fees as shares to recipient
+    /// @dev Updates fee-related variables
+    function collectFees() external onlyOwner whenNotPaused {
+        _collectFees();
+    }
+
+    ////////////////////////
+    // Internal functions //
+    ////////////////////////
+
+    /// @dev Struct wrapping total assets, supply and share value to optimize fee calculations
+    struct Totals {
+        uint256 totalAssets;
+        uint256 totalSupply;
+        uint256 shareValue;
+    }
+
     function _setFees(Fees memory fees) internal {
         require(
             fees.performanceFee <= MAX_PERFORMANCE_FEE &&
@@ -560,22 +543,6 @@ contract UltraVault is BaseControlledAsyncRedeem, UUPSUpgradeable {
         _getUltraVaultStorage().fees = fees;
 
         emit FeesUpdated(currentFees, fees);
-    }
-
-    /// @notice Mint fees as shares to recipient
-    /// @dev Updates fee-related variables
-    function collectFees() external whenNotPaused {
-        _collectFees();
-    }
-
-    function _snapshotTotals() internal view returns (Totals memory) {
-        uint256 _totalAssets = totalAssets();
-        uint256 _totalSupply = totalSupply();
-        return Totals({
-            totalAssets: _totalAssets,
-            totalSupply: _totalSupply,
-            shareValue: _optimizedConvertToAssets(10 ** decimals(), _totalAssets, _totalSupply)
-        });
     }
 
     function _collectFees() internal {
@@ -605,6 +572,45 @@ contract UltraVault is BaseControlledAsyncRedeem, UUPSUpgradeable {
 
             emit FeesCollected(feesInShares, managementFee, performanceFee);
         }
+    }
+
+    function _snapshotTotals() internal view returns (Totals memory) {
+        uint256 _totalAssets = totalAssets();
+        uint256 _totalSupply = totalSupply();
+        return Totals({
+            totalAssets: _totalAssets,
+            totalSupply: _totalSupply,
+            shareValue: _optimizedConvertToAssets(10 ** decimals(), _totalAssets, _totalSupply)
+        });
+    }
+
+    /// @notice Calculate accrued performance fee
+    /// @return accruedPerformanceFee Fee amount in asset token
+    /// @dev Based on high water mark value
+    function _calculateAccruedPerformanceFee(
+        Fees memory fees, 
+        Totals memory totals
+    ) internal view returns (uint256) {
+        uint256 performanceFee = fees.performanceFee;
+        if (performanceFee == 0 || totals.shareValue <= fees.highwaterMark) {
+            return 0;
+        }
+        return performanceFee.mulDivDown(
+            (totals.shareValue - fees.highwaterMark) * totals.totalSupply,
+            (10 ** (18 + decimals()))
+        );
+    }
+
+    /// @notice Calculate accrued management fee
+    /// @return accruedManagementFee Fee amount in asset token
+    /// @dev Annualized per minute, based on 525_600 minutes or 31_536_000 seconds per year
+    function _calculateAccruedManagementFee(Fees memory fees, Totals memory totals) internal view returns (uint256) {
+        uint256 managementFee = fees.managementFee;
+        if (managementFee == 0) {
+            return 0;
+        }
+        uint256 timePassed = block.timestamp - fees.lastUpdateTimestamp;
+        return managementFee.mulDivDown(totals.totalAssets * timePassed, ONE_YEAR) / 1e18;
     }
 
     /// @notice Transfer withdrawal fee to fee recipient
