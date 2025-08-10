@@ -59,6 +59,10 @@ contract UltraFeeder is BaseControlledAsyncRedeem, UUPSUpgradeable {
         }
     }
 
+    //////////
+    // Init //
+    //////////
+
     /// @notice Disable implementation's initializer
     constructor() {
         _disableInitializers();

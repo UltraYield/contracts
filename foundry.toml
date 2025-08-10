@@ -6,6 +6,7 @@ ast = true
 build_info = true
 libs = ["lib"]
 extra_output = ["storageLayout"]
+solc_version = "0.8.28"
 
 remappings = [
   'ds-test/=lib/forge-std/lib/ds-test/src/',

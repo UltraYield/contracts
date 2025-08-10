@@ -12,7 +12,7 @@ import { IRedeemAccounting } from "src/interfaces/IRedeemAccounting.sol";
 import { IUltraVaultRateProvider } from "src/interfaces/IUltraVaultRateProvider.sol";
 import { IPausable } from "src/interfaces/IPausable.sol";
 import { OPERATOR_ROLE, PAUSER_ROLE } from "src/utils/Roles.sol";
-import { InitializableOwnable } from "src/utils/InitializableOwnable.sol";
+import { AccessControlDefaultAdminRulesUpgradeable } from "@openzeppelin/contracts-upgradeable/access/extensions/AccessControlDefaultAdminRulesUpgradeable.sol";
 import { AddressUpdateProposal } from "src/utils/AddressUpdates.sol";
 import { RedeemQueue } from "src/vaults/accounting/RedeemQueue.sol";
 
@@ -36,9 +36,9 @@ struct BaseControlledAsyncRedeemInitParams {
 /// @title BaseControlledAsyncRedeem
 /// @notice Base contract for controlled async redeem flows
 /// @dev Based on ERC-7540 Reference Implementation
-abstract contract BaseControlledAsyncRedeem is 
+abstract contract BaseControlledAsyncRedeem is
+    AccessControlDefaultAdminRulesUpgradeable,
     ERC4626Upgradeable,
-    InitializableOwnable,
     PausableUpgradeable,
     RedeemQueue,
     IRedeemAccounting,
@@ -51,7 +51,6 @@ abstract contract BaseControlledAsyncRedeem is
     // Events //
     ////////////
 
-    event RoleUpdated(bytes32 role, address account, bool approved);
     event RateProviderProposed(address indexed proposedProvider);
     event RateProviderUpdated(address indexed oldProvider, address indexed newProvider);
     event RedeemRequestFulfilled(
@@ -77,6 +76,7 @@ abstract contract BaseControlledAsyncRedeem is
     // Errors //
     ////////////
 
+    error NotOwner();
     error AccessDenied();
     error ZeroAssetAddress();
     error InputLengthMismatch();
@@ -108,7 +108,6 @@ abstract contract BaseControlledAsyncRedeem is
 
     /// @custom:storage-location erc7201:ultrayield.storage.BaseControlledAsyncRedeem
     struct BaseAsyncRedeemStorage {
-        mapping(bytes32 => mapping(address => bool)) hasRole;
         mapping(address => mapping(address => bool)) isOperator;
         IUltraVaultRateProvider rateProvider;
         AddressUpdateProposal proposedRateProvider;
@@ -130,14 +129,20 @@ abstract contract BaseControlledAsyncRedeem is
         BaseControlledAsyncRedeemInitParams memory params
     ) public virtual onlyInitializing {
         require(params.asset != address(0), ZeroAssetAddress());
+
+        // Init OZ contracts
+        __AccessControl_init();
+        __AccessControlDefaultAdminRules_init(0, params.owner);
         __Pausable_init();
         __ERC20_init(params.name, params.symbol);
         __ERC4626_init(IERC20(params.asset));
-        initOwner(params.owner);
+
+        // Init self
         _getBaseAsyncRedeemStorage().rateProvider = IUltraVaultRateProvider(params.rateProvider);
 
-        _updateRole(OPERATOR_ROLE, params.owner, true);
-        _updateRole(PAUSER_ROLE, params.owner, true);
+        // Grant roles to owner
+        _grantRole(OPERATOR_ROLE, params.owner);
+        _grantRole(PAUSER_ROLE, params.owner);
     }
 
     /////////////////
@@ -991,18 +996,9 @@ abstract contract BaseControlledAsyncRedeem is
     // Access Control //
     ////////////////////
 
-    /// @notice Check if account has role
-    /// @param role Role to check
-    /// @param account Account address
-    /// @return True if account has role, false otherwise
-    function hasRole(bytes32 role, address account) public view returns (bool) {
-        return _getBaseAsyncRedeemStorage().hasRole[role][account];
-    }
-
-    /// @notice Check if caller has the given role
-    /// @param role Role to check
-    modifier onlyRole(bytes32 role) {
-        require(hasRole(role, msg.sender), AccessDenied());
+    /// @notice Modifier to ensure caller is owner
+    modifier onlyOwner() {
+        require(msg.sender == owner(), NotOwner());
         _;
     }
 
@@ -1014,29 +1010,6 @@ abstract contract BaseControlledAsyncRedeem is
         _;
     }
 
-    /// @notice Update account role
-    /// @param role Role to update
-    /// @param account Account address
-    /// @param approved Approval status
-    function updateRole(
-        bytes32 role,
-        address account,
-        bool approved
-    ) external onlyOwner {
-        _updateRole(role, account, approved);
-    }
-
-    function _updateRole(
-        bytes32 role,
-        address account,
-        bool approved
-    ) internal {
-        if (hasRole(role,account) != approved) {
-            _getBaseAsyncRedeemStorage().hasRole[role][account] = approved;
-            emit RoleUpdated(role, account, approved);
-        }
-    }
-
     ////////////
     // ERC165 //
     ////////////
@@ -1046,11 +1019,12 @@ abstract contract BaseControlledAsyncRedeem is
     /// @return exists True if interface is supported
     function supportsInterface(
         bytes4 interfaceId
-    ) public pure virtual returns (bool) {
+    ) public view override returns (bool) {
         return
             interfaceId == type(IERC165).interfaceId ||
             interfaceId == type(IERC7540Redeem).interfaceId ||
             interfaceId == type(IERC7575).interfaceId ||
-            interfaceId == type(IERC7540Operator).interfaceId;
+            interfaceId == type(IERC7540Operator).interfaceId ||
+            super.supportsInterface(interfaceId);
     }
 }

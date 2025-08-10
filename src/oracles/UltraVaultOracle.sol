@@ -1,15 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity 0.8.28;
 
-import { IUltraVaultOracle, Price } from "src/interfaces/IUltraVaultOracle.sol";
-import { InitializableOwnable } from "src/utils/InitializableOwnable.sol";
-import { IPriceSource } from "src/interfaces/IPriceSource.sol";
 import { IERC20Metadata } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
+import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
+import { Ownable2Step } from "@openzeppelin/contracts/access/Ownable2Step.sol";
+import { IUltraVaultOracle, Price } from "src/interfaces/IUltraVaultOracle.sol";
+import { IPriceSource } from "src/interfaces/IPriceSource.sol";
 
 /// @title UltraVaultOracle
 /// @notice Oracle for setting base/quote pair prices by permissioned entities
 /// @dev Price safety and reliability handled by other contracts/infrastructure
-contract UltraVaultOracle is InitializableOwnable, IUltraVaultOracle {
+contract UltraVaultOracle is Ownable2Step, IUltraVaultOracle {
     ///////////////
     // Constants //
     ///////////////
@@ -30,9 +31,7 @@ contract UltraVaultOracle is InitializableOwnable, IUltraVaultOracle {
     // Constructor //
     /////////////////
 
-    constructor(address _owner) {
-        initOwner(_owner);
-    }
+    constructor(address _owner) Ownable(_owner) {}
 
     /////////////////////
     // Set Price Logic //
