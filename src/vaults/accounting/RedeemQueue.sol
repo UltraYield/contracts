@@ -7,7 +7,7 @@ import { IRedeemQueueErrors, PendingRedeem, ClaimableRedeem } from "src/interfac
 import { FixedPointMathLib } from "src/utils/FixedPointMathLib.sol";
 
 // keccak256(abi.encode(uint256(keccak256("ultrayield.storage.RedeemQueue")) - 1)) & ~bytes32(uint256(0xff));
-bytes32 constant ULTRA_QUEUE_STORAGE_LOCATION = 0x38487c1eeb502ff9f43b364c26f88c9c1a7289f04ae6ea98e734b0ba2a992400;
+bytes32 constant REDEEM_QUEUE_STORAGE_LOCATION = 0x95f12a6101d8197ca778484991e26970e33953d18285b8b9155ec8dca1c42000;
 
 /// @title RedeemQueue
 /// @notice Contract to help manage redeems for async vaults
@@ -24,11 +24,13 @@ abstract contract RedeemQueue is IRedeemQueueErrors {
     // Storage //
     /////////////
 
+    /// @dev Represents a single storage slot for a pending redeem
     struct PendingRedeemSlot {
         uint128 shares;
         uint128 requestTime;
     }
 
+    /// @dev Represents a single storage slot for a claimable redeem
     struct ClaimableRedeemSlot {
         uint128 assets;
         uint128 shares;
@@ -42,7 +44,7 @@ abstract contract RedeemQueue is IRedeemQueueErrors {
 
     function _getRedeemQueueStorage() private pure returns (Storage storage $) {
         assembly {
-            $.slot := ULTRA_QUEUE_STORAGE_LOCATION
+            $.slot := REDEEM_QUEUE_STORAGE_LOCATION
         }
     }
 

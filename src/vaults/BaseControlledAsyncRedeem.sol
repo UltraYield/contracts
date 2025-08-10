@@ -11,6 +11,7 @@ import { PendingRedeem, ClaimableRedeem } from "src/interfaces/IRedeemQueue.sol"
 import { IRedeemAccounting } from "src/interfaces/IRedeemAccounting.sol";
 import { IUltraVaultRateProvider } from "src/interfaces/IUltraVaultRateProvider.sol";
 import { IPausable } from "src/interfaces/IPausable.sol";
+import { OPERATOR_ROLE, PAUSER_ROLE } from "src/utils/Roles.sol";
 import { InitializableOwnable } from "src/utils/InitializableOwnable.sol";
 import { AddressUpdateProposal } from "src/utils/AddressUpdates.sol";
 import { RedeemQueue } from "src/vaults/accounting/RedeemQueue.sol";
@@ -77,19 +78,20 @@ abstract contract BaseControlledAsyncRedeem is
     ////////////
 
     error AccessDenied();
-    error Misconfigured();
-    error CanNotPreviewWithdrawInAsyncVault();
-    error CanNotPreviewRedeemInAsyncVault();
+    error ZeroAssetAddress();
+    error InputLengthMismatch();
+    error CannotPreviewWithdrawInAsyncVault();
+    error CannotPreviewRedeemInAsyncVault();
     error EmptyDeposit();
     error NothingToMint();
-    error InvalidRedeemCall();
     error NothingToRedeem();
     error NothingToWithdraw();
+    error NoPendingRedeem();
     error InsufficientBalance();
     error AssetNotSupported();
     error MissingRateProvider();
     error NoRateProviderProposed();
-    error CanNotAcceptRateProviderYet();
+    error CannotAcceptRateProviderYet();
     error RateProviderUpdateExpired();
 
     ///////////////
@@ -97,7 +99,6 @@ abstract contract BaseControlledAsyncRedeem is
     ///////////////
 
     uint256 internal constant REQUEST_ID = 0;
-    bytes32 public constant PAUSER_ROLE = keccak256("PAUSER_ROLE");
     uint256 public constant ADDRESS_UPDATE_TIMELOCK = 3 days;
     uint256 public constant MAX_ADDRESS_UPDATE_WAIT = 7 days;
 
@@ -128,12 +129,15 @@ abstract contract BaseControlledAsyncRedeem is
     function initialize(
         BaseControlledAsyncRedeemInitParams memory params
     ) public virtual onlyInitializing {
-        require(params.asset != address(0), Misconfigured());
+        require(params.asset != address(0), ZeroAssetAddress());
         __Pausable_init();
         __ERC20_init(params.name, params.symbol);
         __ERC4626_init(IERC20(params.asset));
         initOwner(params.owner);
         _getBaseAsyncRedeemStorage().rateProvider = IUltraVaultRateProvider(params.rateProvider);
+
+        _updateRole(OPERATOR_ROLE, params.owner, true);
+        _updateRole(PAUSER_ROLE, params.owner, true);
     }
 
     /////////////////
@@ -643,14 +647,14 @@ abstract contract BaseControlledAsyncRedeem is
     function previewWithdraw(
         uint256
     ) public pure virtual override returns (uint256) {
-        revert CanNotPreviewWithdrawInAsyncVault();
+        revert CannotPreviewWithdrawInAsyncVault();
     }
 
     /// @dev Preview redeem not supported for async flows
     function previewRedeem(
         uint256
     ) public pure virtual override returns (uint256) {
-        revert CanNotPreviewRedeemInAsyncVault();
+        revert CannotPreviewRedeemInAsyncVault();
     }
 
     ///////////////////////////////
@@ -830,7 +834,7 @@ abstract contract BaseControlledAsyncRedeem is
     ) internal virtual checkAccess(_controller) {
         // Get pending shares
         uint256 pendingShares = _getPendingRedeem(_controller, _asset).shares;
-        require(pendingShares != 0, NothingToRedeem());
+        require(pendingShares != 0, NoPendingRedeem());
 
         // Clear pending redeem
         _clearPendingRedeem(_controller, _asset);
@@ -852,10 +856,9 @@ abstract contract BaseControlledAsyncRedeem is
     function fulfillRedeem(
         uint256 _shares,
         address _controller
-    ) external virtual returns (uint256) {
-        uint256 assets = convertToAssets(_shares);
+    ) external virtual returns (uint256 assets) {
+        assets = _fulfillRedeemOfAsset(asset(), convertToAssets(_shares), _shares, _controller);
         _burn(address(this), _shares);
-        return _fulfillRedeemOfAsset(asset(), assets, _shares, _controller);
     }
 
     /// @notice Fulfill redeem request
@@ -870,9 +873,8 @@ abstract contract BaseControlledAsyncRedeem is
     ) external virtual returns (uint256 assets) {
         // Convert shares to underlying assets, then to asset units
         uint256 underlyingAssets = convertToAssets(_shares);
-        assets = convertFromUnderlying(_asset, underlyingAssets);
+        assets = _fulfillRedeemOfAsset(_asset, convertFromUnderlying(_asset, underlyingAssets), _shares, _controller);
         _burn(address(this), _shares);
-        return _fulfillRedeemOfAsset(_asset, assets, _shares, _controller);
     }
 
     /// @dev Internal fulfill redeem request logic
@@ -881,9 +883,10 @@ abstract contract BaseControlledAsyncRedeem is
         uint256 _assets,
         uint256 _shares,
         address _controller
-    ) internal virtual returns (uint256) {
+    ) internal onlyRole(OPERATOR_ROLE) returns (uint256) {
         // Checks
-        require(_assets != 0 && _shares != 0, InvalidRedeemCall());
+        require(_shares != 0, NothingToRedeem());
+        require(_assets != 0, NothingToWithdraw());
 
         // Before fulfill redeem hook
         beforeFulfillRedeem(_asset, _assets, _shares);
@@ -926,7 +929,7 @@ abstract contract BaseControlledAsyncRedeem is
         AddressUpdateProposal memory proposal = $.proposedRateProvider;
 
         require(proposal.addr != address(0), NoRateProviderProposed());
-        require(block.timestamp >= proposal.timestamp + ADDRESS_UPDATE_TIMELOCK, CanNotAcceptRateProviderYet());
+        require(block.timestamp >= proposal.timestamp + ADDRESS_UPDATE_TIMELOCK, CannotAcceptRateProviderYet());
         require(block.timestamp <= proposal.timestamp + MAX_ADDRESS_UPDATE_WAIT, RateProviderUpdateExpired());
 
         $.rateProvider = IUltraVaultRateProvider(proposal.addr);
@@ -974,13 +977,13 @@ abstract contract BaseControlledAsyncRedeem is
 
     /// @notice Pause vault operations
     /// @dev Caller must be owner or have PAUSER_ROLE
-    function pause() external override onlyRoleOrOwner(PAUSER_ROLE) {
+    function pause() external override onlyRole(PAUSER_ROLE) {
         _pause();
     }
 
     /// @notice Unpause vault operations
     /// @dev Caller must be owner or have PAUSER_ROLE
-    function unpause() external override onlyRoleOrOwner(PAUSER_ROLE) {
+    function unpause() external override onlyRole(PAUSER_ROLE) {
         _unpause();
     }
 
@@ -996,10 +999,10 @@ abstract contract BaseControlledAsyncRedeem is
         return _getBaseAsyncRedeemStorage().hasRole[role][account];
     }
 
-    /// @notice Check if caller has role or is owner
+    /// @notice Check if caller has the given role
     /// @param role Role to check
-    modifier onlyRoleOrOwner(bytes32 role) {
-        require(hasRole(role, msg.sender) || msg.sender == owner, AccessDenied());
+    modifier onlyRole(bytes32 role) {
+        require(hasRole(role, msg.sender), AccessDenied());
         _;
     }
 
@@ -1019,7 +1022,15 @@ abstract contract BaseControlledAsyncRedeem is
         bytes32 role,
         address account,
         bool approved
-    ) public onlyOwner {
+    ) external onlyOwner {
+        _updateRole(role, account, approved);
+    }
+
+    function _updateRole(
+        bytes32 role,
+        address account,
+        bool approved
+    ) internal {
         if (hasRole(role,account) != approved) {
             _getBaseAsyncRedeemStorage().hasRole[role][account] = approved;
             emit RoleUpdated(role, account, approved);
