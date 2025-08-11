@@ -910,12 +910,12 @@ abstract contract BaseControlledAsyncRedeem is
         uint256 _totalAssets = totalAssets();
         uint256 _totalSupply = totalSupply();
         for (uint256 i; i < shares.length; ) {
-            uint256 assets = _optimizedConvertToAssets(shares[i], _totalAssets, _totalSupply);
-
             // Fulfill redeem
-            _fulfillRedeemOfAsset(_asset, assets, shares[i], controllers[i]);
+            uint256 assets = _optimizedConvertToAssets(shares[i], _totalAssets, _totalSupply);
+            uint256 assetsFulfilled = _fulfillRedeemOfAsset(_asset, assets, shares[i], controllers[i]);
 
-            total += assets;
+            // Update totals
+            total += assetsFulfilled;
             totalShares += shares[i];
 
             unchecked { ++i; }
@@ -933,7 +933,7 @@ abstract contract BaseControlledAsyncRedeem is
         uint256 assets,
         uint256 shares,
         address controller
-    ) internal returns (uint256) {
+    ) internal virtual returns (uint256) {
         // Checks
         require(shares != 0, NothingToRedeem());
         require(assets != 0, NothingToWithdraw());

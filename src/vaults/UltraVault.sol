@@ -407,6 +407,11 @@ contract UltraVault is BaseControlledAsyncRedeem, UUPSUpgradeable, IUltraVaultEv
         return _calculateAccruedPerformanceFee(fees, totals);
     }
 
+    /// @notice Get the withdrawal fee
+    function calculateWithdrawalFee(uint256 assets) external view returns (uint256) {
+        return assets.mulDivDown(getFees().withdrawalFee, 1e18);
+    }
+
     /// @notice Update vault's fee recipient
     /// @param newFeeRecipient New fee recipient
     /// @dev Collects pending fees before update

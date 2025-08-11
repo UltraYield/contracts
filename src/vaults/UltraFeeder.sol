@@ -189,11 +189,22 @@ contract UltraFeeder is BaseControlledAsyncRedeem, UUPSUpgradeable, IUltraFeeder
         mainVault_.fulfillRedeemOfAsset(_asset, shares, address(this));
         uint256 mainAssetsClaimed = mainVault_.redeemAsset(_asset, shares, address(this), address(this));
 
-        // Calculate the expected assets after withdrawal fees from the underlying vault
-        Fees memory fees = mainVault_.getFees();
-        uint256 withdrawalFee = assets * fees.withdrawalFee / 1e18;
-        uint256 expectedAssetsAfterFees = assets - withdrawalFee;
+        // Deduct the expected withdrawal fee from the total amount of assets
+        uint256 expectedAssetsAfterFees = assets - mainVault_.calculateWithdrawalFee(assets);
         require(mainAssetsClaimed == expectedAssetsAfterFees, AssetNumberMismatch());
+    }
+
+    /// @dev Internal fulfill redeem request logic
+    function _fulfillRedeemOfAsset(
+        address _asset,
+        uint256 assets,
+        uint256 shares,
+        address controller
+    ) internal override returns (uint256) {
+        uint256 assetsFulfilled = super._fulfillRedeemOfAsset(_asset, assets, shares, controller);
+        // Deduct the expected withdrawal fee from the total amount of assets
+        uint256 withdrawalFee = mainVault().calculateWithdrawalFee(assetsFulfilled);
+        return assetsFulfilled - withdrawalFee;
     }
 
     /// @dev Hook for inheriting contracts after fulfill redeem
@@ -206,8 +217,7 @@ contract UltraFeeder is BaseControlledAsyncRedeem, UUPSUpgradeable, IUltraFeeder
     ) internal override {
         // The base implementation has added `_assets` to the claimable assets
         // We need to calculate the withdrawal fee and deduct it from the claimable assets
-        Fees memory fees = mainVault().getFees();
-        uint256 withdrawalFee = assets * fees.withdrawalFee / 1e18;
+        uint256 withdrawalFee = mainVault().calculateWithdrawalFee(assets);
         _consumeClaimableRedeem(controller, _asset, withdrawalFee, 0);
     }
 
