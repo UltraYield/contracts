@@ -221,22 +221,19 @@ contract UltraFeeder is BaseControlledAsyncRedeem, UUPSUpgradeable, IUltraFeeder
         _consumeClaimableRedeem(controller, _asset, withdrawalFee, 0);
     }
 
-    /// @notice Cancel redeem request for controller and propagate to underlying vault
-    /// @param _asset Asset
-    /// @param controller Controller address
-    /// @param receiver Share recipient
-    /// @dev Transfers pending shares back to receiver and cancels underlying vault request
-    function _cancelRedeemRequestOfAsset(
+    /// @dev Internal function for canceling redeem requests
+    function _handleRedeemRequestCancelation(
         address _asset,
+        uint256 shares,
         address controller,
         address receiver
     ) internal override {
         // First cancel the request in the underlying vault
         // This ensures that the underlying vault's pending redeem is also cleared
-        mainVault().cancelRedeemRequestOfAsset(_asset, address(this), address(this));
-        
+        mainVault().cancelRedeemRequestPartially(_asset, shares, address(this), address(this));
+
         // Then call the internal implementation to handle the feeder's cancellation
-        super._cancelRedeemRequestOfAsset(_asset, controller, receiver);
+        super._handleRedeemRequestCancelation(_asset, shares, controller, receiver);
     }
 
     //////////////////////
