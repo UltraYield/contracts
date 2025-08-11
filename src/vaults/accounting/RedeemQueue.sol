@@ -130,13 +130,6 @@ abstract contract RedeemQueue is IRedeemQueueErrors {
         }
     }
 
-    function _clearPendingRedeem(
-        address user,
-        address token
-    ) internal {
-        delete _getRedeemQueueStorage().pendingRedeems[user][token];
-    }
-
     /////////////////////////////
     // Update Claimable Redeem //
     /////////////////////////////
