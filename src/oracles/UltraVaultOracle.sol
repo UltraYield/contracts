@@ -1,51 +1,53 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity 0.8.28;
 
+import { IERC20Metadata } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
+import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
+import { Ownable2Step } from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import { IUltraVaultOracle, Price } from "src/interfaces/IUltraVaultOracle.sol";
 import { IPriceSource } from "src/interfaces/IPriceSource.sol";
-import { InitializableOwnable } from "src/utils/InitializableOwnable.sol";
-import { IERC20Metadata } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 
-/**
- * @title UltraVaultOracle
- * @notice Oracle for setting base/quote pair prices by permissioned entities
- * @dev Price safety and reliability handled by other contracts/infrastructure
- */
-contract UltraVaultOracle is IPriceSource, InitializableOwnable {
+/// @title UltraVaultOracle
+/// @notice Oracle for setting base/quote pair prices by permissioned entities
+/// @dev Price safety and reliability handled by other contracts/infrastructure
+contract UltraVaultOracle is Ownable2Step, IUltraVaultOracle {
+    ///////////////
+    // Constants //
+    ///////////////
+
     string public constant name = "UltraVaultOracle";
+    uint256 public constant MIN_VESTING_TIME = 23 hours;
+    uint256 public constant MAX_VESTING_TIME = 60 days;
+    uint256 public constant DECIMAL_PRECISION = 1e18;
 
-    // Events
-    event PriceUpdated(
-        address base,
-        address quote,
-        uint256 price,
-        uint256 targetPrice,
-        uint256 timestampForFullVesting
-    );
-
-    // Errors
-    error NoPriceData(address base, address quote);
-    error Misconfigured();
+    /////////////
+    // Storage //
+    /////////////
 
     /// @dev Fetch price by [base][quote]
-    mapping(address => mapping(address => Price)) public prices;
+    mapping(address => mapping(address => Price)) internal _prices;
 
-    uint256 constant DECIMAL_PRECISION = 1e18;
+    /////////////////
+    // Constructor //
+    /////////////////
 
-    constructor(address _owner) {
-        initOwner(_owner);
+    constructor(address _owner) Ownable(_owner) {}
+
+    /////////////////////
+    // Set Price Logic //
+    /////////////////////
+
+    function prices(
+        address base,
+        address quote
+    ) external view returns (Price memory) {
+        return _prices[base][quote];
     }
 
-    /*//////////////////////////////////////////////////////////////
-                            SET PRICE LOGIC
-    //////////////////////////////////////////////////////////////*/
-
-    /**
-     * @notice Set base/quote pair price
-     * @param base The base asset
-     * @param quote The quote asset
-     * @param price The price of the base in terms of the quote
-     */
+    /// @notice Set base/quote pair price
+    /// @param base The base asset
+    /// @param quote The quote asset
+    /// @param price The price of the base in terms of the quote
     function setPrice(
         address base,
         address quote,
@@ -54,13 +56,11 @@ contract UltraVaultOracle is IPriceSource, InitializableOwnable {
         _setPrice(base, quote, price);
     }
 
-    /**
-     * @notice Set multiple base/quote pair prices
-     * @param bases The base assets
-     * @param quotes The quote assets
-     * @param priceArray The prices of the bases in terms of the quotes
-     * @dev Array lengths must match
-     */
+    /// @notice Set multiple base/quote pair prices
+    /// @param bases The base assets
+    /// @param quotes The quote assets
+    /// @param priceArray The prices of the bases in terms of the quotes
+    /// @dev Array lengths must match
     function setPrices(
         address[] memory bases,
         address[] memory quotes,
@@ -79,27 +79,24 @@ contract UltraVaultOracle is IPriceSource, InitializableOwnable {
         address quote,
         uint256 price
     ) internal {
-        prices[base][quote] = Price({
+        _prices[base][quote] = Price({
             price: price,
             targetPrice: 0,
             timestampForFullVesting: 0,
             lastUpdatedTimestamp: block.timestamp
         });
-
         emit PriceUpdated(base, quote, price, price, 0);
     }
 
-    /*//////////////////////////////////////////////////////////////
-                        VESTING PRICE UPDATE
-    //////////////////////////////////////////////////////////////*/
+    //////////////////////////
+    // Vesting Price Update //
+    //////////////////////////
 
-    /**
-     * @notice Set base/quote pair price with gradual change
-     * @param base The base asset
-     * @param quote The quote asset
-     * @param targetPrice The target price of the base in terms of the quote
-     * @param vestingTime The time over which vesting would occur
-     */
+    /// @notice Set base/quote pair price with gradual change
+    /// @param base The base asset
+    /// @param quote The quote asset
+    /// @param targetPrice The target price of the base in terms of the quote
+    /// @param vestingTime The time over which vesting would occur
     function scheduleLinearPriceUpdate(
         address base,
         address quote,
@@ -114,14 +111,12 @@ contract UltraVaultOracle is IPriceSource, InitializableOwnable {
         );
     }
 
-    /**
-     * @notice Set multiple base/quote pair prices with gradual changes
-     * @param bases The base assets
-     * @param quotes The quote assets
-     * @param targetPrices The target prices of the bases in terms of the quotes
-     * @param vestingTimes The times over which vesting would occur
-     * @dev Array lengths must match
-     */
+    /// @notice Set multiple base/quote pair prices with gradual changes
+    /// @param bases The base assets
+    /// @param quotes The quote assets
+    /// @param targetPrices The target prices of the bases in terms of the quotes
+    /// @param vestingTimes The times over which vesting would occur
+    /// @dev Array lengths must match
     function scheduleLinearPricesUpdates(
         address[] memory bases,
         address[] memory quotes,
@@ -149,19 +144,12 @@ contract UltraVaultOracle is IPriceSource, InitializableOwnable {
         uint256 vestingTime
     ) internal {
         // We are scheduling updates at least over 23 hours for operator convenience
-        if (
-            vestingTime < 23 hours || 
-            vestingTime > 60 days
-        )
-            revert Misconfigured();
-
-        uint256 timestampForFullVesting = block.timestamp + vestingTime;
+        require(vestingTime >= MIN_VESTING_TIME && vestingTime <= MAX_VESTING_TIME, InvalidVestingTime(base, quote, vestingTime));
 
         uint256 price = _getCurrentPrice(base, quote);
-
-        if (price == 0) revert Misconfigured();
-
-        prices[base][quote] = Price({
+        require(price != 0, ZeroVestingStartPrice(base, quote));
+        uint256 timestampForFullVesting = block.timestamp + vestingTime;
+        _prices[base][quote] = Price({
             price: price,
             targetPrice: targetPrice,
             timestampForFullVesting: timestampForFullVesting,
@@ -177,9 +165,9 @@ contract UltraVaultOracle is IPriceSource, InitializableOwnable {
         );
     }
 
-    /*//////////////////////////////////////////////////////////////
-                            QUOTE LOGIC
-    //////////////////////////////////////////////////////////////*/
+    ///////////////////////
+    // Quote Calculation //
+    ///////////////////////
 
     /// @notice Get current price for base/quote pair
     function getCurrentPrice(
@@ -193,7 +181,7 @@ contract UltraVaultOracle is IPriceSource, InitializableOwnable {
         address base,
         address quote
     ) internal view returns (uint256) {
-        Price memory price = prices[base][quote];
+        Price memory price = _prices[base][quote];
 
         if (price.timestampForFullVesting == 0) {
             return price.price;
@@ -214,12 +202,9 @@ contract UltraVaultOracle is IPriceSource, InitializableOwnable {
             diff = price.price - price.targetPrice;
         }
 
-        uint256 changePercentage =
-            (price.timestampForFullVesting - block.timestamp) *
-            DECIMAL_PRECISION /
-            (price.timestampForFullVesting - price.lastUpdatedTimestamp);
-
-        uint256 change = diff - diff * changePercentage / DECIMAL_PRECISION;
+        uint256 timeLeft = price.timestampForFullVesting - block.timestamp;
+        uint256 timeFull = price.timestampForFullVesting - price.lastUpdatedTimestamp;
+        uint256 change = diff - diff * timeLeft * DECIMAL_PRECISION / timeFull / DECIMAL_PRECISION;
  
         return increase ? price.price + change : price.price - change;
     }
@@ -239,8 +224,7 @@ contract UltraVaultOracle is IPriceSource, InitializableOwnable {
         address quote
     ) internal view returns (uint256) {
         uint256 price = _getCurrentPrice(base, quote);
-
-        if (price == 0) revert NoPriceData(base, quote);
+        require(price != 0, NoPriceData(base, quote));
 
         uint8 baseDecimals = _getDecimals(base);
         uint8 quoteDecimals = _getDecimals(quote);
@@ -249,22 +233,19 @@ contract UltraVaultOracle is IPriceSource, InitializableOwnable {
         return inAmount * price * (10 ** quoteDecimals) / (10 ** (baseDecimals + 18));
     }
 
-    /*//////////////////////////////////////////////////////////////
-                                UTILS
-    //////////////////////////////////////////////////////////////*/
+    ///////////
+    // Utils //
+    ///////////
 
     /// @dev Check array lengths match
     function _checkLength(uint256 lengthA, uint256 lengthB) internal pure {
-        if (lengthA != lengthB) 
-            revert Misconfigured();
+        require(lengthA == lengthB, InputLengthMismatch());
     }
 
-    /**
-     * @notice Get asset decimals
-     * @param asset Token address
-     * @return The decimals of the asset
-     * @dev Returns decimals if found, otherwise 18 for future deployments
-     */
+    /// @notice Get asset decimals
+    /// @param asset Token address
+    /// @return The decimals of the asset
+    /// @dev Returns decimals if found, otherwise 18 for future deployments
     function _getDecimals(address asset) internal view returns (uint8) {
         (bool success, bytes memory data) = 
             address(asset).staticcall(abi.encodeCall(IERC20Metadata.decimals, ()));

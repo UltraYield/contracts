@@ -1,127 +1,131 @@
 // SPDX-License-Identifier: GPL-3.0
-pragma solidity 0.8.28;
+pragma solidity >=0.8.0;
 
-/**
- * @title IUltraVault
- * @notice A simplified interface for use in other contracts
- */
-interface IUltraVault {
+import { IBaseVault, IBaseVaultEvents, IBaseVaultErrors } from "src/interfaces/IBaseVault.sol";
+import { IPriceSource } from "src/interfaces/IPriceSource.sol";
 
-    /**
-     * @notice Returns the address of the underlying token used for the Vault
-     * @return assetTokenAddress The address of the underlying asset
-     */
-    function asset() external view returns (address);
+/// @dev Vault fee configuration
+struct Fees {
+    // Performance fee rate (100% = 1e18)
+    uint64 performanceFee;
+    // Management fee rate (100% = 1e18)
+    uint64 managementFee;
+    // Withdrawal fee rate (100% = 1e18)
+    uint64 withdrawalFee;
+    // Last fee update timestamp
+    uint64 lastUpdateTimestamp;
+    // High water mark for performance fees
+    uint256 highwaterMark;
+}
 
-    /**
-     * @notice Preview shares for deposit
-     * @param assets Amount to deposit
-     * @return shares Amount of shares received
-     * @dev Returns 0 if vault is paused
-     */
-    function previewDeposit(
-        uint256 assets
-    ) external view returns (uint256);
+interface IUltraVaultEvents {
+    event FundsHolderProposed(address indexed proposedFundsHolder);
+    event FundsHolderChanged(address indexed oldFundsHolder, address indexed newFundsHolder);
+    event OracleProposed(address indexed proposedOracle);
+    event OracleUpdated(address indexed oldOracle, address indexed newOracle);
+    event FeesRecipientUpdated(address oldRecipient, address newRecipient);
+    event FeesUpdated(Fees oldFees, Fees newFees);
+    event FeesCollected(uint256 shares, uint256 managementFee, uint256 performanceFee);
+    event WithdrawalFeeCollected(uint256 amount);
+}
 
-    /**
-     * @notice Preview assets for mint
-     * @param shares Amount to mint
-     * @return assets Amount of assets required
-     * @dev Returns 0 if vault is paused
-     */
-    function previewMint(
-        uint256 shares
-    ) external view returns (uint256);
+interface IUltraVaultErrors {
+    error ZeroFundsHolderAddress();
+    error ZeroOracleAddress();
+    error ZeroFeeRecipientAddress();
+    error NoPendingFundsHolderUpdate();
+    error ProposedFundsHolderMismatch();
+    error CannotAcceptFundsHolderYet();
+    error FundsHolderUpdateExpired();
+    error NoOracleProposed();
+    error ProposedOracleMismatch();
+    error CannotAcceptOracleYet();
+    error OracleUpdateExpired();
+    error CannotSetBalancesInNonEmptyVault();
+    error InvalidFees();
+}
 
-    /**
-     * @notice Get max assets for deposit
-     * @return assets Maximum deposit amount
-     * @dev Returns 0 if vault is paused
-     */
-    function maxDeposit(
-        address
-    ) external view returns (uint256);
+/// @title IUltraVault
+/// @notice A simplified interface for use in other contracts
+interface IUltraVault is IBaseVault, IUltraVaultEvents, IUltraVaultErrors {
+    ////////////////////
+    // View Functions //
+    ////////////////////
 
-    /**
-     * @notice Get max shares for mint
-     * @return shares Maximum mint amount
-     * @dev Returns 0 if vault is paused
-     */
-    function maxMint(
-        address
-    ) external view returns (uint256);
+    /// @notice Returns the funds holder address of the vault
+    /// @return fundsHolder The address of the funds holder
+    function fundsHolder() external view returns (address);
 
-    /**
-     * @notice Deposit assets for receiver
-     * @param asset Asset
-     * @param assets Amount to deposit
-     * @param receiver Share recipient
-     * @return shares Amount of shares received
-     * @dev Synchronous function, reverts if paused
-     * @dev Uses claimable balances before transferring assets
-     */
-    function depositAsset(
-        address asset,
-        uint256 assets,
-        address receiver
-    ) external returns (uint256 shares);
+    /// @notice Returns the oracle address of the vault
+    /// @return oracle The address of the oracle
+    function oracle() external view returns (IPriceSource);
 
-    /**
-     * @notice Mint shares for receiver with specific asset
-     * @param asset Asset to mint with
-     * @param shares Amount to mint
-     * @param receiver Share recipient
-     * @return assets Amount of assets required
-     * @dev Synchronous function, reverts if paused
-     * @dev Uses claimable balances before minting shares
-     */
-    function mintWithAsset(
-        address asset,
-        uint256 shares,
-        address receiver
-    ) external returns (uint256 assets);
+    /// @notice Returns the current fees configuration
+    /// @return fees The current fees configuration
+    function getFees() external view returns (Fees memory);
 
-    /**
-     * @notice Request redeem of shares
-     * @param asset Asset
-     * @param shares Amount to redeem
-     * @param controller Share recipient
-     * @param owner Share owner
-     * @return requestId Request identifier
-     * @dev Adds to controller's pending redeem requests
-     */
-    function requestRedeemOfAsset(
-        address asset,
-        uint256 shares,
-        address controller,
-        address owner
-    ) external returns (uint256 requestId);
+    /// @notice Get vault fee recipient
+    function feeRecipient() external view returns (address);
 
-    /**
-     * @notice Fulfill redeem request
-     * @param asset Asset
-     * @param shares Amount to redeem
-     * @param controller Controller address
-     * @return assets Amount of claimable assets
-     */
-    function fulfillRedeemOfAsset(
-        address asset,
-        uint256 shares,
-        address controller
-    ) external returns (uint256);
+    /// @notice Get total accrued fees
+    function accruedFees() external view returns (uint256);
 
-    /**
-     * @dev Returns the oracle address of the vault.
-     */
-    function oracle() external view returns (address);
+    /// @notice Get accrued management fees
+    function accruedManagementFees() external view returns (uint256);
 
-    /**
-     * @dev Returns the paused status of the vault.
-     */
-    function paused() external view returns (bool);    
+    /// @notice Get accrued performance fees
+    function accruedPerformanceFees() external view returns (uint256);
 
-    /**
-     * @dev Returns the value of tokens owned by `account`.
-     */
-    function balanceOf(address account) external view returns (uint256);
+    /// @notice Get the withdrawal fee
+    function calculateWithdrawalFee(uint256 assets) external view returns (uint256);
+
+    /// @notice Get the proposed funds holder
+    function proposedFundsHolder() external view returns (address, uint256);
+    
+    /// @notice Get the proposed oracle
+    function proposedOracle() external view returns (address, uint256);
+
+    /////////////////////
+    // Admin Functions //
+    /////////////////////
+
+    /// @notice Update vault's fee recipient
+    /// @param newFeeRecipient New fee recipient
+    function setFeeRecipient(address newFeeRecipient) external;
+
+    /// @notice Update vault fees
+    /// @param fees New fee configuration
+    function setFees(Fees memory fees) external;
+
+    /// @notice Mint fees as shares to fee recipient
+    function collectFees() external;
+
+    /// @notice Propose fundsHolder change, can be accepted after delay
+    /// @param newFundsHolder New fundsHolder address
+    /// @dev changing the holder should be used only in case of multisig upgrade after funds transfer
+    function proposeFundsHolder(address newFundsHolder) external;
+
+    /// @notice Accept proposed fundsHolder
+    /// @dev Pauses vault to ensure oracle setup and prevent deposits with faulty prices
+    /// @dev Oracle must be switched before unpausing
+    function acceptFundsHolder(address newFundsHolder) external;
+
+    /// @notice Propose new oracle for owner acceptance after delay
+    /// @param newOracle Address of the new oracle
+    function proposeOracle(address newOracle) external;
+
+    /// @notice Accept proposed oracle
+    /// @dev Pauses vault to ensure oracle setup and prevent deposits with faulty prices
+    /// @dev Oracle must be switched before unpausing
+    function acceptProposedOracle(address newOracle) external;
+
+    /// @notice Setup initial balances in the vault without depositing the funds
+    /// @notice We expect the funds to be separately sent to funds holder
+    /// @param users Array of users to setup balances
+    /// @param shares Shares of respective users
+    /// @dev Reverts if arrays length mismatch
+    function setupInitialBalances(
+        address[] memory users,
+        uint256[] memory shares
+    ) external;
 } 

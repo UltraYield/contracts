@@ -1,141 +1,173 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity 0.8.28;
 
-import { IRateProvider } from "../interfaces/IRateProvider.sol";
+import { IRateProvider } from "src/interfaces/IRateProvider.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { IERC20Metadata } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
-import { InitializableOwnable } from "../utils/InitializableOwnable.sol";
-import { Initializable } from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
-import { AssetData } from "../interfaces/IUltraVaultRateProvider.sol";
+import { UUPSUpgradeable } from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
+import { IUltraVaultRateProvider, AssetData } from "src/interfaces/IUltraVaultRateProvider.sol";
+import { Ownable2StepUpgradeable } from "@openzeppelin/contracts-upgradeable/access/Ownable2StepUpgradeable.sol";
 
-/**
- * @title UltraVaultRateProvider
- * @notice Handles rate calculations between assets for UltraVault
- */
-contract UltraVaultRateProvider is InitializableOwnable, Initializable {
-    // Events
-    event AssetAdded(address indexed asset, bool isPegged);
-    event AssetRemoved(address indexed asset);
-    event RateProviderUpdated(address indexed asset, address rateProvider);
+// keccak256(abi.encode(uint256(keccak256("ultrayield.storage.UltraVaultRateProvider")) - 1)) & ~bytes32(uint256(0xff));
+bytes32 constant ULTRA_VAULT_RATE_PROVIDER_STORAGE_LOCATION = 0xe24c98638c43dd52672effcbc76556d36ab0c9a1bbbb5f4a3c1e3bd83e851000;
 
-    // Errors
-    error AssetNotSupported();
-    error InvalidRateProvider();
-    error AssetAlreadySupported();
+/// @title UltraVaultRateProvider
+/// @notice Handles rate calculations between assets for UltraVault
+contract UltraVaultRateProvider is Ownable2StepUpgradeable, UUPSUpgradeable, IUltraVaultRateProvider {
+    /////////////
+    // Storage //
+    /////////////
 
-    address public baseAsset;
-    uint8 public decimals;
+    /// @custom:storage-location erc7201:ultrayield.storage.UltraVaultRateProvider
+    struct Storage {
+        address baseAsset;
+        uint8 decimals;
+        mapping(address => AssetData) supportedAssets;
+    }
 
-    // State
-    mapping(address => AssetData) public supportedAssets;
+    function _getStorage() private pure returns (Storage storage $) {
+        assembly {
+            $.slot := ULTRA_VAULT_RATE_PROVIDER_STORAGE_LOCATION
+        }
+    }
 
-    // V0: 3 total: baseAsset, decimals, supportedAssets
-    uint256[47] private __gap;
+    //////////
+    // Init //
+    //////////
 
     constructor() {
         _disableInitializers();
     }
 
     function initialize(address _owner, address _baseAsset) external initializer {
-        initOwner(_owner);
-        baseAsset = _baseAsset;
-        decimals = IERC20Metadata(_baseAsset).decimals();
+        __Ownable_init(_owner);
+        __Ownable2Step_init();
+        __UUPSUpgradeable_init();
+
+        Storage storage $ = _getStorage();
+        uint8 _decimals = IERC20Metadata(_baseAsset).decimals();
+        $.baseAsset = _baseAsset;
+        $.decimals = _decimals;
         // Base asset is always supported and pegged to itself
-        supportedAssets[_baseAsset] = AssetData({
+        $.supportedAssets[_baseAsset] = AssetData({
             isPegged: true,
-            decimals: decimals,
+            decimals: _decimals,
             rateProvider: address(0)
         });
+        emit AssetAdded(address(_baseAsset), true);
     }
 
-    /**
-     * @notice Add a new supported asset
-     * @param asset The asset to add
-     * @param isPegged Whether the asset is pegged to base asset
-     * @param rateProvider External rate provider if not pegged
-     */
-    function addAsset(address asset, bool isPegged, address rateProvider) external onlyOwner {
-        AssetData memory data = supportedAssets[asset];
-        if (data.isPegged || data.rateProvider != address(0)) 
-            revert AssetAlreadySupported();
-        if (!isPegged && rateProvider == address(0))
-            revert InvalidRateProvider();
+    /////////////////////////////
+    // IUltraVaultRateProvider //
+    /////////////////////////////
 
-        supportedAssets[asset] = AssetData({
-            isPegged: isPegged,
-            decimals: IERC20Metadata(asset).decimals(),
-            rateProvider: rateProvider
-        });
-
-        emit AssetAdded(address(asset), isPegged);
-        if (!isPegged) {
-            emit RateProviderUpdated(address(asset), rateProvider);
-        }
+    /// @inheritdoc IUltraVaultRateProvider
+    function baseAsset() public view returns (address) {
+        return _getStorage().baseAsset;
     }
 
-    /**
-     * @notice Remove a supported asset
-     * @param asset The asset to remove
-     */
-    function removeAsset(address asset) external onlyOwner {
-        if (asset == baseAsset) revert AssetNotSupported();
-        delete supportedAssets[asset];
-        emit AssetRemoved(address(asset));
+    /// @inheritdoc IUltraVaultRateProvider
+    function decimals() public view returns (uint8) {
+        return _getStorage().decimals;
     }
 
-    /**
-     * @notice Update rate provider for an asset
-     * @param asset The asset to update
-     * @param rateProvider New rate provider
-     */
-    function updateRateProvider(address asset, address rateProvider) external onlyOwner {
-        if (asset == baseAsset) revert AssetNotSupported();
-        if (supportedAssets[asset].isPegged) revert AssetNotSupported();
-        if (rateProvider == address(0)) revert InvalidRateProvider();
-
-        supportedAssets[asset].rateProvider = rateProvider;
-        emit RateProviderUpdated(address(asset), rateProvider);
+    /// @inheritdoc IUltraVaultRateProvider
+    function supportedAssets(address asset) public view returns (AssetData memory) {
+        return _getStorage().supportedAssets[asset];
     }
 
-    /**
-     * @notice Get the rate between an asset and the base asset
-     * @param asset The asset to get rate for
-     * @param assets Amount to covert
-     * @return result The rate in terms of base asset (18 decimals)
-     */
-    function convertToUnderlying(address asset, uint256 assets) external view returns (uint256 result) {
-        AssetData memory data = supportedAssets[asset];
-        if (data.isPegged) {
-            if (data.decimals == decimals) {
-                return assets; // 1:1 rate
-            } else {
-                // 1:1 rate accounting for decimals, convert from asset decimals to base asset decimals
-                return _convertDecimals(assets, data.decimals, decimals);
-            }
-        }
-
-        if (data.rateProvider == address(0)) revert AssetNotSupported();
-
-        // Call external rate provider
-        return IRateProvider(data.rateProvider).convertToUnderlying(asset, assets);
-    }
-
-    /**
-     * @notice Check if an asset is supported
-     * @param asset The asset to check
-     * @return True if asset is supported
-     */
+    /// @inheritdoc IUltraVaultRateProvider
     function isSupported(address asset) external view returns (bool) {
-        AssetData memory data = supportedAssets[asset];
+        AssetData memory data = _getStorage().supportedAssets[asset];
         if (data.isPegged) {
             return true;
         }
         return data.rateProvider != address(0);
     }
 
-    /**
-     * @notice Help account for decimals
-     */
+    /// @inheritdoc IUltraVaultRateProvider
+    function addAsset(address asset, bool isPegged, address rateProvider) external onlyOwner {
+        // Checks
+        AssetData memory data = supportedAssets(asset);
+        require(!data.isPegged && data.rateProvider == address(0), AssetAlreadySupported());
+        if (isPegged) {
+            require(rateProvider == address(0), InvalidRateProvider());
+        } else {
+            require(rateProvider != address(0), InvalidRateProvider());
+        }
+
+        // Update storage
+        _getStorage().supportedAssets[asset] = AssetData({
+            isPegged: isPegged,
+            decimals: IERC20Metadata(asset).decimals(),
+            rateProvider: rateProvider
+        });
+
+        // Emit events
+        emit AssetAdded(address(asset), isPegged);
+        if (!isPegged) {
+            emit RateProviderUpdated(address(asset), rateProvider);
+        }
+    }
+
+    /// @inheritdoc IUltraVaultRateProvider
+    function removeAsset(address asset) external onlyOwner {
+        require(asset != baseAsset(), CannotUpdateBaseAsset());
+        delete _getStorage().supportedAssets[asset];
+        emit AssetRemoved(asset);
+    }
+
+    /// @inheritdoc IUltraVaultRateProvider
+    function updateRateProvider(address asset, address rateProvider) external onlyOwner {
+        require(asset != baseAsset(), CannotUpdateBaseAsset());
+        require(!supportedAssets(asset).isPegged, AssetNotSupported());
+        require(rateProvider != address(0), InvalidRateProvider());
+
+        _getStorage().supportedAssets[asset].rateProvider = rateProvider;
+        emit RateProviderUpdated(address(asset), rateProvider);
+    }
+
+    /// @inheritdoc IUltraVaultRateProvider
+    function convertToUnderlying(address asset, uint256 assets) external view returns (uint256 result) {
+        AssetData memory data = supportedAssets(asset);
+        uint8 baseDecimals = decimals();
+        if (data.isPegged) {
+            if (data.decimals == baseDecimals) {
+                return assets; // 1:1 rate
+            } else {
+                // 1:1 rate accounting for decimals, convert from asset decimals to base asset decimals
+                return _convertDecimals(assets, data.decimals, baseDecimals);
+            }
+        } else {
+            require(data.rateProvider != address(0), AssetNotSupported());
+            // Call external rate provider
+            return IRateProvider(data.rateProvider).convertToUnderlying(asset, assets);
+        }
+    }
+
+    /// @inheritdoc IUltraVaultRateProvider
+    function convertFromUnderlying(address asset, uint256 baseAssets) external view returns (uint256 result) {
+        AssetData memory data = supportedAssets(asset);
+        uint8 baseDecimals = decimals();
+        if (data.isPegged) {
+            if (data.decimals == baseDecimals) {
+                return baseAssets; // 1:1 rate
+            } else {
+                // 1:1 rate accounting for decimals, convert from base asset decimals to asset decimals
+                return _convertDecimals(baseAssets, baseDecimals, data.decimals);
+            }
+        } else {
+            require(data.rateProvider != address(0), AssetNotSupported());
+            // Call external rate provider
+            return IRateProvider(data.rateProvider).convertFromUnderlying(asset, baseAssets);
+        }
+    }
+
+    //////////////////////
+    // Internal Helpers //
+    //////////////////////
+
+    /// @dev Helps with decimals accounting
     function _convertDecimals(
         uint256 amount, 
         uint8 fromDecimals, 
@@ -149,4 +181,11 @@ contract UltraVaultRateProvider is InitializableOwnable, Initializable {
             return amount / 10 ** (fromDecimals - toDecimals);
         }
     }
+
+    /////////////////////
+    // UUPS Upgradable //
+    /////////////////////
+
+    /// @notice UUPS Upgradable access authorization
+    function _authorizeUpgrade(address newImplementation) internal override onlyOwner {}
 } 
