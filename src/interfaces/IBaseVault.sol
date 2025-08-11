@@ -432,7 +432,7 @@ interface IBaseVault is
         address receiver
     ) external returns (uint256 shares);
 
-    /// @notice Cancel redeem request for controller partially,for a specific amount of shares
+    /// @notice Cancel redeem request for controller partially, for a specific amount of shares
     /// @param asset Asset
     /// @param shares Amount of shares to cancel
     /// @param controller Controller address

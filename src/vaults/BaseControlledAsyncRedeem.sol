@@ -846,7 +846,7 @@ abstract contract BaseControlledAsyncRedeem is
         shares = _cancelRedeemForAllPendingShares(asset(), controller, receiver);
     }
 
-    /// @notice Cancel redeem request for controller partially,for a specific amount of shares
+    /// @notice Cancel redeem request for controller partially, for a specific amount of shares
     /// @param _asset Asset
     /// @param shares Amount of shares to cancel
     /// @param controller Controller address
