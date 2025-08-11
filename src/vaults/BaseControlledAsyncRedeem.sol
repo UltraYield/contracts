@@ -814,8 +814,36 @@ abstract contract BaseControlledAsyncRedeem is
 
     /// @notice Cancel redeem request for controller
     /// @param controller Controller address
-    function cancelRedeemRequest(address controller) external {
-        return _cancelRedeemRequestOfAsset(asset(), controller, msg.sender);
+    /// @return shares Amount of shares canceled
+    /// @dev Transfers pending shares back to receiver
+    function cancelRedeemRequest(address controller) external returns (uint256 shares) {
+        shares = _cancelRedeemForAllPendingShares(asset(), controller, msg.sender);
+    }
+
+    /// @notice Cancel redeem request for controller
+    /// @param _asset Asset
+    /// @param controller Controller address
+    /// @param receiver Share recipient
+    /// @return shares Amount of shares canceled
+    /// @dev Transfers pending shares back to receiver
+    function cancelRedeemRequestOfAsset(
+        address _asset,
+        address controller,
+        address receiver
+    ) external returns (uint256 shares) {
+        shares = _cancelRedeemForAllPendingShares(_asset, controller, receiver);
+    }
+
+    /// @notice Cancel redeem request for controller
+    /// @param controller Controller address
+    /// @param receiver Share recipient
+    /// @return shares Amount of shares canceled
+    /// @dev Transfers pending shares back to receiver
+    function cancelRedeemRequest(
+        address controller,
+        address receiver
+    ) external returns (uint256 shares) {
+        shares = _cancelRedeemForAllPendingShares(asset(), controller, receiver);
     }
 
     /// @notice Cancel redeem request for controller
@@ -823,42 +851,41 @@ abstract contract BaseControlledAsyncRedeem is
     /// @param controller Controller address
     /// @param receiver Share recipient
     /// @dev Transfers pending shares back to receiver
-    function cancelRedeemRequestOfAsset(
+    function cancelRedeemRequestPartially(
+        address _asset,
+        uint256 shares,
+        address controller,
+        address receiver
+    ) external {
+        _handleRedeemRequestCancelation(_asset, shares, controller, receiver);
+    }
+
+    /// @dev Internal function for canceling redeem requests for all pending shares for a user
+    function _cancelRedeemForAllPendingShares(
         address _asset,
         address controller,
         address receiver
-    ) external {
-        return _cancelRedeemRequestOfAsset(_asset, controller, receiver);
-    }
-
-    /// @notice Cancel redeem request for controller
-    /// @param controller Controller address
-    /// @param receiver Share recipient
-    /// @dev Transfers pending shares back to receiver
-    function cancelRedeemRequest(
-        address controller,
-        address receiver
-    ) external {
-        return _cancelRedeemRequestOfAsset(asset(), controller, receiver);
+    ) internal returns (uint256 shares) {
+        shares = _getPendingRedeem(controller, _asset).shares;
+        _handleRedeemRequestCancelation(_asset, shares, controller, receiver);
     }
 
     /// @dev Internal function for canceling redeem requests
-    function _cancelRedeemRequestOfAsset(
+    function _handleRedeemRequestCancelation(
         address _asset,
+        uint256 shares,
         address controller,
         address receiver
     ) internal virtual checkAccess(controller) {
-        // Get pending shares
-        uint256 pendingShares = _getPendingRedeem(controller, _asset).shares;
-        require(pendingShares != 0, NoPendingRedeem());
-
-        // Clear pending redeem
-        _clearPendingRedeem(controller, _asset);
+        // Consume pending redeem
+        require(shares != 0, NoPendingRedeem());
+        _consumePendingRedeem(controller, _asset, shares);
 
         // Send pending shares from vault to receiver
-        SafeERC20.safeTransfer(IERC20(address(this)), receiver, pendingShares);
+        SafeERC20.safeTransfer(IERC20(address(this)), receiver, shares);
 
-        emit RedeemRequestCanceled(controller, receiver, pendingShares);
+        // Emit event
+        emit RedeemRequestCanceled(controller, receiver, shares);
     }
 
     ////////////////////////

@@ -69,9 +69,9 @@ interface IBaseVault is
   IERC7540Operator,
   IRedeemAccounting 
 {
-    /////////////
-    // Getters //
-    /////////////
+    ////////////////////
+    // View Functions //
+    ////////////////////
 
     /// @notice Returns the address of the underlying token used for the Vault
     /// @return assetTokenAddress The address of the underlying asset
@@ -88,6 +88,24 @@ interface IBaseVault is
     /// @notice Returns the proposed rate provider
     /// @return proposedRateProvider The proposed rate provider
     function proposedRateProvider() external view returns (AddressUpdateProposal memory);
+
+    /// @notice Converts assets to underlying
+    /// @param _asset The asset to convert
+    /// @param assets The amount of assets to convert
+    /// @return baseAssets The amount of underlying received
+    function convertToUnderlying(
+        address _asset,
+        uint256 assets
+    ) external view returns (uint256 baseAssets);
+
+    /// @notice Converts underlying to assets
+    /// @param asset The asset to convert
+    /// @param baseAssets The amount of underlying to convert
+    /// @return assets The amount of assets received
+    function convertFromUnderlying(
+        address asset,
+        uint256 baseAssets
+    ) external view returns (uint256 assets);
 
     /////////////
     // Deposit //
@@ -391,43 +409,39 @@ interface IBaseVault is
 
     /// @notice Cancel redeem request for controller
     /// @param controller Controller address
-    function cancelRedeemRequest(address controller) external;
+    /// @return shares Amount of shares canceled
+    function cancelRedeemRequest(address controller) external returns (uint256 shares);
 
     /// @notice Cancel redeem request for controller
     /// @param controller Controller address
     /// @param receiver Share recipient
+    /// @return shares Amount of shares canceled
     function cancelRedeemRequest(
         address controller,
         address receiver
-    ) external;
+    ) external returns (uint256 shares);
 
     /// @notice Cancel redeem request for controller
     /// @param asset Asset
     /// @param controller Controller address
     /// @param receiver Share recipient
+    /// @return shares Amount of shares canceled
     function cancelRedeemRequestOfAsset(
         address asset,
         address controller,
         address receiver
-    ) external;
+    ) external returns (uint256 shares);
 
-    /// @notice Converts assets to underlying
-    /// @param _asset The asset to convert
-    /// @param assets The amount of assets to convert
-    /// @return baseAssets The amount of underlying received
-    function convertToUnderlying(
-        address _asset,
-        uint256 assets
-    ) external view returns (uint256 baseAssets);
-
-    /// @notice Converts underlying to assets
-    /// @param asset The asset to convert
-    /// @param baseAssets The amount of underlying to convert
-    /// @return assets The amount of assets received
-    function convertFromUnderlying(
+    /// @notice Cancel redeem request for controller
+    /// @param asset Asset
+    /// @param controller Controller address
+    /// @param receiver Share recipient
+    function cancelRedeemRequestPartially(
         address asset,
-        uint256 baseAssets
-    ) external view returns (uint256 assets);
+        uint256 shares,
+        address controller,
+        address receiver
+    ) external;
 
     /////////////////////
     // Admin Functions //
