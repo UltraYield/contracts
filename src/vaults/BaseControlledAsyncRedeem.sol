@@ -803,7 +803,7 @@ abstract contract BaseControlledAsyncRedeem is
         SafeERC20.safeTransferFrom(IERC20(this), owner, address(this), shares);
 
         // Emit event
-        emit RedeemRequested(controller, owner, REQUEST_ID, msg.sender, shares);
+        emit RedeemRequest(controller, owner, REQUEST_ID, msg.sender, shares);
         
         return REQUEST_ID;
     }

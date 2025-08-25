@@ -41,10 +41,10 @@ interface IBaseVaultEvents {
         uint256 shares,
         uint256 assets
     );
-    event RedeemRequested(
+    event RedeemRequest(
         address indexed controller,
         address indexed owner,
-        uint256 requestId,
+        uint256 indexed requestId,
         address sender,
         uint256 shares
     );
