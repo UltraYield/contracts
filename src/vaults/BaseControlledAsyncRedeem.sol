@@ -48,6 +48,7 @@ abstract contract BaseControlledAsyncRedeem is
     IBaseVaultEvents
 {
     using Math for uint256;
+    using SafeERC20 for IERC20;
 
     ///////////////
     // Constants //
@@ -386,8 +387,7 @@ abstract contract BaseControlledAsyncRedeem is
         beforeDeposit(_asset, assets, shares);
 
         // Need to transfer before minting or ERC777s could reenter
-        SafeERC20.safeTransferFrom(
-            IERC20(_asset),
+        IERC20(_asset).safeTransferFrom(
             msg.sender,
             address(this),
             assets
@@ -540,7 +540,7 @@ abstract contract BaseControlledAsyncRedeem is
         _consumeClaimableRedeem(controller, _asset, assets, shares);
 
         // Transfer assets to the receiver
-        SafeERC20.safeTransfer(IERC20(_asset), receiver, assets);
+        IERC20(_asset).safeTransfer(receiver, assets);
         emit Withdraw(msg.sender, receiver, controller, assets, shares);
         
         // After-withdrawal hook - use asset units for the hook
@@ -800,7 +800,7 @@ abstract contract BaseControlledAsyncRedeem is
         _increasePendingRedeem(controller, _asset, shares);
 
         // Transfer shares to vault for burning later
-        SafeERC20.safeTransferFrom(IERC20(this), owner, address(this), shares);
+        IERC20(this).safeTransferFrom(owner, address(this), shares);
 
         // Emit event
         emit RedeemRequest(controller, owner, REQUEST_ID, msg.sender, shares);
@@ -883,7 +883,7 @@ abstract contract BaseControlledAsyncRedeem is
         _consumePendingRedeem(controller, _asset, shares);
 
         // Send pending shares from vault to receiver
-        SafeERC20.safeTransfer(IERC20(address(this)), receiver, shares);
+        IERC20(this).safeTransfer(receiver, shares);
 
         // Emit event
         emit RedeemRequestCanceled(controller, receiver, shares);
