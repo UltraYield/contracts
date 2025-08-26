@@ -2,9 +2,16 @@
 pragma solidity >=0.8.0;
 
 import { PendingRedeem, ClaimableRedeem } from "src/interfaces/IRedeemQueue.sol";
-import { IERC7540Redeem } from "ERC-7540/interfaces/IERC7540.sol";
 
-interface IRedeemAccounting is IERC7540Redeem {
+interface IRedeemAccounting {
+    /// @notice Assumes control of shares from sender into the Vault and submits a Request for asynchronous redeem.
+    /// @param shares the amount of shares to be redeemed to transfer from owner
+    /// @param controller the controller of the request who will be able to operate the request
+    /// @param owner the source of the shares to be redeemed
+    /// @dev most implementations will require pre-approval of the Vault with the Vault's share token.
+    /// @return requestId The request ID
+    function requestRedeem(uint256 shares, address controller, address owner) external returns (uint256 requestId);
+
     /// @notice Get controller's pending redeem for the base asset
     /// @param _controller Controller address
     /// @return pendingRedeem Pending redeem details
