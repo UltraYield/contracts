@@ -40,6 +40,7 @@ struct UltraVaultInitParams {
 /// @notice ERC-7540 compliant async redeem vault with UltraVaultOracle pricing and multisig asset management
 contract UltraVault is BaseControlledAsyncRedeem, UUPSUpgradeable, IUltraVaultEvents, IUltraVaultErrors {
     using FixedPointMathLib for uint256;
+    using SafeERC20 for IERC20;
 
     ///////////////
     // Constants //
@@ -169,13 +170,13 @@ contract UltraVault is BaseControlledAsyncRedeem, UUPSUpgradeable, IUltraVaultEv
     /// @dev After deposit hook - collect fees and send funds to fundsHolder
     function afterDeposit(address _asset, uint256 assets, uint256) internal override {
         // Funds are sent to holder
-        SafeERC20.safeTransfer(IERC20(_asset), fundsHolder(), assets);
+        IERC20(_asset).safeTransfer(fundsHolder(), assets);
     }
 
     /// @dev Before fulfill redeem - transfer funds from fundsHolder to vault
     /// @dev "assets" will already be correct given the token user requested
     function beforeFulfillRedeem(address _asset, uint256 assets, uint256) internal override {
-        SafeERC20.safeTransferFrom(IERC20(_asset), fundsHolder(), address(this), assets);
+        IERC20(_asset).safeTransferFrom(fundsHolder(), address(this), assets);
     }
 
     ////////////////////
@@ -568,7 +569,7 @@ contract UltraVault is BaseControlledAsyncRedeem, UUPSUpgradeable, IUltraVaultEv
     ) internal {
         if (fee > 0) {
             // Transfer the fee from the fundsHolder to the fee recipient
-            SafeERC20.safeTransferFrom(IERC20(_asset), fundsHolder(), feeRecipient(), fee);
+            IERC20(_asset).safeTransferFrom(fundsHolder(), feeRecipient(), fee);
             emit WithdrawalFeeCollected(fee);
         }
     }
