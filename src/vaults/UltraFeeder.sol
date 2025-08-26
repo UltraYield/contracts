@@ -29,6 +29,8 @@ bytes32 constant ULTRA_FEEDER_STORAGE_LOCATION = 0x73fc0f32a78274c31085b0032ea47
 /// @notice ERC-4626 compliant vault that wraps UltraVault for deposits and handles async redeems
 /// @dev This vault only handles deposits into the main UltraVault and manages async redeems
 contract UltraFeeder is BaseControlledAsyncRedeem, UUPSUpgradeable, IUltraFeederErrors {
+    using SafeERC20 for IERC20;
+
     /////////////
     // Storage //
     /////////////
@@ -160,7 +162,7 @@ contract UltraFeeder is BaseControlledAsyncRedeem, UUPSUpgradeable, IUltraFeeder
     function afterDeposit(address _asset, uint256 assets, uint256 shares) internal override {
         // Approve main vault to spend assets
         IUltraVault _mainVault = mainVault();
-        SafeERC20.safeIncreaseAllowance(IERC20(_asset), address(_mainVault), assets);
+        IERC20(_asset).safeIncreaseAllowance(address(_mainVault), assets);
 
         uint256 mainShares = _mainVault.depositAsset(_asset, assets, address(this));
         require(mainShares == shares, ShareNumberMismatch());
@@ -175,7 +177,7 @@ contract UltraFeeder is BaseControlledAsyncRedeem, UUPSUpgradeable, IUltraFeeder
     ) internal override {
         // Approve main vault to spend it's shares
         IUltraVault _mainVault = mainVault();
-        SafeERC20.safeIncreaseAllowance(IERC20(address(_mainVault)), address(_mainVault), shares);
+        IERC20(_mainVault).safeIncreaseAllowance(address(_mainVault), shares);
 
         // Request redeem from main vault
         _mainVault.requestRedeemOfAsset(_asset, shares, address(this), address(this));
