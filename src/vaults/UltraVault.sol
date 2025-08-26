@@ -166,12 +166,6 @@ contract UltraVault is BaseControlledAsyncRedeem, UUPSUpgradeable, IUltraVaultEv
     // Hook Overrides //
     ////////////////////
 
-    /// @notice Collect fees before deposit
-    /// @dev Expected to be overridden in inheriting contracts
-    function beforeDeposit(address, uint256, uint256) internal virtual override {
-        _collectFees();
-    }
-
     /// @dev After deposit hook - collect fees and send funds to fundsHolder
     function afterDeposit(address _asset, uint256 assets, uint256) internal override {
         // Funds are sent to holder
@@ -182,6 +176,30 @@ contract UltraVault is BaseControlledAsyncRedeem, UUPSUpgradeable, IUltraVaultEv
     /// @dev "assets" will already be correct given the token user requested
     function beforeFulfillRedeem(address _asset, uint256 assets, uint256) internal override {
         SafeERC20.safeTransferFrom(IERC20(_asset), fundsHolder(), address(this), assets);
+    }
+
+    ////////////////////
+    // Deposit & Mint //
+    ////////////////////
+
+    /// @dev Collects fees right before making a deposit
+    function _depositAsset(
+        address _asset,
+        uint256 assets,
+        address receiver
+    ) internal override returns (uint256 shares) {
+        _collectFees();
+        shares = super._depositAsset(_asset, assets, receiver);
+    }
+
+    /// @dev Collects fees right before performing a mint
+    function _mintWithAsset(
+        address _asset,
+        uint256 shares,
+        address receiver
+    ) internal override returns (uint256 assets) {
+        _collectFees();
+        assets = super._mintWithAsset(_asset, shares, receiver);
     }
 
     ////////////////////////
