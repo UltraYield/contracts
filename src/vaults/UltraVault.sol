@@ -309,7 +309,7 @@ contract UltraVault is BaseControlledAsyncRedeem, UUPSUpgradeable, IUltraVaultEv
 
         _getUltraVaultStorage().proposedFundsHolder = AddressUpdateProposal({
             addr: newFundsHolder,
-            timestamp: block.timestamp
+            timestamp: uint96(block.timestamp)
         });
 
         emit FundsHolderProposed(newFundsHolder);
@@ -346,7 +346,7 @@ contract UltraVault is BaseControlledAsyncRedeem, UUPSUpgradeable, IUltraVaultEv
 
         _getUltraVaultStorage().proposedOracle = AddressUpdateProposal({
             addr: newOracle,
-            timestamp: block.timestamp
+            timestamp: uint96(block.timestamp)
         });
 
         emit OracleProposed(newOracle);
