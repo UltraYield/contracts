@@ -993,7 +993,7 @@ abstract contract BaseControlledAsyncRedeem is
 
         _getBaseAsyncRedeemStorage().proposedRateProvider = AddressUpdateProposal({
             addr: newRateProvider,
-            timestamp: block.timestamp
+            timestamp: uint96(block.timestamp)
         });
 
         emit RateProviderProposed(newRateProvider);
