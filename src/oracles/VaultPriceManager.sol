@@ -266,7 +266,7 @@ contract VaultPriceManager is Ownable2Step {
             _limit.jump != oldLimit.jump || 
             _limit.drawdown != oldLimit.drawdown
         ) {
-            emit LimitsUpdated(_vault, limits[_vault], _limit);
+            emit LimitsUpdated(_vault, oldLimit, _limit);
             limits[_vault] = _limit;
         }
     }
