@@ -788,7 +788,7 @@ abstract contract BaseControlledAsyncRedeem is
     ) internal checkAccess(owner) returns (uint256 requestId) {
         // Checks
         require(shares != 0, NothingToRedeem());
-        require(IERC20(address(this)).balanceOf(owner) >= shares, InsufficientBalance());
+        require(balanceOf(owner) >= shares, InsufficientBalance());
 
         // Validate that the asset is supported by the rate provider
         require(_asset == this.asset() || rateProvider().isSupported(_asset), AssetNotSupported());
