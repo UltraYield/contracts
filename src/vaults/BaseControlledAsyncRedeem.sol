@@ -1011,9 +1011,10 @@ abstract contract BaseControlledAsyncRedeem is
         require(block.timestamp >= proposal.timestamp + ADDRESS_UPDATE_TIMELOCK, CannotAcceptRateProviderYet());
         require(block.timestamp <= proposal.timestamp + MAX_ADDRESS_UPDATE_WAIT, RateProviderUpdateExpired());
 
-        $.rateProvider = IUltraVaultRateProvider(proposal.addr);
+        address oldRateProvider = address($.rateProvider);
+        $.rateProvider = IUltraVaultRateProvider(newRateProvider);
         delete $.proposedRateProvider;
-        emit RateProviderUpdated(address($.rateProvider), proposal.addr);
+        emit RateProviderUpdated(oldRateProvider, newRateProvider);
 
         // Pause to manually check the setup by operators
         _pause();
