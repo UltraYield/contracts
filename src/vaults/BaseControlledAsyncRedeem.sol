@@ -321,7 +321,7 @@ abstract contract BaseControlledAsyncRedeem is
         address _asset,
         uint256 assets,
         address receiver
-    ) internal whenNotPaused returns (uint256 shares) {
+    ) internal virtual whenNotPaused returns (uint256 shares) {
         shares = previewDepositForAsset(_asset, assets);
         _performDeposit(_asset, assets, shares, receiver);
     }
@@ -366,7 +366,7 @@ abstract contract BaseControlledAsyncRedeem is
         address _asset,
         uint256 shares,
         address receiver
-    ) internal whenNotPaused returns (uint256 assets) {
+    ) internal virtual whenNotPaused returns (uint256 assets) {
         assets = previewMintForAsset(_asset, shares);
         _performDeposit(_asset, assets, shares, receiver);
     }
