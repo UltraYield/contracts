@@ -166,9 +166,13 @@ contract UltraVaultRateProvider is Ownable2StepUpgradeable, UUPSUpgradeable, IUl
         if (fromDecimals == toDecimals) {
             return amount;
         } else if (fromDecimals < toDecimals) {
-            return amount * 10 ** (toDecimals - fromDecimals);
+            uint8 diff;
+            unchecked { diff = toDecimals - fromDecimals; }
+            return amount * 10 ** diff;
         } else {
-            return amount / 10 ** (fromDecimals - toDecimals);
+            uint8 diff;
+            unchecked { diff = fromDecimals - toDecimals; }
+            return amount / 10 ** diff;
         }
     }
 
