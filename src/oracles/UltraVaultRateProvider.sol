@@ -116,11 +116,12 @@ contract UltraVaultRateProvider is Ownable2StepUpgradeable, UUPSUpgradeable, IUl
 
     /// @inheritdoc IUltraVaultRateProvider
     function updateRateProvider(address asset, address rateProvider) external onlyOwner {
-        require(asset != baseAsset(), CannotUpdateBaseAsset());
-        require(!supportedAssets(asset).isPegged, AssetNotSupported());
+        Storage storage $ = _getStorage();
+        require(asset != $.baseAsset, CannotUpdateBaseAsset());
+        require(!$.supportedAssets[asset].isPegged, AssetNotSupported());
         require(rateProvider != address(0), InvalidRateProvider());
 
-        _getStorage().supportedAssets[asset].rateProvider = rateProvider;
+        $.supportedAssets[asset].rateProvider = rateProvider;
         emit RateProviderUpdated(address(asset), rateProvider);
     }
 
