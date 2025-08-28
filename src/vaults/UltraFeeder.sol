@@ -28,7 +28,7 @@ bytes32 constant ULTRA_FEEDER_STORAGE_LOCATION = 0x73fc0f32a78274c31085b0032ea47
 /// @title UltraFeeder
 /// @notice ERC-4626 compliant vault that wraps UltraVault for deposits and handles async redeems
 /// @dev This vault only handles deposits into the main UltraVault and manages async redeems
-contract UltraFeeder is BaseControlledAsyncRedeem, UUPSUpgradeable, IUltraFeederErrors {
+contract UltraFeeder is BaseControlledAsyncRedeem, IUltraFeederErrors {
     using SafeERC20 for IERC20;
 
     /////////////
@@ -237,12 +237,4 @@ contract UltraFeeder is BaseControlledAsyncRedeem, UUPSUpgradeable, IUltraFeeder
         // Then call the internal implementation to handle the feeder's cancellation
         super._handleRedeemRequestCancelation(_asset, shares, controller, receiver);
     }
-
-    //////////////////////
-    // UUPS Upgradeable //
-    //////////////////////
-
-    /// @notice Authorizes an upgrade to a new implementation
-    /// @param newImplementation The address of the new implementation
-    function _authorizeUpgrade(address newImplementation) internal override onlyOwner {}
 }
