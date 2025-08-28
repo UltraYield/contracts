@@ -2,7 +2,6 @@
 pragma solidity 0.8.28;
 
 import { UUPSUpgradeable } from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
-import { AccessControlDefaultAdminRulesUpgradeable } from "@openzeppelin/contracts-upgradeable/access/extensions/AccessControlDefaultAdminRulesUpgradeable.sol";
 
 // keccak256(abi.encode(uint256(keccak256("ultrayield.storage.TimelockedUUPSUpgradeable")) - 1)) & ~bytes32(uint256(0xff));
 bytes32 constant TIMELOCKED_UUPS_STORAGE_LOCATION = 0x7afc453cc683fcfc27ce501db7dcd220398cd57313b5d865546460cea677ec00;
