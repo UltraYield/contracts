@@ -5,7 +5,7 @@ import { UUPSUpgradeable } from "@openzeppelin/contracts-upgradeable/proxy/utils
 import { AccessControlDefaultAdminRulesUpgradeable } from "@openzeppelin/contracts-upgradeable/access/extensions/AccessControlDefaultAdminRulesUpgradeable.sol";
 
 // keccak256(abi.encode(uint256(keccak256("ultrayield.storage.TimelockedUUPSUpgradeable")) - 1)) & ~bytes32(uint256(0xff));
-bytes32 constant TIMELOCKED_UUPS_STORAGE_LOCATION = 0x73fc0f32a78274c31085b0032ea471ff6cedefdd8cffdf1dfa84871cdcb59100;
+bytes32 constant TIMELOCKED_UUPS_STORAGE_LOCATION = 0x7afc453cc683fcfc27ce501db7dcd220398cd57313b5d865546460cea677ec00;
 
 /// @title TimelockedUUPSUpgradeable
 /// @notice UUPS upgradeable contract with timelock functionality for upgrades
@@ -14,7 +14,7 @@ abstract contract TimelockedUUPSUpgradeable is UUPSUpgradeable {
     ////////////
     // Events //
     ////////////
-    
+
     /// @notice Emitted when a new upgrade is proposed
     /// @param implementation The new implementation address
     /// @param data The data to execute a call after the upgrade
@@ -24,22 +24,16 @@ abstract contract TimelockedUUPSUpgradeable is UUPSUpgradeable {
         bytes data,
         uint256 executionTime
     );
-    
+
     /// @notice Emitted when a proposed upgrade is executed
     /// @param implementation The new implementation address
     /// @param data The data used to execute a call after the upgrade
-    event UpgradeExecuted(
-        address indexed implementation,
-        bytes data
-    );
-    
+    event UpgradeExecuted(address indexed implementation, bytes data);
+
     /// @notice Emitted when a proposed upgrade is cancelled
     /// @param implementation The implementation address for the cancelled upgrade
     /// @param dataHash The hash of the data to execute a call after the upgrade
-    event UpgradeCancelled(
-        address indexed implementation,
-        bytes32 dataHash
-    );
+    event UpgradeCancelled(address indexed implementation, bytes32 dataHash);
 
     ////////////
     // Errors //
@@ -54,34 +48,30 @@ abstract contract TimelockedUUPSUpgradeable is UUPSUpgradeable {
     ///////////////
     // Constants //
     ///////////////
-    
+
     /// @notice Minimum delay for upgrades
     uint256 public constant MIN_UPGRADE_DELAY = 7 days;
-    
+
     /////////////
     // Storage //
     /////////////
-    
+
     /// @dev Represents the single pending upgrade
     struct PendingUpgrade {
-      // The proposed implementation address
-      address implementation;    
-      // Hash of the call data
-      bytes32 dataHash;          
-      // Earliest when the upgrade can be executed (0 if not proposed)
-      uint256 executionTime;     
+        // The proposed implementation address
+        address implementation;
+        // Hash of the data to execute a call after the upgrade
+        bytes32 dataHash;
+        // Earliest when the upgrade can be executed (0 if not proposed)
+        uint256 executionTime;
     }
-    
+
     /// @custom:storage-location erc7201:ultrayield.storage.TimelockedUUPSUpgradeable
     struct TimelockedUUPSStorage {
         PendingUpgrade pendingUpgrade;
     }
-    
-    function _getTimelockedUUPSStorage()
-        internal
-        pure
-        returns (TimelockedUUPSStorage storage $)
-    {
+
+    function _getTimelockedUUPSStorage() internal pure returns (TimelockedUUPSStorage storage $) {
         assembly {
             $.slot := TIMELOCKED_UUPS_STORAGE_LOCATION
         }
@@ -98,18 +88,18 @@ abstract contract TimelockedUUPSUpgradeable is UUPSUpgradeable {
     ////////////////////
     // View Functions //
     ////////////////////
-    
+
     /// @notice Get the pending upgrade details
     /// @return implementation The implementation address (address(0) if none pending)
     /// @return dataHash The hash of call data for the upgrade
     /// @return executionTime The earliest time the upgrade can be executed (0 if none pending)
-    function getPendingUpgrade() external view returns (
-        address implementation,
-        bytes32 dataHash,
-        uint256 executionTime
-    ) {
-        PendingUpgrade storage pendingUpgrade = _getTimelockedUUPSStorage().pendingUpgrade;
-        return (pendingUpgrade.implementation, pendingUpgrade.dataHash, pendingUpgrade.executionTime);
+    function getPendingUpgrade() external view returns (address implementation, bytes32 dataHash, uint256 executionTime) {
+        PendingUpgrade memory pendingUpgrade = _getTimelockedUUPSStorage().pendingUpgrade;
+        return (
+            pendingUpgrade.implementation,
+            pendingUpgrade.dataHash,
+            pendingUpgrade.executionTime
+        );
     }
 
     /// @notice Check if an upgrade is ready to be executed
@@ -120,17 +110,18 @@ abstract contract TimelockedUUPSUpgradeable is UUPSUpgradeable {
         address implementation,
         bytes memory data
     ) public view returns (bool) {
-        PendingUpgrade memory pending = _getTimelockedUUPSStorage().pendingUpgrade;
+        PendingUpgrade memory pending = _getTimelockedUUPSStorage()
+            .pendingUpgrade;
         require(pending.executionTime != 0, NoUpgradeProposed());
         require(pending.implementation == implementation, UpgradeImplementationMismatch());
         require(pending.dataHash == keccak256(data), UpgradeDataMismatch());
         return block.timestamp >= pending.executionTime;
     }
-    
+
     ////////////////////////
     // Upgrade Management //
     ////////////////////////
-    
+
     /// @notice Propose a new implementation for upgrade and data to execute a call after the upgrade
     /// @param newImplementation The address of the new implementation contract
     /// @param data The data to execute a call after the upgrade
@@ -146,16 +137,16 @@ abstract contract TimelockedUUPSUpgradeable is UUPSUpgradeable {
         address newImplementation,
         bytes calldata data
     ) internal {
-        PendingUpgrade storage pendingUpgrade = _getTimelockedUUPSStorage().pendingUpgrade;
-        require(pendingUpgrade.executionTime == 0, PendingUpgradeAlreadyProposed());
+        PendingUpgrade storage pending = _getTimelockedUUPSStorage().pendingUpgrade;
+        require(pending.executionTime == 0, PendingUpgradeAlreadyProposed());
         uint256 executionTime = block.timestamp + MIN_UPGRADE_DELAY;
-        pendingUpgrade.implementation = newImplementation;
-        pendingUpgrade.dataHash = keccak256(data);
-        pendingUpgrade.executionTime = executionTime;
-        
+        pending.implementation = newImplementation;
+        pending.dataHash = keccak256(data);
+        pending.executionTime = executionTime;
+
         emit UpgradeProposed(newImplementation, data, executionTime);
     }
-    
+
     /// @notice Cancel the pending upgrade
     function cancelUpgrade() external onlyProxy {
         _authorizeUpgradeCancellation();
@@ -177,11 +168,11 @@ abstract contract TimelockedUUPSUpgradeable is UUPSUpgradeable {
     function _authorizeUpgradeProposal() internal virtual;
 
     function _authorizeUpgradeCancellation() internal virtual;
-    
+
     ////////////////////
     // UUPS Overrides //
     ////////////////////
-    
+
     /// @notice Override upgradeToAndCall to enforce timelock validation
     /// @param newImplementation The new implementation address
     /// @param data The call data to execute
