@@ -30,6 +30,7 @@ interface IUltraVaultRateProvider {
     error CannotUpdateBaseAsset();
     error InvalidRateProvider();
     error AssetAlreadySupported();
+    error InvalidDecimals();
 
     ////////////////////
     // View Functions //

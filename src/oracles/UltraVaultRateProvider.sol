@@ -14,6 +14,13 @@ bytes32 constant ULTRA_VAULT_RATE_PROVIDER_STORAGE_LOCATION = 0xe24c98638c43dd52
 /// @title UltraVaultRateProvider
 /// @notice Handles rate calculations between assets for UltraVault
 contract UltraVaultRateProvider is Ownable2StepUpgradeable, UUPSUpgradeable, IUltraVaultRateProvider {
+    ///////////////
+    // Constants //
+    ///////////////
+
+    uint8 internal constant MIN_DECIMALS = 6;
+    uint8 internal constant MAX_DECIMALS = 18;
+
     /////////////
     // Storage //
     /////////////
@@ -44,8 +51,10 @@ contract UltraVaultRateProvider is Ownable2StepUpgradeable, UUPSUpgradeable, IUl
         __Ownable2Step_init();
         __UUPSUpgradeable_init();
 
-        Storage storage $ = _getStorage();
         uint8 _decimals = IERC20Metadata(_baseAsset).decimals();
+        _validateDecimals(_decimals);
+
+        Storage storage $ = _getStorage();
         $.baseAsset = _baseAsset;
         $.decimals = _decimals;
         // Base asset is always supported and pegged to itself
@@ -94,9 +103,11 @@ contract UltraVaultRateProvider is Ownable2StepUpgradeable, UUPSUpgradeable, IUl
         }
 
         // Update storage
+        uint8 _decimals = IERC20Metadata(asset).decimals();
+        _validateDecimals(_decimals);
         _getStorage().supportedAssets[asset] = AssetData({
             isPegged: isPegged,
-            decimals: IERC20Metadata(asset).decimals(),
+            decimals: _decimals,
             rateProvider: rateProvider
         });
 
@@ -172,6 +183,11 @@ contract UltraVaultRateProvider is Ownable2StepUpgradeable, UUPSUpgradeable, IUl
             unchecked { diff = fromDecimals - toDecimals; }
             return amount / 10 ** diff;
         }
+    }
+
+    /// @dev Validates that the given decimals value lies within the allowed range
+    function _validateDecimals(uint8 _decimals) internal pure {
+        require(_decimals >= MIN_DECIMALS && _decimals <= MAX_DECIMALS, InvalidDecimals());
     }
 
     /////////////////////
