@@ -79,10 +79,7 @@ contract UltraVaultRateProvider is Ownable2StepUpgradeable, UUPSUpgradeable, IUl
     /// @inheritdoc IUltraVaultRateProvider
     function isSupported(address asset) external view returns (bool) {
         AssetData memory data = _getStorage().supportedAssets[asset];
-        if (data.isPegged) {
-            return true;
-        }
-        return data.rateProvider != address(0);
+        return data.isPegged || data.rateProvider != address(0);
     }
 
     /// @inheritdoc IUltraVaultRateProvider
