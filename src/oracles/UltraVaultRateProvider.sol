@@ -132,12 +132,7 @@ contract UltraVaultRateProvider is Ownable2StepUpgradeable, UUPSUpgradeable, IUl
         AssetData memory data = supportedAssets(asset);
         uint8 baseDecimals = decimals();
         if (data.isPegged) {
-            if (data.decimals == baseDecimals) {
-                return assets; // 1:1 rate
-            } else {
-                // 1:1 rate accounting for decimals, convert from asset decimals to base asset decimals
-                return _convertDecimals(assets, data.decimals, baseDecimals);
-            }
+            return _convertDecimals(assets, data.decimals, baseDecimals);
         } else {
             require(data.rateProvider != address(0), AssetNotSupported());
             // Call external rate provider
@@ -150,12 +145,7 @@ contract UltraVaultRateProvider is Ownable2StepUpgradeable, UUPSUpgradeable, IUl
         AssetData memory data = supportedAssets(asset);
         uint8 baseDecimals = decimals();
         if (data.isPegged) {
-            if (data.decimals == baseDecimals) {
-                return baseAssets; // 1:1 rate
-            } else {
-                // 1:1 rate accounting for decimals, convert from base asset decimals to asset decimals
-                return _convertDecimals(baseAssets, baseDecimals, data.decimals);
-            }
+            return _convertDecimals(baseAssets, baseDecimals, data.decimals);
         } else {
             require(data.rateProvider != address(0), AssetNotSupported());
             // Call external rate provider
