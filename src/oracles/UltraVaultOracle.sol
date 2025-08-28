@@ -18,7 +18,6 @@ contract UltraVaultOracle is Ownable2Step, IUltraVaultOracle {
     string public constant name = "UltraVaultOracle";
     uint256 public constant MIN_VESTING_TIME = 23 hours;
     uint256 public constant MAX_VESTING_TIME = 60 days;
-    uint256 public constant DECIMAL_PRECISION = 1e18;
 
     /////////////
     // Storage //
@@ -198,7 +197,7 @@ contract UltraVaultOracle is Ownable2Step, IUltraVaultOracle {
 
         uint256 timeLeft = price.timestampForFullVesting - block.timestamp;
         uint256 timeFull = price.timestampForFullVesting - price.lastUpdatedTimestamp;
-        uint256 change = diff - diff * timeLeft * DECIMAL_PRECISION / timeFull / DECIMAL_PRECISION;
+        uint256 change = diff - diff * timeLeft / timeFull;
  
         return increase ? price.price + change : price.price - change;
     }
