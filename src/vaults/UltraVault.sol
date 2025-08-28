@@ -50,6 +50,7 @@ contract UltraVault is BaseControlledAsyncRedeem, UUPSUpgradeable, IUltraVaultEv
     uint64 public constant MAX_MANAGEMENT_FEE = 5e16; // 5%
     uint64 public constant MAX_WITHDRAWAL_FEE = 1e16; // 1%
     uint256 internal constant ONE_YEAR = 365 * 24 * 60 * 60; // 31_536_000 seconds
+    uint256 internal constant ONE_UNIT = 1e18; // Default scale
 
     /////////////
     // Storage //
@@ -223,7 +224,7 @@ contract UltraVault is BaseControlledAsyncRedeem, UUPSUpgradeable, IUltraVaultEv
         assets = convertToAssets(shares);
 
         // Calculate the withdrawal incentive fee from the assets
-        uint256 withdrawalFee = assets.mulDivDown(getFees().withdrawalFee, 1e18);
+        uint256 withdrawalFee = assets.mulDivDown(getFees().withdrawalFee, ONE_UNIT);
 
         // Fulfill request
         uint256 withdrawalAmount = assets - withdrawalFee;
@@ -255,7 +256,7 @@ contract UltraVault is BaseControlledAsyncRedeem, UUPSUpgradeable, IUltraVaultEv
         assets = _convertFromUnderlying(_asset, underlyingAssets);
         
         // Calculate the withdrawal incentive fee directly in asset units
-        uint256 withdrawalFee = assets.mulDivDown(getFees().withdrawalFee, 1e18);
+        uint256 withdrawalFee = assets.mulDivDown(getFees().withdrawalFee, ONE_UNIT);
 
         // Fulfill request with asset units (base contract expects asset units)
         uint256 withdrawalAmount = assets - withdrawalFee;
@@ -295,7 +296,7 @@ contract UltraVault is BaseControlledAsyncRedeem, UUPSUpgradeable, IUltraVaultEv
             uint256 assets = _optimizedConvertToAssets(shares[i], _totalAssets, _totalSupply);
 
             // Calculate the withdrawal incentive fee from the assets
-            uint256 withdrawalFee = assets.mulDivDown(withdrawalFeeRate, 1e18);
+            uint256 withdrawalFee = assets.mulDivDown(withdrawalFeeRate, ONE_UNIT);
 
             // Fulfill redeem
             _fulfillRedeemOfAsset(_asset, assets - withdrawalFee, shares[i], controllers[i]);
@@ -428,7 +429,7 @@ contract UltraVault is BaseControlledAsyncRedeem, UUPSUpgradeable, IUltraVaultEv
 
     /// @notice Get the withdrawal fee
     function calculateWithdrawalFee(uint256 assets) external view returns (uint256) {
-        return assets.mulDivDown(getFees().withdrawalFee, 1e18);
+        return assets.mulDivDown(getFees().withdrawalFee, ONE_UNIT);
     }
 
     /// @notice Update vault's fee recipient
@@ -557,7 +558,7 @@ contract UltraVault is BaseControlledAsyncRedeem, UUPSUpgradeable, IUltraVaultEv
             return 0;
         }
         uint256 timePassed = block.timestamp - fees.lastUpdateTimestamp;
-        return managementFee.mulDivDown(totals.totalAssets * timePassed, ONE_YEAR) / 1e18;
+        return managementFee.mulDivDown(totals.totalAssets * timePassed, ONE_YEAR) / ONE_UNIT;
     }
 
     /// @notice Transfer withdrawal fee to fee recipient

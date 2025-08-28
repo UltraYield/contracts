@@ -17,7 +17,7 @@ contract UltraVaultOracle is Ownable2Step, IUltraVaultOracle {
 
     string public constant name = "UltraVaultOracle";
     uint256 public constant MIN_VESTING_TIME = 23 hours;
-    uint256 public constant MAX_VESTING_TIME = 60 days;
+    uint256 public constant MAX_VESTING_TIME = 7 days;
     uint8 internal constant PRICE_FEED_DECIMALS = 18;
     uint8 internal constant DEFAULT_DECIMALS = 18;
 
