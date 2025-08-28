@@ -131,28 +131,28 @@ contract VaultPriceManager is Ownable2Step {
 
     /// @notice Update vault price gradually over multiple blocks
     /// @param priceUpdate Price update data
-    /// @param timestampForFullVesting Target timestamp for full vesting
+    /// @param duration Vesting duration
     /// @dev Pauses vault on large price jumps
     function updatePriceWithVesting(
         PriceUpdate calldata priceUpdate,
-        uint256 timestampForFullVesting
+        uint256 duration
     ) external {
-        _updatePriceWithVesting(priceUpdate, timestampForFullVesting);
+        _updatePriceWithVesting(priceUpdate, duration);
     }
 
     /// @notice Update prices for multiple vaults gradually
     /// @param priceUpdates Array of price updates
-    /// @param timestampForFullVesting Array of price changes per block
+    /// @param durations Array of vesting durations
     function updatePricesWithVesting(
         PriceUpdate[] calldata priceUpdates,
-        uint256[] calldata timestampForFullVesting
+        uint256[] calldata durations
     ) external {
-        require(priceUpdates.length == timestampForFullVesting.length, InputLengthMismatch());
+        require(priceUpdates.length == durations.length, InputLengthMismatch());
 
         for (uint256 i; i < priceUpdates.length; i++) {
             _updatePriceWithVesting(
                 priceUpdates[i],
-                timestampForFullVesting[i]
+                durations[i]
             );
         }
     }
@@ -160,14 +160,14 @@ contract VaultPriceManager is Ownable2Step {
     /// @notice Internal gradual price update function
     function _updatePriceWithVesting(
         PriceUpdate calldata priceUpdate,
-        uint256 timestampForFullVesting
+        uint256 duration
     ) internal onlyAdminOrOwner(priceUpdate.vault) {
         _checkSuddenMovements(priceUpdate);
         oracle.scheduleLinearPriceUpdate(
             priceUpdate.vault,
             priceUpdate.asset,
             priceUpdate.shareValueInAssets,
-            timestampForFullVesting
+            duration
         );
     }
 
