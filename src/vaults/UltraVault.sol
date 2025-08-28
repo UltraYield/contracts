@@ -46,11 +46,12 @@ contract UltraVault is BaseControlledAsyncRedeem, UUPSUpgradeable, IUltraVaultEv
     // Constants //
     ///////////////
 
-    uint64 public constant MAX_PERFORMANCE_FEE = 3e17; // 30%
-    uint64 public constant MAX_MANAGEMENT_FEE = 5e16; // 5%
-    uint64 public constant MAX_WITHDRAWAL_FEE = 1e16; // 1%
     uint256 internal constant ONE_YEAR = 365 * 24 * 60 * 60; // 31_536_000 seconds
     uint256 internal constant ONE_UNIT = 1e18; // Default scale
+    uint64 internal constant ONE_PERCENT = uint64(ONE_UNIT) / 100;
+    uint64 public constant MAX_PERFORMANCE_FEE = 30 * ONE_PERCENT; // 30%
+    uint64 public constant MAX_MANAGEMENT_FEE = 5 * ONE_PERCENT; // 5%
+    uint64 public constant MAX_WITHDRAWAL_FEE = ONE_PERCENT; // 1%
 
     /////////////
     // Storage //
