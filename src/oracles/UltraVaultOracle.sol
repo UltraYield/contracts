@@ -18,6 +18,8 @@ contract UltraVaultOracle is Ownable2Step, IUltraVaultOracle {
     string public constant name = "UltraVaultOracle";
     uint256 public constant MIN_VESTING_TIME = 23 hours;
     uint256 public constant MAX_VESTING_TIME = 60 days;
+    uint8 internal constant PRICE_FEED_DECIMALS = 18;
+    uint8 internal constant DEFAULT_DECIMALS = 18;
 
     /////////////
     // Storage //
@@ -219,7 +221,7 @@ contract UltraVaultOracle is Ownable2Step, IUltraVaultOracle {
         uint256 price = _getCurrentPrice(base, quote);
         require(price != 0, NoPriceData(base, quote));
 
-        uint8 baseDecimals = _getDecimals(base) + 18; // 18 is price feed decimals
+        uint8 baseDecimals = _getDecimals(base) + PRICE_FEED_DECIMALS;
         uint8 quoteDecimals = _getDecimals(quote);
         uint256 outAmount = inAmount * price;
         uint8 decimalsDiff;
@@ -246,10 +248,10 @@ contract UltraVaultOracle is Ownable2Step, IUltraVaultOracle {
     /// @notice Get asset decimals
     /// @param asset Token address
     /// @return The decimals of the asset
-    /// @dev Returns decimals if found, otherwise 18 for future deployments
+    /// @dev Returns decimals if found, otherwise 18 (default)
     function _getDecimals(address asset) internal view returns (uint8) {
         (bool success, bytes memory data) = 
             address(asset).staticcall(abi.encodeCall(IERC20Metadata.decimals, ()));
-        return success && data.length == 32 ? abi.decode(data, (uint8)) : 18;
+        return success && data.length == 32 ? abi.decode(data, (uint8)) : DEFAULT_DECIMALS;
     }
 }
