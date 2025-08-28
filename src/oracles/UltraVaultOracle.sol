@@ -195,9 +195,9 @@ contract UltraVaultOracle is Ownable2Step, IUltraVaultOracle {
         uint256 diff;
         unchecked { diff = increase ? price.targetPrice - price.price : price.price - price.targetPrice; }
 
-        uint256 timeLeft = price.timestampForFullVesting - block.timestamp;
-        uint256 timeFull = price.timestampForFullVesting - price.lastUpdatedTimestamp;
-        uint256 change = diff - diff * timeLeft / timeFull;
+        uint256 timeElapsed = block.timestamp - price.lastUpdatedTimestamp;
+        uint256 timeTotal = price.timestampForFullVesting - price.lastUpdatedTimestamp;
+        uint256 change = diff * timeElapsed / timeTotal;
  
         return increase ? price.price + change : price.price - change;
     }
