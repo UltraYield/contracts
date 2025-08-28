@@ -221,19 +221,13 @@ contract UltraVaultOracle is Ownable2Step, IUltraVaultOracle {
         uint256 price = _getCurrentPrice(base, quote);
         require(price != 0, NoPriceData(base, quote));
 
-        uint8 baseDecimals = _getDecimals(base) + PRICE_FEED_DECIMALS;
-        uint8 quoteDecimals = _getDecimals(quote);
-        uint256 outAmount = inAmount * price;
-        uint8 decimalsDiff;
-        if (quoteDecimals == baseDecimals) {
-            return outAmount;
-        } else if (quoteDecimals > baseDecimals) {
-            unchecked { decimalsDiff = quoteDecimals - baseDecimals; }
-            return outAmount * 10 ** decimalsDiff;
-        } else {
-            unchecked { decimalsDiff = baseDecimals - quoteDecimals; }
-            return outAmount / 10 ** decimalsDiff;
-        }
+        // Assets decimals are within [6, 18], enforced by UltraVaultRateProvider
+        uint8 nominatorDecimals = _getDecimals(quote);
+        uint8 denominatorDecimals = _getDecimals(base) + PRICE_FEED_DECIMALS;
+        require(denominatorDecimals > nominatorDecimals, InvalidAssetsDecimals());
+        uint8 diff;
+        unchecked { diff = denominatorDecimals - nominatorDecimals; }
+        return inAmount * price / 10 ** diff;
     }
 
     ///////////

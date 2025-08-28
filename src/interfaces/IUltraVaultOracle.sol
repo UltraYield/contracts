@@ -39,6 +39,7 @@ interface IUltraVaultOracle is IPriceSource {
     error InputLengthMismatch();
     error InvalidVestingTime(address base, address quote, uint256 vestingTime);
     error ZeroVestingStartPrice(address base, address quote);
+    error InvalidAssetsDecimals();
 
     ////////////////////
     // View Functions //
