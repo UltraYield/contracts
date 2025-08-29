@@ -5,13 +5,14 @@ import { IERC165, IERC7575 } from "ERC-7540/interfaces/IERC7575.sol";
 import { IERC7540Redeem, IERC7540Operator } from "ERC-7540/interfaces/IERC7540.sol";
 import { PausableUpgradeable } from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import { ERC4626Upgradeable } from "@openzeppelin/contracts-upgradeable/token/ERC20/extensions/ERC4626Upgradeable.sol";
+import { TimelockedUUPSUpgradeable } from "src/utils/TimelockedUUPSUpgradeable.sol";
 import { SafeERC20, IERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
 import { PendingRedeem, ClaimableRedeem } from "src/interfaces/IRedeemQueue.sol";
 import { IRedeemAccounting } from "src/interfaces/IRedeemAccounting.sol";
 import { IUltraVaultRateProvider } from "src/interfaces/IUltraVaultRateProvider.sol";
 import { IPausable } from "src/interfaces/IPausable.sol";
-import { OPERATOR_ROLE, PAUSER_ROLE } from "src/utils/Roles.sol";
+import { OPERATOR_ROLE, PAUSER_ROLE, UPGRADER_ROLE } from "src/utils/Roles.sol";
 import { AccessControlDefaultAdminRulesUpgradeable } from "@openzeppelin/contracts-upgradeable/access/extensions/AccessControlDefaultAdminRulesUpgradeable.sol";
 import { AddressUpdateProposal } from "src/utils/AddressUpdates.sol";
 import { RedeemQueue } from "src/vaults/accounting/RedeemQueue.sol";
@@ -41,6 +42,7 @@ abstract contract BaseControlledAsyncRedeem is
     AccessControlDefaultAdminRulesUpgradeable,
     ERC4626Upgradeable,
     PausableUpgradeable,
+    TimelockedUUPSUpgradeable,
     RedeemQueue,
     IERC7540Operator,
     IRedeemAccounting,
@@ -48,6 +50,7 @@ abstract contract BaseControlledAsyncRedeem is
     IBaseVaultEvents
 {
     using Math for uint256;
+    using SafeERC20 for IERC20;
 
     ///////////////
     // Constants //
@@ -85,7 +88,8 @@ abstract contract BaseControlledAsyncRedeem is
     ) public virtual onlyInitializing {
         require(params.asset != address(0), ZeroAssetAddress());
 
-        // Init OZ contracts
+        // Init parents
+        __TimelockedUUPSUpgradeable_init();
         __AccessControl_init();
         __AccessControlDefaultAdminRules_init(0, params.owner);
         __Pausable_init();
@@ -98,6 +102,7 @@ abstract contract BaseControlledAsyncRedeem is
         // Grant roles to owner
         _grantRole(OPERATOR_ROLE, params.owner);
         _grantRole(PAUSER_ROLE, params.owner);
+        _grantRole(UPGRADER_ROLE, params.owner);
     }
 
     /////////////////
@@ -321,7 +326,7 @@ abstract contract BaseControlledAsyncRedeem is
         address _asset,
         uint256 assets,
         address receiver
-    ) internal whenNotPaused returns (uint256 shares) {
+    ) internal virtual whenNotPaused returns (uint256 shares) {
         shares = previewDepositForAsset(_asset, assets);
         _performDeposit(_asset, assets, shares, receiver);
     }
@@ -366,7 +371,7 @@ abstract contract BaseControlledAsyncRedeem is
         address _asset,
         uint256 shares,
         address receiver
-    ) internal whenNotPaused returns (uint256 assets) {
+    ) internal virtual whenNotPaused returns (uint256 assets) {
         assets = previewMintForAsset(_asset, shares);
         _performDeposit(_asset, assets, shares, receiver);
     }
@@ -386,8 +391,7 @@ abstract contract BaseControlledAsyncRedeem is
         beforeDeposit(_asset, assets, shares);
 
         // Need to transfer before minting or ERC777s could reenter
-        SafeERC20.safeTransferFrom(
-            IERC20(_asset),
+        IERC20(_asset).safeTransferFrom(
             msg.sender,
             address(this),
             assets
@@ -540,7 +544,7 @@ abstract contract BaseControlledAsyncRedeem is
         _consumeClaimableRedeem(controller, _asset, assets, shares);
 
         // Transfer assets to the receiver
-        SafeERC20.safeTransfer(IERC20(_asset), receiver, assets);
+        IERC20(_asset).safeTransfer(receiver, assets);
         emit Withdraw(msg.sender, receiver, controller, assets, shares);
         
         // After-withdrawal hook - use asset units for the hook
@@ -788,7 +792,7 @@ abstract contract BaseControlledAsyncRedeem is
     ) internal checkAccess(owner) returns (uint256 requestId) {
         // Checks
         require(shares != 0, NothingToRedeem());
-        require(IERC20(address(this)).balanceOf(owner) >= shares, InsufficientBalance());
+        require(balanceOf(owner) >= shares, InsufficientBalance());
 
         // Validate that the asset is supported by the rate provider
         require(_asset == this.asset() || rateProvider().isSupported(_asset), AssetNotSupported());
@@ -800,10 +804,10 @@ abstract contract BaseControlledAsyncRedeem is
         _increasePendingRedeem(controller, _asset, shares);
 
         // Transfer shares to vault for burning later
-        SafeERC20.safeTransferFrom(IERC20(this), owner, address(this), shares);
+        IERC20(this).safeTransferFrom(owner, address(this), shares);
 
         // Emit event
-        emit RedeemRequested(controller, owner, REQUEST_ID, msg.sender, shares);
+        emit RedeemRequest(controller, owner, REQUEST_ID, msg.sender, shares);
         
         return REQUEST_ID;
     }
@@ -883,7 +887,7 @@ abstract contract BaseControlledAsyncRedeem is
         _consumePendingRedeem(controller, _asset, shares);
 
         // Send pending shares from vault to receiver
-        SafeERC20.safeTransfer(IERC20(address(this)), receiver, shares);
+        IERC20(this).safeTransfer(receiver, shares);
 
         // Emit event
         emit RedeemRequestCanceled(controller, receiver, shares);
@@ -993,7 +997,7 @@ abstract contract BaseControlledAsyncRedeem is
 
         _getBaseAsyncRedeemStorage().proposedRateProvider = AddressUpdateProposal({
             addr: newRateProvider,
-            timestamp: block.timestamp
+            timestamp: uint96(block.timestamp)
         });
 
         emit RateProviderProposed(newRateProvider);
@@ -1011,9 +1015,10 @@ abstract contract BaseControlledAsyncRedeem is
         require(block.timestamp >= proposal.timestamp + ADDRESS_UPDATE_TIMELOCK, CannotAcceptRateProviderYet());
         require(block.timestamp <= proposal.timestamp + MAX_ADDRESS_UPDATE_WAIT, RateProviderUpdateExpired());
 
-        $.rateProvider = IUltraVaultRateProvider(proposal.addr);
+        address oldRateProvider = address($.rateProvider);
+        $.rateProvider = IUltraVaultRateProvider(newRateProvider);
         delete $.proposedRateProvider;
-        emit RateProviderUpdated(address($.rateProvider), proposal.addr);
+        emit RateProviderUpdated(oldRateProvider, newRateProvider);
 
         // Pause to manually check the setup by operators
         _pause();
@@ -1083,6 +1088,15 @@ abstract contract BaseControlledAsyncRedeem is
         require(controller == msg.sender || isOperator(controller, msg.sender), AccessDenied());
         _;
     }
+
+    /// @dev Checks that caller has the UPGRADER_ROLE required to execute an upgrade
+    function _authorizeUpgrade(address newImplementation) internal override onlyRole(UPGRADER_ROLE) {}
+
+    /// @dev Checks that caller has the UPGRADER_ROLE required to propose an upgrade
+    function _authorizeUpgradeProposal() internal override onlyRole(UPGRADER_ROLE) {}
+
+    /// @dev Checks that caller has the UPGRADER_ROLE required to cancel a pending upgrade
+    function _authorizeUpgradeCancellation() internal override onlyRole(UPGRADER_ROLE) {}
 
     ////////////
     // ERC165 //

@@ -53,6 +53,14 @@ contract VaultPriceManager is Ownable2Step {
     error NotAdminOrOwner();
     error InvalidLimit();
 
+    ///////////////
+    // Constants //
+    ///////////////
+
+    uint256 internal constant SCALE = 1e18;
+    uint256 public constant MAX_JUMP_LIMIT = SCALE;
+    uint256 public constant MAX_DRAWDOWN_LIMIT = SCALE;
+
     /////////////
     // Storage //
     /////////////
@@ -86,8 +94,9 @@ contract VaultPriceManager is Ownable2Step {
         // Ensure vault is empty
         require(IERC20Supply(vault).totalSupply() == 0, CannotAddNonEmptyVault());
 
-        highwaterMarks[vault] = 1e18;
-        oracle.setPrice(vault, address(IERC4626(vault).asset()), 1e18);
+        uint256 initialPrice = SCALE;
+        highwaterMarks[vault] = initialPrice;
+        oracle.setPrice(vault, address(IERC4626(vault).asset()), initialPrice);
 
         emit VaultAdded(vault);
     }
@@ -122,28 +131,28 @@ contract VaultPriceManager is Ownable2Step {
 
     /// @notice Update vault price gradually over multiple blocks
     /// @param priceUpdate Price update data
-    /// @param timestampForFullVesting Target timestamp for full vesting
+    /// @param duration Vesting duration
     /// @dev Pauses vault on large price jumps
     function updatePriceWithVesting(
         PriceUpdate calldata priceUpdate,
-        uint256 timestampForFullVesting
+        uint256 duration
     ) external {
-        _updatePriceWithVesting(priceUpdate, timestampForFullVesting);
+        _updatePriceWithVesting(priceUpdate, duration);
     }
 
     /// @notice Update prices for multiple vaults gradually
     /// @param priceUpdates Array of price updates
-    /// @param timestampForFullVesting Array of price changes per block
+    /// @param durations Array of vesting durations
     function updatePricesWithVesting(
         PriceUpdate[] calldata priceUpdates,
-        uint256[] calldata timestampForFullVesting
+        uint256[] calldata durations
     ) external {
-        require(priceUpdates.length == timestampForFullVesting.length, InputLengthMismatch());
+        require(priceUpdates.length == durations.length, InputLengthMismatch());
 
         for (uint256 i; i < priceUpdates.length; i++) {
             _updatePriceWithVesting(
                 priceUpdates[i],
-                timestampForFullVesting[i]
+                durations[i]
             );
         }
     }
@@ -151,14 +160,14 @@ contract VaultPriceManager is Ownable2Step {
     /// @notice Internal gradual price update function
     function _updatePriceWithVesting(
         PriceUpdate calldata priceUpdate,
-        uint256 timestampForFullVesting
+        uint256 duration
     ) internal onlyAdminOrOwner(priceUpdate.vault) {
         _checkSuddenMovements(priceUpdate);
         oracle.scheduleLinearPriceUpdate(
             priceUpdate.vault,
             priceUpdate.asset,
             priceUpdate.shareValueInAssets,
-            timestampForFullVesting
+            duration
         );
     }
 
@@ -175,13 +184,13 @@ contract VaultPriceManager is Ownable2Step {
         if (
             // Sudden drop
             priceUpdate.shareValueInAssets <
-            lastPrice.mulDivDown(1e18 - limit.jump, 1e18) ||
+            lastPrice.mulDivDown(SCALE - limit.jump, SCALE) ||
             // Sudden increase
             priceUpdate.shareValueInAssets >
-            lastPrice.mulDivDown(1e18 + limit.jump, 1e18) ||
+            lastPrice.mulDivDown(SCALE + limit.jump, SCALE) ||
             // Drawdown check
             priceUpdate.shareValueInAssets <
-            highwaterMark.mulDivDown(1e18 - limit.drawdown, 1e18)
+            highwaterMark.mulDivDown(SCALE - limit.drawdown, SCALE)
         ) {
             IPausable vault = IPausable(priceUpdate.vault);
             if (!vault.paused()) {
@@ -258,15 +267,14 @@ contract VaultPriceManager is Ownable2Step {
     }
 
     function _setLimits(address _vault, Limit memory _limit) internal {
-        require(_limit.jump <= 1e18 && _limit.drawdown <= 1e18, InvalidLimit());
-
+        require(_limit.jump <= MAX_JUMP_LIMIT && _limit.drawdown <= MAX_DRAWDOWN_LIMIT, InvalidLimit());
 
         Limit memory oldLimit = limits[_vault];
         if (
             _limit.jump != oldLimit.jump || 
             _limit.drawdown != oldLimit.drawdown
         ) {
-            emit LimitsUpdated(_vault, limits[_vault], _limit);
+            emit LimitsUpdated(_vault, oldLimit, _limit);
             limits[_vault] = _limit;
         }
     }

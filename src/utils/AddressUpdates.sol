@@ -3,5 +3,5 @@ pragma solidity 0.8.28;
 
 struct AddressUpdateProposal {
     address addr;
-    uint256 timestamp;
+    uint96 timestamp;
 }

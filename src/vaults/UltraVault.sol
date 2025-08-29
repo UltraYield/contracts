@@ -2,7 +2,6 @@
 pragma solidity 0.8.28;
 
 import { SafeERC20, IERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import { UUPSUpgradeable } from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import { IERC20Metadata } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import { IPriceSource } from "src/interfaces/IPriceSource.sol";
 import { Fees, IUltraVaultEvents, IUltraVaultErrors } from "src/interfaces/IUltraVault.sol";
@@ -38,17 +37,20 @@ struct UltraVaultInitParams {
 
 /// @title UltraVault
 /// @notice ERC-7540 compliant async redeem vault with UltraVaultOracle pricing and multisig asset management
-contract UltraVault is BaseControlledAsyncRedeem, UUPSUpgradeable, IUltraVaultEvents, IUltraVaultErrors {
+contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVaultErrors {
     using FixedPointMathLib for uint256;
+    using SafeERC20 for IERC20;
 
     ///////////////
     // Constants //
     ///////////////
 
-    uint64 public constant MAX_PERFORMANCE_FEE = 3e17; // 30%
-    uint64 public constant MAX_MANAGEMENT_FEE = 5e16; // 5%
-    uint64 public constant MAX_WITHDRAWAL_FEE = 1e16; // 1%
     uint256 internal constant ONE_YEAR = 365 * 24 * 60 * 60; // 31_536_000 seconds
+    uint256 internal constant ONE_UNIT = 1e18; // Default scale
+    uint64 internal constant ONE_PERCENT = uint64(ONE_UNIT) / 100;
+    uint64 public constant MAX_PERFORMANCE_FEE = 30 * ONE_PERCENT; // 30%
+    uint64 public constant MAX_MANAGEMENT_FEE = 5 * ONE_PERCENT; // 5%
+    uint64 public constant MAX_WITHDRAWAL_FEE = ONE_PERCENT; // 1%
 
     /////////////
     // Storage //
@@ -92,7 +94,7 @@ contract UltraVault is BaseControlledAsyncRedeem, UUPSUpgradeable, IUltraVaultEv
         $.oracle = IPriceSource(params.oracle);
         _pause();
         
-        // Calling at the very end since we need oracle to be setup
+        // Calling at the end since we need oracle to be setup
         super.initialize(BaseControlledAsyncRedeemInitParams({
             owner: params.owner,
             asset: params.asset,
@@ -166,22 +168,40 @@ contract UltraVault is BaseControlledAsyncRedeem, UUPSUpgradeable, IUltraVaultEv
     // Hook Overrides //
     ////////////////////
 
-    /// @notice Collect fees before deposit
-    /// @dev Expected to be overridden in inheriting contracts
-    function beforeDeposit(address, uint256, uint256) internal virtual override {
-        _collectFees();
-    }
-
     /// @dev After deposit hook - collect fees and send funds to fundsHolder
     function afterDeposit(address _asset, uint256 assets, uint256) internal override {
         // Funds are sent to holder
-        SafeERC20.safeTransfer(IERC20(_asset), fundsHolder(), assets);
+        IERC20(_asset).safeTransfer(fundsHolder(), assets);
     }
 
     /// @dev Before fulfill redeem - transfer funds from fundsHolder to vault
     /// @dev "assets" will already be correct given the token user requested
     function beforeFulfillRedeem(address _asset, uint256 assets, uint256) internal override {
-        SafeERC20.safeTransferFrom(IERC20(_asset), fundsHolder(), address(this), assets);
+        IERC20(_asset).safeTransferFrom(fundsHolder(), address(this), assets);
+    }
+
+    ////////////////////
+    // Deposit & Mint //
+    ////////////////////
+
+    /// @dev Collects fees right before making a deposit
+    function _depositAsset(
+        address _asset,
+        uint256 assets,
+        address receiver
+    ) internal override returns (uint256 shares) {
+        _collectFees();
+        shares = super._depositAsset(_asset, assets, receiver);
+    }
+
+    /// @dev Collects fees right before performing a mint
+    function _mintWithAsset(
+        address _asset,
+        uint256 shares,
+        address receiver
+    ) internal override returns (uint256 assets) {
+        _collectFees();
+        assets = super._mintWithAsset(_asset, shares, receiver);
     }
 
     ////////////////////////
@@ -204,7 +224,7 @@ contract UltraVault is BaseControlledAsyncRedeem, UUPSUpgradeable, IUltraVaultEv
         assets = convertToAssets(shares);
 
         // Calculate the withdrawal incentive fee from the assets
-        uint256 withdrawalFee = assets.mulDivDown(getFees().withdrawalFee, 1e18);
+        uint256 withdrawalFee = assets.mulDivDown(getFees().withdrawalFee, ONE_UNIT);
 
         // Fulfill request
         uint256 withdrawalAmount = assets - withdrawalFee;
@@ -236,7 +256,7 @@ contract UltraVault is BaseControlledAsyncRedeem, UUPSUpgradeable, IUltraVaultEv
         assets = _convertFromUnderlying(_asset, underlyingAssets);
         
         // Calculate the withdrawal incentive fee directly in asset units
-        uint256 withdrawalFee = assets.mulDivDown(getFees().withdrawalFee, 1e18);
+        uint256 withdrawalFee = assets.mulDivDown(getFees().withdrawalFee, ONE_UNIT);
 
         // Fulfill request with asset units (base contract expects asset units)
         uint256 withdrawalAmount = assets - withdrawalFee;
@@ -276,7 +296,7 @@ contract UltraVault is BaseControlledAsyncRedeem, UUPSUpgradeable, IUltraVaultEv
             uint256 assets = _optimizedConvertToAssets(shares[i], _totalAssets, _totalSupply);
 
             // Calculate the withdrawal incentive fee from the assets
-            uint256 withdrawalFee = assets.mulDivDown(withdrawalFeeRate, 1e18);
+            uint256 withdrawalFee = assets.mulDivDown(withdrawalFeeRate, ONE_UNIT);
 
             // Fulfill redeem
             _fulfillRedeemOfAsset(_asset, assets - withdrawalFee, shares[i], controllers[i]);
@@ -309,7 +329,7 @@ contract UltraVault is BaseControlledAsyncRedeem, UUPSUpgradeable, IUltraVaultEv
 
         _getUltraVaultStorage().proposedFundsHolder = AddressUpdateProposal({
             addr: newFundsHolder,
-            timestamp: block.timestamp
+            timestamp: uint96(block.timestamp)
         });
 
         emit FundsHolderProposed(newFundsHolder);
@@ -346,7 +366,7 @@ contract UltraVault is BaseControlledAsyncRedeem, UUPSUpgradeable, IUltraVaultEv
 
         _getUltraVaultStorage().proposedOracle = AddressUpdateProposal({
             addr: newOracle,
-            timestamp: block.timestamp
+            timestamp: uint96(block.timestamp)
         });
 
         emit OracleProposed(newOracle);
@@ -409,7 +429,7 @@ contract UltraVault is BaseControlledAsyncRedeem, UUPSUpgradeable, IUltraVaultEv
 
     /// @notice Get the withdrawal fee
     function calculateWithdrawalFee(uint256 assets) external view returns (uint256) {
-        return assets.mulDivDown(getFees().withdrawalFee, 1e18);
+        return assets.mulDivDown(getFees().withdrawalFee, ONE_UNIT);
     }
 
     /// @notice Update vault's fee recipient
@@ -538,7 +558,7 @@ contract UltraVault is BaseControlledAsyncRedeem, UUPSUpgradeable, IUltraVaultEv
             return 0;
         }
         uint256 timePassed = block.timestamp - fees.lastUpdateTimestamp;
-        return managementFee.mulDivDown(totals.totalAssets * timePassed, ONE_YEAR) / 1e18;
+        return managementFee.mulDivDown(totals.totalAssets * timePassed, ONE_YEAR) / ONE_UNIT;
     }
 
     /// @notice Transfer withdrawal fee to fee recipient
@@ -550,15 +570,8 @@ contract UltraVault is BaseControlledAsyncRedeem, UUPSUpgradeable, IUltraVaultEv
     ) internal {
         if (fee > 0) {
             // Transfer the fee from the fundsHolder to the fee recipient
-            SafeERC20.safeTransferFrom(IERC20(_asset), fundsHolder(), feeRecipient(), fee);
+            IERC20(_asset).safeTransferFrom(fundsHolder(), feeRecipient(), fee);
             emit WithdrawalFeeCollected(fee);
         }
     }
-
-    /////////////////////
-    // UUPS Upgradable //
-    /////////////////////
-
-    /// @notice UUPS Upgradable access authorization
-    function _authorizeUpgrade(address newImplementation) internal override onlyOwner {}
 }
