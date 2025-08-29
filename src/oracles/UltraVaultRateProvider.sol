@@ -4,7 +4,7 @@ pragma solidity 0.8.28;
 import { IRateProvider } from "src/interfaces/IRateProvider.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { IERC20Metadata } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
-import { UUPSUpgradeable } from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
+import { TimelockedUUPSUpgradeable } from "src/utils/TimelockedUUPSUpgradeable.sol";
 import { IUltraVaultRateProvider, AssetData } from "src/interfaces/IUltraVaultRateProvider.sol";
 import { Ownable2StepUpgradeable } from "@openzeppelin/contracts-upgradeable/access/Ownable2StepUpgradeable.sol";
 
@@ -13,7 +13,7 @@ bytes32 constant ULTRA_VAULT_RATE_PROVIDER_STORAGE_LOCATION = 0xe24c98638c43dd52
 
 /// @title UltraVaultRateProvider
 /// @notice Handles rate calculations between assets for UltraVault
-contract UltraVaultRateProvider is Ownable2StepUpgradeable, UUPSUpgradeable, IUltraVaultRateProvider {
+contract UltraVaultRateProvider is Ownable2StepUpgradeable, TimelockedUUPSUpgradeable, IUltraVaultRateProvider {
     ///////////////
     // Constants //
     ///////////////
@@ -49,7 +49,7 @@ contract UltraVaultRateProvider is Ownable2StepUpgradeable, UUPSUpgradeable, IUl
     function initialize(address _owner, address _baseAsset) external initializer {
         __Ownable_init(_owner);
         __Ownable2Step_init();
-        __UUPSUpgradeable_init();
+        __TimelockedUUPSUpgradeable_init();
 
         uint8 _decimals = IERC20Metadata(_baseAsset).decimals();
         _validateDecimals(_decimals);
@@ -190,10 +190,13 @@ contract UltraVaultRateProvider is Ownable2StepUpgradeable, UUPSUpgradeable, IUl
         require(_decimals >= MIN_DECIMALS && _decimals <= MAX_DECIMALS, InvalidDecimals());
     }
 
-    /////////////////////
-    // UUPS Upgradable //
-    /////////////////////
+    ////////////////////////////
+    // Upgrade Access Control //
+    ////////////////////////////
 
-    /// @notice UUPS Upgradable access authorization
     function _authorizeUpgrade(address newImplementation) internal override onlyOwner {}
+
+    function _authorizeUpgradeProposal() internal override onlyOwner {}
+
+    function _authorizeUpgradeCancellation() internal override onlyOwner {}
 } 

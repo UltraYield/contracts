@@ -2,7 +2,6 @@
 pragma solidity 0.8.28;
 
 import { SafeERC20, IERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import { UUPSUpgradeable } from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import { IERC20Metadata } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import { IPriceSource } from "src/interfaces/IPriceSource.sol";
 import { Fees, IUltraVaultEvents, IUltraVaultErrors } from "src/interfaces/IUltraVault.sol";
@@ -38,7 +37,7 @@ struct UltraVaultInitParams {
 
 /// @title UltraVault
 /// @notice ERC-7540 compliant async redeem vault with UltraVaultOracle pricing and multisig asset management
-contract UltraVault is BaseControlledAsyncRedeem, UUPSUpgradeable, IUltraVaultEvents, IUltraVaultErrors {
+contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVaultErrors {
     using FixedPointMathLib for uint256;
     using SafeERC20 for IERC20;
 
@@ -46,11 +45,12 @@ contract UltraVault is BaseControlledAsyncRedeem, UUPSUpgradeable, IUltraVaultEv
     // Constants //
     ///////////////
 
-    uint64 public constant MAX_PERFORMANCE_FEE = 3e17; // 30%
-    uint64 public constant MAX_MANAGEMENT_FEE = 5e16; // 5%
-    uint64 public constant MAX_WITHDRAWAL_FEE = 1e16; // 1%
     uint256 internal constant ONE_YEAR = 365 * 24 * 60 * 60; // 31_536_000 seconds
     uint256 internal constant ONE_UNIT = 1e18; // Default scale
+    uint64 internal constant ONE_PERCENT = uint64(ONE_UNIT) / 100;
+    uint64 public constant MAX_PERFORMANCE_FEE = 30 * ONE_PERCENT; // 30%
+    uint64 public constant MAX_MANAGEMENT_FEE = 5 * ONE_PERCENT; // 5%
+    uint64 public constant MAX_WITHDRAWAL_FEE = ONE_PERCENT; // 1%
 
     /////////////
     // Storage //
@@ -94,7 +94,7 @@ contract UltraVault is BaseControlledAsyncRedeem, UUPSUpgradeable, IUltraVaultEv
         $.oracle = IPriceSource(params.oracle);
         _pause();
         
-        // Calling at the very end since we need oracle to be setup
+        // Calling at the end since we need oracle to be setup
         super.initialize(BaseControlledAsyncRedeemInitParams({
             owner: params.owner,
             asset: params.asset,
@@ -574,11 +574,4 @@ contract UltraVault is BaseControlledAsyncRedeem, UUPSUpgradeable, IUltraVaultEv
             emit WithdrawalFeeCollected(fee);
         }
     }
-
-    /////////////////////
-    // UUPS Upgradable //
-    /////////////////////
-
-    /// @notice UUPS Upgradable access authorization
-    function _authorizeUpgrade(address newImplementation) internal override onlyOwner {}
 }

@@ -5,13 +5,14 @@ import { IERC165, IERC7575 } from "ERC-7540/interfaces/IERC7575.sol";
 import { IERC7540Redeem, IERC7540Operator } from "ERC-7540/interfaces/IERC7540.sol";
 import { PausableUpgradeable } from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import { ERC4626Upgradeable } from "@openzeppelin/contracts-upgradeable/token/ERC20/extensions/ERC4626Upgradeable.sol";
+import { TimelockedUUPSUpgradeable } from "src/utils/TimelockedUUPSUpgradeable.sol";
 import { SafeERC20, IERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
 import { PendingRedeem, ClaimableRedeem } from "src/interfaces/IRedeemQueue.sol";
 import { IRedeemAccounting } from "src/interfaces/IRedeemAccounting.sol";
 import { IUltraVaultRateProvider } from "src/interfaces/IUltraVaultRateProvider.sol";
 import { IPausable } from "src/interfaces/IPausable.sol";
-import { OPERATOR_ROLE, PAUSER_ROLE } from "src/utils/Roles.sol";
+import { OPERATOR_ROLE, PAUSER_ROLE, UPGRADER_ROLE } from "src/utils/Roles.sol";
 import { AccessControlDefaultAdminRulesUpgradeable } from "@openzeppelin/contracts-upgradeable/access/extensions/AccessControlDefaultAdminRulesUpgradeable.sol";
 import { AddressUpdateProposal } from "src/utils/AddressUpdates.sol";
 import { RedeemQueue } from "src/vaults/accounting/RedeemQueue.sol";
@@ -41,6 +42,7 @@ abstract contract BaseControlledAsyncRedeem is
     AccessControlDefaultAdminRulesUpgradeable,
     ERC4626Upgradeable,
     PausableUpgradeable,
+    TimelockedUUPSUpgradeable,
     RedeemQueue,
     IERC7540Operator,
     IRedeemAccounting,
@@ -86,7 +88,8 @@ abstract contract BaseControlledAsyncRedeem is
     ) public virtual onlyInitializing {
         require(params.asset != address(0), ZeroAssetAddress());
 
-        // Init OZ contracts
+        // Init parents
+        __TimelockedUUPSUpgradeable_init();
         __AccessControl_init();
         __AccessControlDefaultAdminRules_init(0, params.owner);
         __Pausable_init();
@@ -99,6 +102,7 @@ abstract contract BaseControlledAsyncRedeem is
         // Grant roles to owner
         _grantRole(OPERATOR_ROLE, params.owner);
         _grantRole(PAUSER_ROLE, params.owner);
+        _grantRole(UPGRADER_ROLE, params.owner);
     }
 
     /////////////////
@@ -1084,6 +1088,15 @@ abstract contract BaseControlledAsyncRedeem is
         require(controller == msg.sender || isOperator(controller, msg.sender), AccessDenied());
         _;
     }
+
+    /// @dev Checks that caller has the UPGRADER_ROLE required to execute an upgrade
+    function _authorizeUpgrade(address newImplementation) internal override onlyRole(UPGRADER_ROLE) {}
+
+    /// @dev Checks that caller has the UPGRADER_ROLE required to propose an upgrade
+    function _authorizeUpgradeProposal() internal override onlyRole(UPGRADER_ROLE) {}
+
+    /// @dev Checks that caller has the UPGRADER_ROLE required to cancel a pending upgrade
+    function _authorizeUpgradeCancellation() internal override onlyRole(UPGRADER_ROLE) {}
 
     ////////////
     // ERC165 //
