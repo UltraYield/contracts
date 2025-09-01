@@ -15,6 +15,7 @@ interface IBaseVaultErrors {
     error NotOwner();
     error AccessDenied();
     error ZeroAssetAddress();
+    error ZeroRateProviderAddress();
     error InputLengthMismatch();
     error CannotPreviewWithdrawInAsyncVault();
     error CannotPreviewRedeemInAsyncVault();
@@ -73,10 +74,6 @@ interface IBaseVault is
     // View Functions //
     ////////////////////
 
-    /// @notice Returns the address of the underlying token used for the Vault
-    /// @return assetTokenAddress The address of the underlying asset
-    function baseAsset() external view returns (address);
-
     /// @notice Returns the address of the share token
     /// @return share The address of the share token
     function share() external view returns (address);
@@ -132,15 +129,6 @@ interface IBaseVault is
         address asset,
         uint256 assets
     ) external view returns (uint256);
-
-    /// @notice Helper to deposit assets for msg.sender upon referral
-    /// @param assets Amount to deposit
-    /// @param referralId id of referral
-    /// @return shares Amount of shares received
-    function depositWithReferral(
-        uint256 assets,
-        string calldata referralId
-    ) external returns (uint256);
 
     /// @notice Helper to deposit assets for msg.sender upon referral specifying receiver
     /// @param assets Amount to deposit

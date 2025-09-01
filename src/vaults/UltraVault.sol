@@ -48,9 +48,9 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
     uint256 internal constant ONE_YEAR = 365 * 24 * 60 * 60; // 31_536_000 seconds
     uint256 internal constant ONE_UNIT = 1e18; // Default scale
     uint64 internal constant ONE_PERCENT = uint64(ONE_UNIT) / 100;
-    uint64 public constant MAX_PERFORMANCE_FEE = 30 * ONE_PERCENT; // 30%
-    uint64 public constant MAX_MANAGEMENT_FEE = 5 * ONE_PERCENT; // 5%
-    uint64 public constant MAX_WITHDRAWAL_FEE = ONE_PERCENT; // 1%
+    uint64 internal constant MAX_PERFORMANCE_FEE = 30 * ONE_PERCENT; // 30%
+    uint64 internal constant MAX_MANAGEMENT_FEE = 5 * ONE_PERCENT; // 5%
+    uint64 internal constant MAX_WITHDRAWAL_FEE = ONE_PERCENT; // 1%
 
     /////////////
     // Storage //
@@ -217,25 +217,8 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
     function fulfillRedeem(
         uint256 shares,
         address controller
-    ) external override onlyRole(OPERATOR_ROLE) returns (uint256 assets) {
-        // Collect fees accrued to date
-        _collectFees();
-
-        assets = convertToAssets(shares);
-
-        // Calculate the withdrawal incentive fee from the assets
-        uint256 withdrawalFee = assets.mulDivDown(getFees().withdrawalFee, ONE_UNIT);
-
-        // Fulfill request
-        uint256 withdrawalAmount = assets - withdrawalFee;
-        _fulfillRedeemOfAsset(asset(), withdrawalAmount, shares, controller);
-
-        // Burn shares
-        _burn(address(this), shares);
-
-        _transferWithdrawalFeeInAsset(asset(), withdrawalFee);
-
-        return withdrawalAmount;
+    ) external override returns (uint256 assets) {
+        assets = fulfillRedeemOfAsset(asset(), shares, controller);
     }
 
     /// @notice Fulfill redeem request
@@ -247,7 +230,7 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
         address _asset,
         uint256 shares,
         address controller
-    ) external override onlyRole(OPERATOR_ROLE) returns (uint256 assets) {
+    ) public override onlyRole(OPERATOR_ROLE) returns (uint256 assets) {
         // Collect fees accrued to date
         _collectFees();
         

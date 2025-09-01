@@ -49,7 +49,7 @@ abstract contract TimelockedUUPSUpgradeable is UUPSUpgradeable {
     ///////////////
 
     /// @notice Minimum delay for upgrades
-    uint256 public constant MIN_UPGRADE_DELAY = 7 days;
+    uint256 internal constant MIN_UPGRADE_DELAY = 7 days;
 
     /////////////
     // Storage //

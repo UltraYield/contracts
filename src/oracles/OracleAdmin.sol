@@ -22,6 +22,7 @@ contract OracleAdmin is Ownable2Step {
     ////////////
 
     error NotAdminOrOwner();
+    error ZeroOracleAddress();
 
     /////////////
     // Storage //
@@ -41,6 +42,7 @@ contract OracleAdmin is Ownable2Step {
     /// @param _oracle Oracle contract address
     /// @param _owner Owner address
     constructor(address _oracle, address _owner) Ownable(_owner) {
+        require(_oracle != address(0), ZeroOracleAddress());
         oracle = IUltraVaultOracle(_oracle);
     }
 
