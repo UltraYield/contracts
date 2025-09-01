@@ -15,6 +15,7 @@ interface IBaseVaultErrors {
     error NotOwner();
     error AccessDenied();
     error ZeroAssetAddress();
+    error ZeroRateProviderAddress();
     error InputLengthMismatch();
     error CannotPreviewWithdrawInAsyncVault();
     error CannotPreviewRedeemInAsyncVault();

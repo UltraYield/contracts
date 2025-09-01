@@ -87,6 +87,7 @@ abstract contract BaseControlledAsyncRedeem is
         BaseControlledAsyncRedeemInitParams memory params
     ) public virtual onlyInitializing {
         require(params.asset != address(0), ZeroAssetAddress());
+        require(params.rateProvider != address(0), ZeroRateProviderAddress());
 
         // Init parents
         __TimelockedUUPSUpgradeable_init();
