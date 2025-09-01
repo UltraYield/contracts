@@ -13,7 +13,7 @@ import { IRedeemAccounting } from "src/interfaces/IRedeemAccounting.sol";
 import { IUltraVaultRateProvider } from "src/interfaces/IUltraVaultRateProvider.sol";
 import { IPausable } from "src/interfaces/IPausable.sol";
 import { OPERATOR_ROLE, PAUSER_ROLE, UPGRADER_ROLE } from "src/utils/Roles.sol";
-import { AccessControlDefaultAdminRulesUpgradeable } from "@openzeppelin/contracts-upgradeable/access/extensions/AccessControlDefaultAdminRulesUpgradeable.sol";
+import { AccessControlUpgradeable } from "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol";
 import { AddressUpdateProposal } from "src/utils/AddressUpdates.sol";
 import { RedeemQueue } from "src/vaults/accounting/RedeemQueue.sol";
 import { IBaseVault, IBaseVaultErrors, IBaseVaultEvents } from "src/interfaces/IBaseVault.sol";
@@ -39,7 +39,7 @@ struct BaseControlledAsyncRedeemInitParams {
 /// @notice Base contract for controlled async redeem flows
 /// @dev Based on ERC-7540 Reference Implementation
 abstract contract BaseControlledAsyncRedeem is
-    AccessControlDefaultAdminRulesUpgradeable,
+    AccessControlUpgradeable,
     ERC4626Upgradeable,
     PausableUpgradeable,
     TimelockedUUPSUpgradeable,
@@ -57,8 +57,8 @@ abstract contract BaseControlledAsyncRedeem is
     ///////////////
 
     uint256 internal constant REQUEST_ID = 0;
-    uint256 public constant ADDRESS_UPDATE_TIMELOCK = 3 days;
-    uint256 public constant MAX_ADDRESS_UPDATE_WAIT = 7 days;
+    uint256 internal constant ADDRESS_UPDATE_TIMELOCK = 3 days;
+    uint256 internal constant MAX_ADDRESS_UPDATE_WAIT = 7 days;
 
     /////////////
     // Storage //
@@ -91,7 +91,6 @@ abstract contract BaseControlledAsyncRedeem is
         // Init parents
         __TimelockedUUPSUpgradeable_init();
         __AccessControl_init();
-        __AccessControlDefaultAdminRules_init(0, params.owner);
         __Pausable_init();
         __ERC20_init(params.name, params.symbol);
         __ERC4626_init(IERC20(params.asset));
@@ -100,6 +99,7 @@ abstract contract BaseControlledAsyncRedeem is
         _getBaseAsyncRedeemStorage().rateProvider = IUltraVaultRateProvider(params.rateProvider);
 
         // Grant roles to owner
+        _grantRole(DEFAULT_ADMIN_ROLE, params.owner);
         _grantRole(OPERATOR_ROLE, params.owner);
         _grantRole(PAUSER_ROLE, params.owner);
         _grantRole(UPGRADER_ROLE, params.owner);
@@ -108,12 +108,6 @@ abstract contract BaseControlledAsyncRedeem is
     /////////////////
     // Public view //
     /////////////////
-
-    /// @notice Returns the address of the underlying token used for the Vault
-    /// @return assetTokenAddress The address of the underlying asset
-    function baseAsset() external view returns (address) {
-        return super.asset();
-    }
 
     /// @notice Returns the address of the rate provider
     /// @return rateProvider The address of the rate provider
@@ -235,17 +229,6 @@ abstract contract BaseControlledAsyncRedeem is
     // Deposit & Mint //
     ////////////////////
 
-    /// @notice Helper to deposit assets for msg.sender upon referral
-    /// @param assets Amount to deposit
-    /// @param referralId id of referral
-    /// @return shares Amount of shares received
-    function depositWithReferral(
-        uint256 assets,
-        string calldata referralId
-    ) external returns (uint256) {
-        return _depositAssetWithReferral(asset(), assets, msg.sender, referralId);
-    }
-
     /// @notice Helper to deposit assets for msg.sender upon referral specifying receiver
     /// @param assets Amount to deposit
     /// @param receiver receiver of deposit
@@ -272,13 +255,6 @@ abstract contract BaseControlledAsyncRedeem is
         string calldata referralId
     ) external returns (uint256) {
         return _depositAssetWithReferral(_asset, assets, receiver, referralId);
-    }
-
-    /// @notice Helper to deposit assets for msg.sender
-    /// @param assets Amount to deposit
-    /// @return shares Amount of shares received
-    function deposit(uint256 assets) external returns (uint256) {
-        return _depositAsset(asset(), assets, msg.sender);
     }
 
     /// @notice Deposit exact number of assets in base asset and mint shares to receiver
@@ -329,13 +305,6 @@ abstract contract BaseControlledAsyncRedeem is
     ) internal virtual whenNotPaused returns (uint256 shares) {
         shares = previewDepositForAsset(_asset, assets);
         _performDeposit(_asset, assets, shares, receiver);
-    }
-
-    /// @notice Helper to mint shares for msg.sender
-    /// @param shares Amount to mint
-    /// @return assets Amount of assets required
-    function mint(uint256 shares) external returns (uint256) {
-        return _mintWithAsset(asset(), shares, msg.sender);
     }
 
     /// @notice Mint exact number of shares to receiver and deposit in base asset
@@ -411,13 +380,6 @@ abstract contract BaseControlledAsyncRedeem is
     // Withdraw & Redeem //
     ///////////////////////
 
-    /// @notice Helper to withdraw assets for msg.sender
-    /// @param assets Amount to withdraw
-    /// @return shares Amount of shares burned
-    function withdraw(uint256 assets) external returns (uint256) {
-        return _withdrawAsset(asset(), assets, msg.sender, msg.sender);
-    }
-
     /// @notice Withdraw assets from fulfilled redeem requests
     /// @param assets Amount to withdraw
     /// @param receiver Asset recipient
@@ -467,13 +429,6 @@ abstract contract BaseControlledAsyncRedeem is
 
         // Execute withdraw
         _performWithdraw(_asset, assets, shares, receiver, controller);
-    }
-
-    /// @notice Helper to redeem shares for msg.sender
-    /// @param shares Amount to redeem
-    /// @return assets Amount of assets received
-    function redeem(uint256 shares) external returns (uint256) {
-        return _redeemAsset(asset(), shares, msg.sender, msg.sender);
     }
 
     /// @notice Redeem shares from fulfilled requests
@@ -780,6 +735,8 @@ abstract contract BaseControlledAsyncRedeem is
         address controller,
         address owner
     ) external returns (uint256 requestId) {
+        // Validate that the asset is supported by the rate provider
+        require(rateProvider().isSupported(_asset), AssetNotSupported());
         return _requestRedeemOfAsset(_asset, shares, controller, owner);
     }
 
@@ -793,9 +750,6 @@ abstract contract BaseControlledAsyncRedeem is
         // Checks
         require(shares != 0, NothingToRedeem());
         require(balanceOf(owner) >= shares, InsufficientBalance());
-
-        // Validate that the asset is supported by the rate provider
-        require(_asset == this.asset() || rateProvider().isSupported(_asset), AssetNotSupported());
 
         // Call beforeRequestRedeem hook
         beforeRequestRedeem(_asset, shares, controller, owner);
@@ -918,7 +872,7 @@ abstract contract BaseControlledAsyncRedeem is
         address _asset,
         uint256 shares,
         address controller
-    ) external virtual onlyRole(OPERATOR_ROLE) returns (uint256 assets) {
+    ) public virtual onlyRole(OPERATOR_ROLE) returns (uint256 assets) {
         // Convert shares to underlying assets, then to asset units
         uint256 underlyingAssets = convertToAssets(shares);
         assets = _fulfillRedeemOfAsset(_asset, _convertFromUnderlying(_asset, underlyingAssets), shares, controller);
@@ -1075,9 +1029,9 @@ abstract contract BaseControlledAsyncRedeem is
     // Access Control //
     ////////////////////
 
-    /// @notice Modifier to ensure caller is owner
+    /// @notice Internal function to ensure caller is owner
     modifier onlyOwner() {
-        require(msg.sender == owner(), NotOwner());
+        require(hasRole(DEFAULT_ADMIN_ROLE, msg.sender), NotOwner());
         _;
     }
 

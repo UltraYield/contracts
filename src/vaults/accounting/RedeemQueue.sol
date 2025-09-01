@@ -17,7 +17,7 @@ abstract contract RedeemQueue is IRedeemQueueErrors {
     // Constants //
     ///////////////
 
-    uint256 constant UINT128_MAX = type(uint128).max;
+    uint256 internal constant UINT128_MAX = type(uint128).max;
 
     /////////////
     // Storage //
