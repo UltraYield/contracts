@@ -758,8 +758,10 @@ abstract contract BaseControlledAsyncRedeem is
         // Update pending redeem
         _increasePendingRedeem(controller, _asset, shares);
 
+        // Spend user's shares allowance
+        _spendAllowance(owner, address(this), shares);
         // Transfer shares to vault for burning later
-        IERC20(this).safeTransferFrom(owner, address(this), shares);
+        _transfer(owner, address(this), shares);
 
         // Emit event
         emit RedeemRequest(controller, owner, REQUEST_ID, msg.sender, shares);
@@ -841,8 +843,8 @@ abstract contract BaseControlledAsyncRedeem is
         require(shares != 0, NoPendingRedeem());
         _consumePendingRedeem(controller, _asset, shares);
 
-        // Send pending shares from vault to receiver
-        IERC20(this).safeTransfer(receiver, shares);
+        // Transfer pending shares from vault to receiver
+        _transfer(address(this), receiver, shares);
 
         // Emit event
         emit RedeemRequestCanceled(controller, receiver, shares);
