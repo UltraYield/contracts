@@ -883,29 +883,40 @@ abstract contract BaseControlledAsyncRedeem is
     }
 
     /// @notice Fulfill multiple redeem requests
+    /// @param assets Array of assets
     /// @param shares Array of share amounts
     /// @param controllers Array of controllers
-    /// @return total Total assets received
+    /// @return Array of fulfilled amounts in requested asset
     /// @dev Reverts if arrays length mismatch
     /// @dev Collects withdrawal fee to incentivize manager
     function fulfillMultipleRedeems(
+        address[] memory assets,
         uint256[] memory shares,
         address[] memory controllers
-    ) external virtual onlyRole(OPERATOR_ROLE) returns (uint256 total) {
-        require(shares.length == controllers.length, InputLengthMismatch());
+    ) external virtual onlyRole(OPERATOR_ROLE) returns (uint256[] memory) {
+        uint256 length = assets.length;
+        require(length == shares.length && length == controllers.length, InputLengthMismatch());
 
         uint256 totalShares;
-        address _asset = asset();
         uint256 _totalAssets = totalAssets();
         uint256 _totalSupply = totalSupply();
-        for (uint256 i; i < shares.length; ) {
+        uint256[] memory result = new uint256[](length);
+        for (uint256 i; i < length; ) {
             // Fulfill redeem
-            uint256 assets = _optimizedConvertToAssets(shares[i], _totalAssets, _totalSupply);
-            uint256 assetsFulfilled = _fulfillRedeemOfAsset(_asset, assets, shares[i], controllers[i]);
+            address _asset = assets[i];
+            uint256 _shares = shares[i];
+            address _controller = controllers[i];
+            uint256 underlyingAssets = _optimizedConvertToAssets(_shares, _totalAssets, _totalSupply);
+            uint256 assetsFulfilled = _fulfillRedeemOfAsset(
+                _asset, 
+                _convertFromUnderlying(_asset, underlyingAssets), 
+                _shares, 
+                _controller
+            );
 
             // Update totals
-            total += assetsFulfilled;
-            totalShares += shares[i];
+            result[i] = assetsFulfilled;
+            totalShares += _shares;
 
             unchecked { ++i; }
         }
@@ -913,7 +924,7 @@ abstract contract BaseControlledAsyncRedeem is
         // Burn shares
         _burn(address(this), totalShares);
 
-        return total;
+        return result;
     }
 
     /// @dev Internal fulfill redeem request logic
