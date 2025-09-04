@@ -360,7 +360,7 @@ abstract contract BaseControlledAsyncRedeem is
         // Pre-deposit hook - use the actual asset amount being transferred
         beforeDeposit(_asset, assets, shares);
 
-        // Need to transfer before minting or ERC777s could reenter
+        // Transfer assets from sender to the vault
         IERC20(_asset).safeTransferFrom(
             msg.sender,
             address(this),

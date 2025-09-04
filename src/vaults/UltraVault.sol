@@ -170,7 +170,6 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
 
     /// @dev After deposit hook - collect fees and send funds to fundsHolder
     function afterDeposit(address _asset, uint256 assets, uint256) internal override {
-        // Funds are sent to holder
         IERC20(_asset).safeTransfer(fundsHolder(), assets);
     }
 
