@@ -266,11 +266,14 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
         uint256[] memory shares,
         address[] memory controllers
     ) external override onlyRole(OPERATOR_ROLE) returns (uint256[] memory) {
+        // Check input length
         uint256 length = assets.length;
         require(length == shares.length && length == controllers.length, InputLengthMismatch());
 
+        // Collect fees accrued to date
         _collectFees();
 
+        // Prepare values for calculations
         uint256 totalShares;
         uint256 _totalAssets = totalAssets();
         uint256 _totalSupply = totalSupply();
@@ -281,17 +284,16 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
             address _asset = assets[i];
             uint256 _shares = shares[i];
             address _controller = controllers[i];
-            uint256 convertedAssets = _convertFromUnderlying(
-                _asset, 
-                _optimizedConvertToAssets(_shares, _totalAssets, _totalSupply)
-            );
+            uint256 underlyingAssets = _optimizedConvertToAssets(_shares, _totalAssets, _totalSupply);
+            uint256 convertedAssets = _convertFromUnderlying(_asset, underlyingAssets);
 
-            // Calculate the withdrawal fee
+            // Calculate and transfer withdrawal fee (in asset units)
             uint256 withdrawalFee = convertedAssets.mulDivDown(withdrawalFeeRate, ONE_UNIT);
             _transferWithdrawalFeeInAsset(_asset, withdrawalFee);
 
             // Fulfill redeem
-            result[i] = _fulfillRedeemOfAsset(_asset, convertedAssets - withdrawalFee, _shares, _controller);
+            uint256 assetsFulfilled = _fulfillRedeemOfAsset(_asset, convertedAssets - withdrawalFee, _shares, _controller);
+            result[i] = assetsFulfilled;
             totalShares += _shares;
 
             unchecked { ++i; }
