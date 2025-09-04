@@ -363,13 +363,15 @@ interface IBaseVault is
     ) external returns (uint256);
 
     /// @notice Fulfill multiple redeem requests
+    /// @param assets Array of assets
     /// @param shares Array of share amounts
     /// @param controllers Array of controllers
-    /// @return total Total assets received
+    /// @return Array of fulfilled amounts in requested asset
     function fulfillMultipleRedeems(
+        address[] memory assets,
         uint256[] memory shares,
         address[] memory controllers
-    ) external returns (uint256 total);
+    ) external returns (uint256[] memory);
 
     ////////////////////////
     // Redeem Cancelation //

@@ -255,37 +255,44 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
     }
 
     /// @notice Fulfill multiple redeem requests
+    /// @param assets Array of assets
     /// @param shares Array of share amounts
     /// @param controllers Array of controllers
-    /// @return total Total assets received
+    /// @return Array of fulfilled amounts in requested asset
     /// @dev Reverts if arrays length mismatch
     /// @dev Collects withdrawal fee to incentivize manager
     function fulfillMultipleRedeems(
+        address[] memory assets,
         uint256[] memory shares,
         address[] memory controllers
-    ) external override onlyRole(OPERATOR_ROLE) returns (uint256 total) {
-        require(shares.length == controllers.length, InputLengthMismatch());
+    ) external override onlyRole(OPERATOR_ROLE) returns (uint256[] memory) {
+        uint256 length = assets.length;
+        require(length == shares.length && length == controllers.length, InputLengthMismatch());
 
         _collectFees();
 
-        uint256 withdrawalFeeRate = getFees().withdrawalFee;
         uint256 totalShares;
-        uint256 totalFees;
-        address _asset = asset();
         uint256 _totalAssets = totalAssets();
         uint256 _totalSupply = totalSupply();
-        for (uint256 i; i < shares.length; ) {
-            uint256 assets = _optimizedConvertToAssets(shares[i], _totalAssets, _totalSupply);
+        uint256 withdrawalFeeRate = getFees().withdrawalFee;
+        uint256[] memory result = new uint256[](length);
+        for (uint256 i; i < length; ) {
+            // Resolve redeem amount in the requested asset
+            address _asset = assets[i];
+            uint256 _shares = shares[i];
+            address _controller = controllers[i];
+            uint256 convertedAssets = _convertFromUnderlying(
+                _asset, 
+                _optimizedConvertToAssets(_shares, _totalAssets, _totalSupply)
+            );
 
-            // Calculate the withdrawal incentive fee from the assets
-            uint256 withdrawalFee = assets.mulDivDown(withdrawalFeeRate, ONE_UNIT);
+            // Calculate the withdrawal fee
+            uint256 withdrawalFee = convertedAssets.mulDivDown(withdrawalFeeRate, ONE_UNIT);
+            _transferWithdrawalFeeInAsset(_asset, withdrawalFee);
 
             // Fulfill redeem
-            _fulfillRedeemOfAsset(_asset, assets - withdrawalFee, shares[i], controllers[i]);
-
-            total += assets;
-            totalFees += withdrawalFee;
-            totalShares += shares[i];
+            result[i] = _fulfillRedeemOfAsset(_asset, convertedAssets - withdrawalFee, _shares, _controller);
+            totalShares += _shares;
 
             unchecked { ++i; }
         }
@@ -293,10 +300,7 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
         // Burn shares
         _burn(address(this), totalShares);
 
-        // Transfer withdrawal fees
-        _transferWithdrawalFeeInAsset(_asset, totalFees);
-
-        return total - totalFees;
+        return result;
     }
 
     //////////////////////////
