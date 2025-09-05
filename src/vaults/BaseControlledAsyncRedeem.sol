@@ -11,12 +11,11 @@ import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
 import { PendingRedeem, ClaimableRedeem } from "src/interfaces/IRedeemQueue.sol";
 import { IRedeemAccounting } from "src/interfaces/IRedeemAccounting.sol";
 import { IUltraVaultRateProvider } from "src/interfaces/IUltraVaultRateProvider.sol";
-import { IPausable } from "src/interfaces/IPausable.sol";
 import { OPERATOR_ROLE, PAUSER_ROLE, UPGRADER_ROLE } from "src/utils/Roles.sol";
 import { AccessControlUpgradeable } from "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol";
 import { AddressUpdateProposal } from "src/utils/AddressUpdates.sol";
 import { RedeemQueue } from "src/vaults/accounting/RedeemQueue.sol";
-import { IBaseVault, IBaseVaultErrors, IBaseVaultEvents } from "src/interfaces/IBaseVault.sol";
+import { IBaseVaultErrors, IBaseVaultEvents } from "src/interfaces/IBaseVault.sol";
 
 // keccak256(abi.encode(uint256(keccak256("ultrayield.storage.BaseControlledAsyncRedeem")) - 1)) & ~bytes32(uint256(0xff));
 bytes32 constant BASE_ASYNC_REDEEM_STORAGE_LOCATION = 0xaf7389673351d5ab654ae6fb9b324c897ebef437a969ec1524dcc6c7b5ca5400;
@@ -855,30 +854,18 @@ abstract contract BaseControlledAsyncRedeem is
     ////////////////////////
 
     /// @notice Fulfill redeem request
-    /// @param shares Amount to redeem
-    /// @param controller Controller address
-    /// @return assets Amount of claimable assets
-    function fulfillRedeem(
-        uint256 shares,
-        address controller
-    ) external virtual onlyRole(OPERATOR_ROLE) returns (uint256 assets) {
-        assets = _fulfillRedeemOfAsset(asset(), convertToAssets(shares), shares, controller);
-        _burn(address(this), shares);
-    }
-
-    /// @notice Fulfill redeem request
     /// @param _asset Asset
     /// @param shares Amount to redeem
     /// @param controller Controller address
     /// @return assets Amount of claimable assets
-    function fulfillRedeemOfAsset(
+    function fulfillRedeem(
         address _asset,
         uint256 shares,
         address controller
-    ) public virtual onlyRole(OPERATOR_ROLE) returns (uint256 assets) {
+    ) external virtual onlyRole(OPERATOR_ROLE) returns (uint256 assets) {
         // Convert shares to underlying assets, then to asset units
         uint256 underlyingAssets = convertToAssets(shares);
-        assets = _fulfillRedeemOfAsset(_asset, _convertFromUnderlying(_asset, underlyingAssets), shares, controller);
+        assets = _fulfillRedeem(_asset, _convertFromUnderlying(_asset, underlyingAssets), shares, controller);
         _burn(address(this), shares);
     }
 
@@ -907,7 +894,7 @@ abstract contract BaseControlledAsyncRedeem is
             uint256 _shares = shares[i];
             address _controller = controllers[i];
             uint256 underlyingAssets = _optimizedConvertToAssets(_shares, _totalAssets, _totalSupply);
-            uint256 assetsFulfilled = _fulfillRedeemOfAsset(
+            uint256 assetsFulfilled = _fulfillRedeem(
                 _asset, 
                 _convertFromUnderlying(_asset, underlyingAssets), 
                 _shares, 
@@ -928,7 +915,7 @@ abstract contract BaseControlledAsyncRedeem is
     }
 
     /// @dev Internal fulfill redeem request logic
-    function _fulfillRedeemOfAsset(
+    function _fulfillRedeem(
         address _asset,
         uint256 assets,
         uint256 shares,
