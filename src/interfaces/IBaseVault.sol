@@ -154,11 +154,6 @@ interface IBaseVault is
         string calldata referralId
     ) external returns (uint256);
 
-    /// @notice Helper to deposit assets for msg.sender
-    /// @param assets Amount to deposit
-    /// @return shares Amount of shares received
-    function deposit(uint256 assets) external returns (uint256);
-
     /// @notice Deposit exact number of assets in base asset and mint shares to receiver
     /// @param assets Amount of assets to deposit
     /// @param receiver Share receiver
@@ -205,11 +200,6 @@ interface IBaseVault is
         uint256 shares
     ) external view returns (uint256);
 
-    /// @notice Helper to mint shares for msg.sender
-    /// @param shares Amount to mint
-    /// @return assets Amount of assets required
-    function mint(uint256 shares) external returns (uint256);
-
     /// @notice Mint exact number of shares to receiver and deposit in base asset
     /// @param shares Amount of shares to mint
     /// @param receiver Share receiver
@@ -247,11 +237,6 @@ interface IBaseVault is
         address asset,
         address controller
     ) external view returns (uint256);
-
-    /// @notice Helper to withdraw assets for msg.sender
-    /// @param assets Amount to withdraw
-    /// @return shares Amount of shares burned
-    function withdraw(uint256 assets) external returns (uint256);
 
     /// @notice Withdraw assets from fulfilled redeem requests
     /// @param assets Amount to withdraw
@@ -295,11 +280,6 @@ interface IBaseVault is
         address asset,
         address controller
     ) external view returns (uint256);
-
-    /// @notice Helper to redeem shares for msg.sender
-    /// @param shares Amount to redeem
-    /// @return assets Amount of assets received
-    function redeem(uint256 shares) external returns (uint256);
 
     /// @notice Redeem shares from fulfilled requests
     /// @param shares Amount to redeem
@@ -383,13 +363,15 @@ interface IBaseVault is
     ) external returns (uint256);
 
     /// @notice Fulfill multiple redeem requests
+    /// @param assets Array of assets
     /// @param shares Array of share amounts
     /// @param controllers Array of controllers
-    /// @return total Total assets received
+    /// @return Array of fulfilled amounts in requested asset
     function fulfillMultipleRedeems(
+        address[] memory assets,
         uint256[] memory shares,
         address[] memory controllers
-    ) external returns (uint256 total);
+    ) external returns (uint256[] memory);
 
     ////////////////////////
     // Redeem Cancelation //
