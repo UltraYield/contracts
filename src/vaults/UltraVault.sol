@@ -208,28 +208,15 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
     ////////////////////////
 
     /// @notice Fulfill redeem request
-    /// @param shares Amount to redeem
-    /// @param controller Controller to redeem for
-    /// @return assets Amount of assets received
-    /// @dev Reverts if shares < minAmount
-    /// @dev Collects withdrawal fee to incentivize manager
-    function fulfillRedeem(
-        uint256 shares,
-        address controller
-    ) external override returns (uint256 assets) {
-        assets = fulfillRedeemOfAsset(asset(), shares, controller);
-    }
-
-    /// @notice Fulfill redeem request
     /// @param _asset Asset
     /// @param shares Amount to redeem
     /// @param controller Controller address
     /// @return assets Amount of claimable assets
-    function fulfillRedeemOfAsset(
+    function fulfillRedeem(
         address _asset,
         uint256 shares,
         address controller
-    ) public override onlyRole(OPERATOR_ROLE) returns (uint256 assets) {
+    ) external override onlyRole(OPERATOR_ROLE) returns (uint256 assets) {
         // Collect fees accrued to date
         _collectFees();
         
@@ -242,7 +229,7 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
 
         // Fulfill request with asset units (base contract expects asset units)
         uint256 withdrawalAmount = assets - withdrawalFee;
-        _fulfillRedeemOfAsset(_asset, withdrawalAmount, shares, controller);
+        _fulfillRedeem(_asset, withdrawalAmount, shares, controller);
 
         // Burn shares
         _burn(address(this), shares);
@@ -292,7 +279,7 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
             _transferWithdrawalFeeInAsset(_asset, withdrawalFee);
 
             // Fulfill redeem
-            uint256 assetsFulfilled = _fulfillRedeemOfAsset(_asset, convertedAssets - withdrawalFee, _shares, _controller);
+            uint256 assetsFulfilled = _fulfillRedeem(_asset, convertedAssets - withdrawalFee, _shares, _controller);
             result[i] = assetsFulfilled;
             totalShares += _shares;
 
