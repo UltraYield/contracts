@@ -94,7 +94,8 @@ contract UltraVaultRateProvider is Ownable2StepUpgradeable, TimelockedUUPSUpgrad
     /// @inheritdoc IUltraVaultRateProvider
     function addAsset(address asset, bool isPegged, address rateProvider) external onlyOwner {
         // Checks
-        AssetData memory data = supportedAssets(asset);
+        Storage storage $ = _getStorage();
+        AssetData memory data = $.supportedAssets[asset];
         require(!data.isPegged && data.rateProvider == address(0), AssetAlreadySupported());
         if (isPegged) {
             require(rateProvider == address(0), InvalidRateProvider());
@@ -105,7 +106,7 @@ contract UltraVaultRateProvider is Ownable2StepUpgradeable, TimelockedUUPSUpgrad
         // Update storage
         uint8 _decimals = IERC20Metadata(asset).decimals();
         _validateDecimals(_decimals);
-        _getStorage().supportedAssets[asset] = AssetData({
+        $.supportedAssets[asset] = AssetData({
             isPegged: isPegged,
             decimals: _decimals,
             rateProvider: rateProvider
@@ -120,8 +121,9 @@ contract UltraVaultRateProvider is Ownable2StepUpgradeable, TimelockedUUPSUpgrad
 
     /// @inheritdoc IUltraVaultRateProvider
     function removeAsset(address asset) external onlyOwner {
-        require(asset != baseAsset(), CannotUpdateBaseAsset());
-        delete _getStorage().supportedAssets[asset];
+        Storage storage $ = _getStorage();
+        require(asset != $.baseAsset, CannotUpdateBaseAsset());
+        delete $.supportedAssets[asset];
         emit AssetRemoved(asset);
     }
 
@@ -138,10 +140,10 @@ contract UltraVaultRateProvider is Ownable2StepUpgradeable, TimelockedUUPSUpgrad
 
     /// @inheritdoc IUltraVaultRateProvider
     function convertToUnderlying(address asset, uint256 assets) external view returns (uint256 result) {
-        AssetData memory data = supportedAssets(asset);
-        uint8 baseDecimals = decimals();
+        Storage storage $ = _getStorage();
+        AssetData memory data = $.supportedAssets[asset];
         if (data.isPegged) {
-            return _convertDecimals(assets, data.decimals, baseDecimals);
+            return _convertDecimals(assets, data.decimals, $.decimals);
         } else {
             require(data.rateProvider != address(0), AssetNotSupported());
             // Call external rate provider
@@ -151,10 +153,10 @@ contract UltraVaultRateProvider is Ownable2StepUpgradeable, TimelockedUUPSUpgrad
 
     /// @inheritdoc IUltraVaultRateProvider
     function convertFromUnderlying(address asset, uint256 baseAssets) external view returns (uint256 result) {
-        AssetData memory data = supportedAssets(asset);
-        uint8 baseDecimals = decimals();
+        Storage storage $ = _getStorage();
+        AssetData memory data = $.supportedAssets[asset];
         if (data.isPegged) {
-            return _convertDecimals(baseAssets, baseDecimals, data.decimals);
+            return _convertDecimals(baseAssets, $.decimals, data.decimals);
         } else {
             require(data.rateProvider != address(0), AssetNotSupported());
             // Call external rate provider
