@@ -188,7 +188,7 @@ contract UltraFeeder is BaseControlledAsyncRedeem, IUltraFeederErrors {
     function beforeFulfillRedeem(address _asset, uint256 assets, uint256 shares) internal override {
         IUltraVault mainVault_ = mainVault();
         // Fulfill redeem in main vault. Returns asset units
-        mainVault_.fulfillRedeemOfAsset(_asset, shares, address(this));
+        mainVault_.fulfillRedeem(_asset, shares, address(this));
         uint256 mainAssetsClaimed = mainVault_.redeemAsset(_asset, shares, address(this), address(this));
 
         // Deduct the expected withdrawal fee from the total amount of assets
@@ -197,13 +197,13 @@ contract UltraFeeder is BaseControlledAsyncRedeem, IUltraFeederErrors {
     }
 
     /// @dev Internal fulfill redeem request logic
-    function _fulfillRedeemOfAsset(
+    function _fulfillRedeem(
         address _asset,
         uint256 assets,
         uint256 shares,
         address controller
     ) internal override returns (uint256) {
-        uint256 assetsFulfilled = super._fulfillRedeemOfAsset(_asset, assets, shares, controller);
+        uint256 assetsFulfilled = super._fulfillRedeem(_asset, assets, shares, controller);
         // Deduct the expected withdrawal fee from the total amount of assets
         uint256 withdrawalFee = mainVault().calculateWithdrawalFee(assetsFulfilled);
         return assetsFulfilled - withdrawalFee;

@@ -21,7 +21,7 @@ remappings = [
   'ERC-7540/=lib/ERC-7540-Reference/src/'
 ]
 
-[profile.deploy]
+[profile.release]
 optimizer = true
 optimizer_runs = 50
 dotenv = true
