@@ -15,6 +15,14 @@ interface IUltraFrontendHelper {
     // Structs //
     /////////////
 
+    /// @notice Struct describing the aggregated state of the vault
+    struct VaultState {
+        uint256 totalAssets;
+        uint256 totalShares;
+        uint256 sharePrice;
+    }
+
+    /// @notice Struct describing a pending redeem
     struct Redeem {
         address user;
         address asset;
@@ -28,6 +36,10 @@ interface IUltraFrontendHelper {
     /// @notice Get the vault address
     /// @return vault The vault address
     function getVault() external view returns (address);
+
+    /// @notice Get the vault state
+    /// @return vaultState State of the vault
+    function getVaultState() external view returns (VaultState memory);
 
     /// @notice Preview the number of shares that will be received for a deposit
     /// @param asset The asset to deposit

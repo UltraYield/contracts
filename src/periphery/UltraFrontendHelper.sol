@@ -52,11 +52,24 @@ contract UltraFrontendHelper is IUltraFrontendHelper, Ownable2StepUpgradeable, U
     // View Functions //
     ////////////////////
 
+    /// @inheritdoc IUltraFrontendHelper
     function getVault() external view returns (address) {
         Storage storage $ = _getStorage();
         return $.vault;
     }
+    
+    /// @inheritdoc IUltraFrontendHelper
+    function getVaultState() external view returns (VaultState memory) {
+        IUltraVault vault = _getVault();
+        uint8 decimals = vault.decimals();
+        return VaultState({
+            totalAssets: vault.totalAssets(),
+            totalShares: vault.totalSupply(),
+            sharePrice: vault.convertToAssets(10 ** decimals)
+        });
+    }
 
+    /// @inheritdoc IUltraFrontendHelper
     function previewDeposit(address asset, uint256 amount) external view returns (uint256) {
         IUltraVault vault = _getVault();
         uint256 baseAssets = vault.convertToUnderlying(asset, amount);
@@ -64,6 +77,7 @@ contract UltraFrontendHelper is IUltraFrontendHelper, Ownable2StepUpgradeable, U
         return shares;
     }
 
+    /// @inheritdoc IUltraFrontendHelper
     function previewRedeem(address asset, uint256 shares) external view returns (uint256) {
         IUltraVault vault = _getVault();
         uint256 baseAssets = vault.convertToAssets(shares);
@@ -72,6 +86,7 @@ contract UltraFrontendHelper is IUltraFrontendHelper, Ownable2StepUpgradeable, U
         return assets - withdrawalFee;
     }
 
+    /// @inheritdoc IUltraFrontendHelper
     function collectPendingRedeems(address[] calldata users) external view returns (Redeem[] memory redeems) {
         IUltraVault vault = _getVault();
         address[] memory assets = _getVaultAssets();
@@ -108,13 +123,19 @@ contract UltraFrontendHelper is IUltraFrontendHelper, Ownable2StepUpgradeable, U
     // Admin Functions //
     /////////////////////
     
+    /// @inheritdoc IUltraFrontendHelper
     function addAsset(address asset) external onlyOwner {
         require(asset != address(0), "Zero asset address");
         require(_getVault().rateProvider().isSupported(asset), "Asset not supported");
+        address[] memory assets = _getVaultAssets();
+        for (uint256 i = 0; i < assets.length; i++) {
+            require(assets[i] != asset, "Duplicate asset");
+        }
         _getStorage().additionalAssets.push(asset);
         emit AssetAdded(asset);
     }
 
+    /// @inheritdoc IUltraFrontendHelper
     function removeAsset(address asset) external onlyOwner {
         Storage storage $ = _getStorage();
         bool didRemove = false;
