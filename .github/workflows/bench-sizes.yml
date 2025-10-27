@@ -17,7 +17,6 @@ jobs:
       - name: Checkout PR branch
         uses: actions/checkout@v4
         with:
-          # Ensure we are on the contributor's head branch, not detached HEAD
           ref: ${{ github.head_ref }}
           fetch-depth: 0
           submodules: recursive
@@ -34,7 +33,6 @@ jobs:
         id: current_size
         shell: bash
         run: |
-          # Grab the first table line for UltraVault and extract the size column
           SIZE=$(grep -E '^\|\s*UltraVault\s*\|' build-output.txt | head -n1 | awk -F '|' '{print $3}' | tr -d ', ' | xargs)
           if [[ -z "$SIZE" ]]; then
             echo "Failed to parse UltraVault size from forge output:"
@@ -51,7 +49,19 @@ jobs:
         run: |
           git fetch origin "${{ github.base_ref }}"
           if git show "origin/${{ github.base_ref }}:benches/sizes" > /dev/null 2>&1; then
-            BASE_SIZE=$(git show "origin/${{ github.base_ref }}:benches/sizes")
+            CONTENT=$(git show "origin/${{ github.base_ref }}:benches/sizes")
+            # Preferred new format: key=value lines, extract UltraVault
+            if echo "$CONTENT" | grep -qE '^UltraVault='; then
+              BASE_SIZE=$(echo "$CONTENT" | awk -F'=' '/^UltraVault=/{print $2}' | tr -d '[:space:]')
+            # Backward-compat: legacy file with just a number
+            elif echo "$CONTENT" | grep -qE '^[[:space:]]*[0-9]+[[:space:]]*$'; then
+              BASE_SIZE=$(echo "$CONTENT" | tr -d '[:space:]')
+            else
+              echo "Found benches/sizes but could not parse UltraVault entry."
+              echo "Content was:"
+              echo "$CONTENT"
+              exit 1
+            fi
             echo "exists=true" >> "$GITHUB_OUTPUT"
             echo "size=$BASE_SIZE" >> "$GITHUB_OUTPUT"
             echo "Found base size: $BASE_SIZE bytes"
@@ -72,16 +82,12 @@ jobs:
           # Determine status
           if [ "$CURRENT" -gt "$LIMIT" ]; then
             STATUS="🔴 EXCEEDS LIMIT"
-            STATUS_COLOR="red"
           elif [ "$MARGIN" -lt 500 ]; then
             STATUS="⚠️ CRITICAL"
-            STATUS_COLOR="orange"
           elif [ "$MARGIN" -lt 2000 ]; then
             STATUS="⚠️ WARNING"
-            STATUS_COLOR="yellow"
           else
             STATUS="✅ HEALTHY"
-            STATUS_COLOR="green"
           fi
 
           echo "current=$CURRENT" >> "$GITHUB_OUTPUT"
@@ -187,7 +193,7 @@ jobs:
       - name: Update benchmark file
         run: |
           mkdir -p benches
-          echo "${{ steps.current_size.outputs.size }}" > benches/sizes
+          printf "UltraVault=%s\n" "${{ steps.current_size.outputs.size }}" > benches/sizes
 
       # Only commit back when the PR is from the same repository (not a fork),
       # and avoid looping when the actor is the bot.
