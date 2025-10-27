@@ -148,7 +148,7 @@ jobs:
               body += `| **Current Size** | ${current} bytes |\n`;
               body += `| **Previous Size** | ${base} bytes |\n`;
               body += `| **Change** | ${emoji} ${sign}${diff} bytes (${sign}${percent}%) |\n`;
-              body += `| **EVM Limit** | 24,576 bytes |\n`;
+              body += `| **EVM Limit** | 24576 bytes |\n`;
               body += `| **Margin** | ${margin} bytes (${marginPct}%) |\n`;
               body += `| **Status** | ${status} |\n`;
             } else {
@@ -156,7 +156,7 @@ jobs:
               body += '| Metric | Value |\n';
               body += '|--------|-------|\n';
               body += `| **Size** | ${current} bytes |\n`;
-              body += `| **EVM Limit** | 24,576 bytes |\n`;
+              body += `| **EVM Limit** | 24576 bytes |\n`;
               body += `| **Margin** | ${margin} bytes (${marginPct}%) |\n`;
               body += `| **Status** | ${status} |\n`;
             }
@@ -220,6 +220,6 @@ jobs:
         run: |
           CURRENT=${{ steps.compare.outputs.current }}
           if [ "$CURRENT" -gt 24576 ]; then
-            echo "❌ ERROR: UltraVault bytecode size ($CURRENT bytes) exceeds the EVM limit (24,576 bytes)!"
+            echo "❌ ERROR: UltraVault bytecode size ($CURRENT bytes) exceeds the EVM limit (24576 bytes)!"
             exit 1
           fi
