@@ -12,10 +12,14 @@ permissions:
 jobs:
   benchmark:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout PR branch
         uses: actions/checkout@v4
         with:
+          # Ensure we are on the contributor's head branch, not detached HEAD
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
           submodules: recursive
 
       - name: Setup Foundry
@@ -28,30 +32,37 @@ jobs:
 
       - name: Extract UltraVault size
         id: current_size
+        shell: bash
         run: |
-          SIZE=$(grep "^| UltraVault " build-output.txt | head -n1 | awk -F '|' '{print $3}' | tr -d ', ' | xargs)
-          echo "size=$SIZE" >> $GITHUB_OUTPUT
+          # Grab the first table line for UltraVault and extract the size column
+          SIZE=$(grep -E '^\|\s*UltraVault\s*\|' build-output.txt | head -n1 | awk -F '|' '{print $3}' | tr -d ', ' | xargs)
+          if [[ -z "$SIZE" ]]; then
+            echo "Failed to parse UltraVault size from forge output:"
+            cat build-output.txt
+            exit 1
+          fi
+          echo "size=$SIZE" >> "$GITHUB_OUTPUT"
           echo "Current UltraVault size: $SIZE bytes"
           rm build-output.txt
 
       - name: Fetch target branch benchmark
         id: base_bench
+        shell: bash
         run: |
-          git fetch origin ${{ github.base_ref }}
-          
-          # Try to get the benchmark file from target branch
-          if git show origin/${{ github.base_ref }}:benches/sizes > /dev/null 2>&1; then
-            BASE_SIZE=$(git show origin/${{ github.base_ref }}:benches/sizes)
-            echo "exists=true" >> $GITHUB_OUTPUT
-            echo "size=$BASE_SIZE" >> $GITHUB_OUTPUT
+          git fetch origin "${{ github.base_ref }}"
+          if git show "origin/${{ github.base_ref }}:benches/sizes" > /dev/null 2>&1; then
+            BASE_SIZE=$(git show "origin/${{ github.base_ref }}:benches/sizes")
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "size=$BASE_SIZE" >> "$GITHUB_OUTPUT"
             echo "Found base size: $BASE_SIZE bytes"
           else
-            echo "exists=false" >> $GITHUB_OUTPUT
+            echo "exists=false" >> "$GITHUB_OUTPUT"
             echo "No previous benchmark found"
           fi
 
       - name: Calculate comparison
         id: compare
+        shell: bash
         run: |
           CURRENT=${{ steps.current_size.outputs.size }}
           LIMIT=24576
@@ -72,14 +83,13 @@ jobs:
             STATUS="✅ HEALTHY"
             STATUS_COLOR="green"
           fi
-          
-          echo "current=$CURRENT" >> $GITHUB_OUTPUT
-          echo "margin=$MARGIN" >> $GITHUB_OUTPUT
-          echo "margin_pct=$MARGIN_PCT" >> $GITHUB_OUTPUT
-          echo "status=$STATUS" >> $GITHUB_OUTPUT
-          
-          # Calculate change if base exists
-          if [ "${{ steps.base_bench.outputs.exists }}" == "true" ]; then
+
+          echo "current=$CURRENT" >> "$GITHUB_OUTPUT"
+          echo "margin=$MARGIN" >> "$GITHUB_OUTPUT"
+          echo "margin_pct=$MARGIN_PCT" >> "$GITHUB_OUTPUT"
+          echo "status=$STATUS" >> "$GITHUB_OUTPUT"
+
+          if [ "${{ steps.base_bench.outputs.exists }}" = "true" ]; then
             BASE=${{ steps.base_bench.outputs.size }}
             DIFF=$((CURRENT - BASE))
             
@@ -99,15 +109,14 @@ jobs:
             else
               PERCENT="0.00"
             fi
-            
-            echo "has_comparison=true" >> $GITHUB_OUTPUT
-            echo "base=$BASE" >> $GITHUB_OUTPUT
-            echo "diff=$DIFF" >> $GITHUB_OUTPUT
-            echo "sign=$SIGN" >> $GITHUB_OUTPUT
-            echo "percent=$PERCENT" >> $GITHUB_OUTPUT
-            echo "change_emoji=$CHANGE_EMOJI" >> $GITHUB_OUTPUT
+            echo "has_comparison=true" >> "$GITHUB_OUTPUT"
+            echo "base=$BASE"          >> "$GITHUB_OUTPUT"
+            echo "diff=$DIFF"          >> "$GITHUB_OUTPUT"
+            echo "sign=$SIGN"          >> "$GITHUB_OUTPUT"
+            echo "percent=$PERCENT"    >> "$GITHUB_OUTPUT"
+            echo "change_emoji=$CHANGE_EMOJI" >> "$GITHUB_OUTPUT"
           else
-            echo "has_comparison=false" >> $GITHUB_OUTPUT
+            echo "has_comparison=false" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Create or update PR comment
@@ -119,16 +128,15 @@ jobs:
             const marginPct = '${{ steps.compare.outputs.margin_pct }}';
             const status = '${{ steps.compare.outputs.status }}';
             const hasComparison = '${{ steps.compare.outputs.has_comparison }}' === 'true';
-            
+
             let body = '## 📊 UltraVault Bytecode Size\n\n';
-            
+
             if (hasComparison) {
               const base = '${{ steps.compare.outputs.base }}';
               const diff = '${{ steps.compare.outputs.diff }}';
               const sign = '${{ steps.compare.outputs.sign }}';
               const percent = '${{ steps.compare.outputs.percent }}';
               const emoji = '${{ steps.compare.outputs.change_emoji }}';
-              
               body += '| Metric | Value |\n';
               body += '|--------|-------|\n';
               body += `| **Current Size** | ${current} bytes |\n`;
@@ -146,35 +154,33 @@ jobs:
               body += `| **Margin** | ${margin} bytes (${marginPct}%) |\n`;
               body += `| **Status** | ${status} |\n`;
             }
-            
+
             body += '\n---\n*This comment is automatically updated on each push.*';
-            
-            // Find existing comment
+
             const { data: comments } = await github.rest.issues.listComments({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.issue.number,
             });
-            
-            const botComment = comments.find(comment => 
-              comment.user.type === 'Bot' && 
-              comment.body.includes('📊 UltraVault Bytecode Size')
+
+            const botComment = comments.find(c =>
+              c.user.type === 'Bot' &&
+              c.body.includes('📊 UltraVault Bytecode Size')
             );
-            
-            // Create or update comment
+
             if (botComment) {
               await github.rest.issues.updateComment({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 comment_id: botComment.id,
-                body: body
+                body
               });
             } else {
               await github.rest.issues.createComment({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 issue_number: context.issue.number,
-                body: body
+                body
               });
             }
 
@@ -183,16 +189,25 @@ jobs:
           mkdir -p benches
           echo "${{ steps.current_size.outputs.size }}" > benches/sizes
 
+      # Only commit back when the PR is from the same repository (not a fork),
+      # and avoid looping when the actor is the bot.
       - name: Commit benchmark update
+        if: ${{ github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'github-actions[bot]' }}
+        shell: bash
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Ensure we are on the PR head branch (safety belt)
+          git checkout "${{ github.head_ref }}"
+
           git add benches/sizes
           if git diff --staged --quiet; then
             echo "No changes to commit"
           else
             git commit -m "Update bytecode size benchmark"
-            git push
+            # Push explicitly to the PR branch to avoid detached HEAD issues
+            git push origin HEAD:"${{ github.head_ref }}"
           fi
 
       - name: Check size limit
@@ -202,4 +217,3 @@ jobs:
             echo "❌ ERROR: UltraVault bytecode size ($CURRENT bytes) exceeds the EVM limit (24,576 bytes)!"
             exit 1
           fi
-
