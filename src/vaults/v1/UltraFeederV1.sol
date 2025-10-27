@@ -3,7 +3,7 @@ pragma solidity 0.8.28;
 
 import { IUltraVault, Fees } from "src/interfaces/IUltraVault.sol";
 import { IUltraFeederErrors } from "src/interfaces/IUltraFeeder.sol";
-import { BaseControlledAsyncRedeem, BaseControlledAsyncRedeemInitParams } from "src/vaults/BaseControlledAsyncRedeem.sol";
+import { BaseControlledAsyncRedeemV1, BaseControlledAsyncRedeemInitParams } from "src/vaults/v1/BaseControlledAsyncRedeemV1.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import { UUPSUpgradeable } from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
@@ -25,10 +25,10 @@ struct UltraFeederInitParams {
 // keccak256(abi.encode(uint256(keccak256("ultrayield.storage.UltraFeeder")) - 1)) & ~bytes32(uint256(0xff));
 bytes32 constant ULTRA_FEEDER_STORAGE_LOCATION = 0x73fc0f32a78274c31085b0032ea471ff6cedefdd8cffdf1dfa84871cdcb59000;
 
-/// @title UltraFeeder
+/// @title UltraFeederV1
 /// @notice ERC-4626 compliant vault that wraps UltraVault for deposits and handles async redeems
 /// @dev This vault only handles deposits into the main UltraVault and manages async redeems
-contract UltraFeeder is BaseControlledAsyncRedeem, IUltraFeederErrors {
+contract UltraFeederV1 is BaseControlledAsyncRedeemV1, IUltraFeederErrors {
     using SafeERC20 for IERC20;
 
     /////////////
