@@ -68,13 +68,7 @@ interface IUltraVault is IBaseVault, IUltraVaultEvents, IUltraVaultErrors {
     function feeRecipient() external view returns (address);
 
     /// @notice Get total accrued fees
-    function accruedFees() external view returns (uint256);
-
-    /// @notice Get accrued management fees
-    function accruedManagementFees() external view returns (uint256);
-
-    /// @notice Get accrued performance fees
-    function accruedPerformanceFees() external view returns (uint256);
+    function accruedFees() external view returns (uint256 managementFee, uint256 performanceFee);
 
     /// @notice Get the withdrawal fee
     function calculateWithdrawalFee(uint256 assets) external view returns (uint256);
