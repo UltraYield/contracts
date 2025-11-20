@@ -130,17 +130,6 @@ interface IBaseVault is
         uint256 assets
     ) external view returns (uint256);
 
-    /// @notice Helper to deposit assets for msg.sender upon referral specifying receiver
-    /// @param assets Amount to deposit
-    /// @param receiver receiver of deposit
-    /// @param referralId id of referral
-    /// @return shares Amount of shares received
-    function depositWithReferral(
-        uint256 assets,
-        address receiver,
-        string calldata referralId
-    ) external returns (uint256);
-
     /// @notice Helper to deposit particular asset for msg.sender upon referral
     /// @param asset Asset to deposit
     /// @param assets Amount to deposit
@@ -309,29 +298,13 @@ interface IBaseVault is
     // Redeem requests //
     /////////////////////
 
-    /// @notice Request redeem for msg.sender
-    /// @param shares Amount to redeem
-    /// @return requestId Request identifier
-    function requestRedeem(uint256 shares) external returns (uint256 requestId);
-
-    /// @notice Request redeem of shares
-    /// @param shares Amount to redeem
-    /// @param controller Share recipient
-    /// @param owner Share owner
-    /// @return requestId Request identifier
-    function requestRedeem(
-        uint256 shares,
-        address controller,
-        address owner
-    ) external returns (uint256 requestId);
-
     /// @notice Request redeem of shares
     /// @param asset Asset
     /// @param shares Amount to redeem
     /// @param controller Share recipient
     /// @param owner Share owner
     /// @return requestId Request identifier
-    function requestRedeemOfAsset(
+    function requestRedeem(
         address asset,
         uint256 shares,
         address controller,
@@ -369,25 +342,11 @@ interface IBaseVault is
     ////////////////////////
 
     /// @notice Cancel redeem request for controller
-    /// @param controller Controller address
-    /// @return shares Amount of shares canceled
-    function cancelRedeemRequest(address controller) external returns (uint256 shares);
-
-    /// @notice Cancel redeem request for controller
-    /// @param controller Controller address
-    /// @param receiver Share recipient
-    /// @return shares Amount of shares canceled
-    function cancelRedeemRequest(
-        address controller,
-        address receiver
-    ) external returns (uint256 shares);
-
-    /// @notice Cancel redeem request for controller
     /// @param asset Asset
     /// @param controller Controller address
     /// @param receiver Share recipient
     /// @return shares Amount of shares canceled
-    function cancelRedeemRequestOfAsset(
+    function cancelRedeemRequest(
         address asset,
         address controller,
         address receiver

@@ -11,7 +11,6 @@ import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 bytes32 constant ULTRA_FRONTEND_HELPER_STORAGE_LOCATION = 0xb0722828b3d7d54293138ffa77a01c09742cd65ca869b0919a7d833efbba8900;
 
 contract UltraFrontendHelper is IUltraFrontendHelper, Ownable2StepUpgradeable, UUPSUpgradeable {
-
     /////////////
     // Storage //
     /////////////

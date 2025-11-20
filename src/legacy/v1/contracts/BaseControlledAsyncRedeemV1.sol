@@ -9,18 +9,18 @@ import { TimelockedUUPSUpgradeable } from "src/utils/TimelockedUUPSUpgradeable.s
 import { SafeERC20, IERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
 import { PendingRedeem, ClaimableRedeem } from "src/interfaces/IRedeemQueue.sol";
-import { IRedeemAccounting } from "src/interfaces/IRedeemAccounting.sol";
+import { IRedeemAccountingV1 } from "src/legacy/v1/interfaces/IRedeemAccountingV1.sol";
 import { IUltraVaultRateProvider } from "src/interfaces/IUltraVaultRateProvider.sol";
 import { OPERATOR_ROLE, PAUSER_ROLE, UPGRADER_ROLE } from "src/utils/Roles.sol";
 import { AccessControlUpgradeable } from "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol";
 import { AddressUpdateProposal } from "src/utils/AddressUpdates.sol";
 import { RedeemQueue } from "src/vaults/accounting/RedeemQueue.sol";
-import { IBaseVaultErrors, IBaseVaultEvents } from "src/interfaces/IBaseVault.sol";
+import { IBaseVaultV1Errors, IBaseVaultV1Events } from "src/legacy/v1/interfaces/IBaseVaultV1.sol";
 
 // keccak256(abi.encode(uint256(keccak256("ultrayield.storage.BaseControlledAsyncRedeem")) - 1)) & ~bytes32(uint256(0xff));
 bytes32 constant BASE_ASYNC_REDEEM_STORAGE_LOCATION = 0xaf7389673351d5ab654ae6fb9b324c897ebef437a969ec1524dcc6c7b5ca5400;
 
-/// @dev Initialization parameters for BaseControlledAsyncRedeem
+/// @dev Initialization parameters for BaseControlledAsyncRedeemV1
 struct BaseControlledAsyncRedeemInitParams {
     // Owner of the vault
     address owner;
@@ -44,9 +44,9 @@ abstract contract BaseControlledAsyncRedeemV1 is
     TimelockedUUPSUpgradeable,
     RedeemQueue,
     IERC7540Operator,
-    IRedeemAccounting,
-    IBaseVaultErrors,
-    IBaseVaultEvents
+    IRedeemAccountingV1,
+    IBaseVaultV1Errors,
+    IBaseVaultV1Events
 {
     using Math for uint256;
     using SafeERC20 for IERC20;
@@ -510,14 +510,14 @@ abstract contract BaseControlledAsyncRedeemV1 is
     // Accounting //
     ////////////////
 
-    /// @inheritdoc IRedeemAccounting
+    /// @inheritdoc IRedeemAccountingV1
     function getPendingRedeem(
         address controller
     ) external view returns (PendingRedeem memory) {
         return _getPendingRedeem(controller, asset());
     }
 
-    /// @inheritdoc IRedeemAccounting
+    /// @inheritdoc IRedeemAccountingV1
     function getPendingRedeemForAsset(
         address _asset,
         address _controller
@@ -525,14 +525,14 @@ abstract contract BaseControlledAsyncRedeemV1 is
         return _getPendingRedeem(_controller, _asset);
     }
 
-    /// @inheritdoc IRedeemAccounting
+    /// @inheritdoc IRedeemAccountingV1
     function getClaimableRedeem(
         address _controller
     ) external view returns (ClaimableRedeem memory) {
         return _getClaimableRedeem(_controller, asset());
     }
 
-    /// @inheritdoc IRedeemAccounting
+    /// @inheritdoc IRedeemAccountingV1
     function getClaimableRedeemForAsset(
         address _asset,
         address _controller
@@ -540,7 +540,7 @@ abstract contract BaseControlledAsyncRedeemV1 is
         return _getClaimableRedeem(_controller, _asset);
     }
 
-    /// @inheritdoc IRedeemAccounting
+    /// @inheritdoc IRedeemAccountingV1
     function pendingRedeemRequest(
         uint256, // requestId
         address _controller
@@ -548,7 +548,7 @@ abstract contract BaseControlledAsyncRedeemV1 is
         return _getPendingRedeem(_controller, asset()).shares;
     }
 
-    /// @inheritdoc IRedeemAccounting
+    /// @inheritdoc IRedeemAccountingV1
     function pendingRedeemRequestForAsset(
         address _asset,
         uint256, // requestId
@@ -557,7 +557,7 @@ abstract contract BaseControlledAsyncRedeemV1 is
         return _getPendingRedeem(_controller, _asset).shares;
     }
 
-    /// @inheritdoc IRedeemAccounting
+    /// @inheritdoc IRedeemAccountingV1
     function claimableRedeemRequest(
         uint256, // requestId
         address _controller
@@ -565,7 +565,7 @@ abstract contract BaseControlledAsyncRedeemV1 is
         return _getClaimableRedeem(_controller, asset()).shares;
     }
 
-    /// @inheritdoc IRedeemAccounting
+    /// @inheritdoc IRedeemAccountingV1
     function claimableRedeemRequestForAsset(
         address _asset,
         uint256, // requestId

@@ -4,10 +4,10 @@ pragma solidity 0.8.28;
 import { SafeERC20, IERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import { IERC20Metadata } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import { IPriceSource } from "src/interfaces/IPriceSource.sol";
-import { Fees, IUltraVaultEvents, IUltraVaultErrors } from "src/interfaces/IUltraVault.sol";
+import { Fees, IUltraVaultV1Events, IUltraVaultV1Errors } from "src/legacy/v1/interfaces/IUltraVaultV1.sol";
 import { AddressUpdateProposal } from "src/utils/AddressUpdates.sol";
 import { FixedPointMathLib } from "src/utils/FixedPointMathLib.sol";
-import { BaseControlledAsyncRedeemV1, BaseControlledAsyncRedeemInitParams } from "src/vaults/v1/BaseControlledAsyncRedeemV1.sol";
+import { BaseControlledAsyncRedeemV1, BaseControlledAsyncRedeemInitParams } from "src/legacy/v1/contracts/BaseControlledAsyncRedeemV1.sol";
 import { OPERATOR_ROLE } from "src/utils/Roles.sol";
 
 // keccak256(abi.encode(uint256(keccak256("ultrayield.storage.UltraVault")) - 1)) & ~bytes32(uint256(0xff));
@@ -37,7 +37,7 @@ struct UltraVaultInitParams {
 
 /// @title UltraVaultV1
 /// @notice ERC-7540 compliant async redeem vault with UltraVaultOracle pricing and multisig asset management
-contract UltraVaultV1 is BaseControlledAsyncRedeemV1, IUltraVaultEvents, IUltraVaultErrors {
+contract UltraVaultV1 is BaseControlledAsyncRedeemV1, IUltraVaultV1Events, IUltraVaultV1Errors {
     using FixedPointMathLib for uint256;
     using SafeERC20 for IERC20;
 

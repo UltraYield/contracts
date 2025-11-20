@@ -4,13 +4,14 @@ pragma solidity >=0.8.0;
 import { PendingRedeem, ClaimableRedeem } from "src/interfaces/IRedeemQueue.sol";
 
 interface IRedeemAccounting {
-    /// @notice Assumes control of shares from sender into the Vault and submits a Request for asynchronous redeem.
+    /// @notice Assumes control of shares from sender into the Vault and submits a Request for asynchronous redeem of asset.
+    /// @param asset the asset to redeem in
     /// @param shares the amount of shares to be redeemed to transfer from owner
     /// @param controller the controller of the request who will be able to operate the request
     /// @param owner the source of the shares to be redeemed
     /// @dev most implementations will require pre-approval of the Vault with the Vault's share token.
     /// @return requestId The request ID
-    function requestRedeem(uint256 shares, address controller, address owner) external returns (uint256 requestId);
+    function requestRedeem(address asset, uint256 shares, address controller, address owner) external returns (uint256 requestId);
 
     /// @notice Get controller's pending redeem for the base asset
     /// @param _controller Controller address

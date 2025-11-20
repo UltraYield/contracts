@@ -34,10 +34,10 @@ struct BaseControlledAsyncRedeemInitParams {
     address rateProvider;
 }
 
-/// @title BaseControlledAsyncRedeemV2
+/// @title BaseControlledAsyncRedeem
 /// @notice Base contract for controlled async redeem flows
 /// @dev Based on ERC-7540 Reference Implementation
-abstract contract BaseControlledAsyncRedeemV2 is
+abstract contract BaseControlledAsyncRedeem is
     AccessControlUpgradeable,
     ERC4626Upgradeable,
     PausableUpgradeable,
@@ -703,33 +703,13 @@ abstract contract BaseControlledAsyncRedeemV2 is
     // Request Redeem //
     ////////////////////
 
-    /// @notice Request redeem for msg.sender
-    /// @param shares Amount to redeem
-    /// @return requestId Request identifier
-    function requestRedeem(uint256 shares) external returns (uint256 requestId) {
-        return _requestRedeemOfAsset(asset(), shares, msg.sender, msg.sender);
-    }
-
-    /// @notice Request redeem of shares
-    /// @param shares Amount to redeem
-    /// @param controller Share recipient
-    /// @param owner Share owner
-    /// @return requestId Request identifier
-    function requestRedeem(
-        uint256 shares,
-        address controller,
-        address owner
-    ) external returns (uint256 requestId) {
-        return _requestRedeemOfAsset(asset(), shares, controller, owner);
-    }
-
     /// @notice Request redeem of shares
     /// @param _asset Asset
     /// @param shares Amount to redeem
     /// @param controller Share recipient
     /// @param owner Share owner
     /// @return requestId Request identifier
-    function requestRedeemOfAsset(
+    function requestRedeem(
         address _asset,
         uint256 shares,
         address controller,
@@ -773,37 +753,17 @@ abstract contract BaseControlledAsyncRedeemV2 is
     ////////////////////////
 
     /// @notice Cancel redeem request for controller
-    /// @param controller Controller address
-    /// @return shares Amount of shares canceled
-    /// @dev Transfers pending shares back to receiver
-    function cancelRedeemRequest(address controller) external returns (uint256 shares) {
-        shares = _cancelRedeemForAllPendingShares(asset(), controller, msg.sender);
-    }
-
-    /// @notice Cancel redeem request for controller
     /// @param _asset Asset
     /// @param controller Controller address
     /// @param receiver Share recipient
     /// @return shares Amount of shares canceled
     /// @dev Transfers pending shares back to receiver
-    function cancelRedeemRequestOfAsset(
+    function cancelRedeemRequest(
         address _asset,
         address controller,
         address receiver
     ) external returns (uint256 shares) {
         shares = _cancelRedeemForAllPendingShares(_asset, controller, receiver);
-    }
-
-    /// @notice Cancel redeem request for controller
-    /// @param controller Controller address
-    /// @param receiver Share recipient
-    /// @return shares Amount of shares canceled
-    /// @dev Transfers pending shares back to receiver
-    function cancelRedeemRequest(
-        address controller,
-        address receiver
-    ) external returns (uint256 shares) {
-        shares = _cancelRedeemForAllPendingShares(asset(), controller, receiver);
     }
 
     /// @notice Cancel redeem request for controller partially, for a specific amount of shares
