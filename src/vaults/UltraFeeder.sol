@@ -180,7 +180,7 @@ contract UltraFeeder is BaseControlledAsyncRedeem, IUltraFeederErrors {
         IERC20(_mainVault).safeIncreaseAllowance(address(_mainVault), shares);
 
         // Request redeem from main vault
-        _mainVault.requestRedeemOfAsset(_asset, shares, address(this), address(this));
+        _mainVault.requestRedeem(_asset, shares, address(this), address(this));
     }
 
     /// @dev Before fulfill redeem - transfer funds from fundsHolder to vault

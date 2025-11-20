@@ -382,24 +382,11 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
     }
 
     /// @notice Get total accrued fees
-    function accruedFees() external view returns (uint256) {
+    function accruedFees() external view returns (uint256 managementFee, uint256 performanceFee) {
         Fees memory fees = getFees();
         Totals memory totals = _snapshotTotals();
-        return _calculateAccruedPerformanceFee(fees, totals) + _calculateAccruedManagementFee(fees, totals);
-    }
-
-    /// @notice Get accrued management fees
-    function accruedManagementFees() external view returns (uint256) {
-        Fees memory fees = getFees();
-        Totals memory totals = _snapshotTotals();
-        return _calculateAccruedManagementFee(fees, totals);
-    }
-
-    /// @notice Get accrued performance fees
-    function accruedPerformanceFees() external view returns (uint256) {
-        Fees memory fees = getFees();
-        Totals memory totals = _snapshotTotals();
-        return _calculateAccruedPerformanceFee(fees, totals);
+        managementFee = _calculateAccruedManagementFee(fees, totals);
+        performanceFee = _calculateAccruedPerformanceFee(fees, totals);
     }
 
     /// @notice Get the withdrawal fee
