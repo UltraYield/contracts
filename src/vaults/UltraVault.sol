@@ -7,7 +7,7 @@ import { IPriceSource } from "src/interfaces/IPriceSource.sol";
 import { Fees, IUltraVaultEvents, IUltraVaultErrors } from "src/interfaces/IUltraVault.sol";
 import { AddressUpdateProposal } from "src/utils/AddressUpdates.sol";
 import { FixedPointMathLib } from "src/utils/FixedPointMathLib.sol";
-import { BaseControlledAsyncRedeemV2, BaseControlledAsyncRedeemInitParams } from "src/vaults/v2/BaseControlledAsyncRedeemV2.sol";
+import { BaseControlledAsyncRedeem, BaseControlledAsyncRedeemInitParams } from "src/vaults/BaseControlledAsyncRedeem.sol";
 import { OPERATOR_ROLE } from "src/utils/Roles.sol";
 
 // keccak256(abi.encode(uint256(keccak256("ultrayield.storage.UltraVault")) - 1)) & ~bytes32(uint256(0xff));
@@ -35,9 +35,9 @@ struct UltraVaultInitParams {
     address fundsHolder;
 }
 
-/// @title UltraVaultV2
+/// @title UltraVault
 /// @notice ERC-7540 compliant async redeem vault with UltraVaultOracle pricing and multisig asset management
-contract UltraVaultV2 is BaseControlledAsyncRedeemV2, IUltraVaultEvents, IUltraVaultErrors {
+contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVaultErrors {
     using FixedPointMathLib for uint256;
     using SafeERC20 for IERC20;
 

@@ -34,10 +34,10 @@ struct BaseControlledAsyncRedeemInitParams {
     address rateProvider;
 }
 
-/// @title BaseControlledAsyncRedeemV1
+/// @title BaseControlledAsyncRedeem
 /// @notice Base contract for controlled async redeem flows
 /// @dev Based on ERC-7540 Reference Implementation
-abstract contract BaseControlledAsyncRedeemV1 is
+abstract contract BaseControlledAsyncRedeem is
     AccessControlUpgradeable,
     ERC4626Upgradeable,
     PausableUpgradeable,

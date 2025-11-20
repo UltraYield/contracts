@@ -29,18 +29,18 @@ jobs:
       - name: Build contracts (release profile)
         run: FOUNDRY_PROFILE=release forge build --sizes > build-output.txt 2>&1
 
-      - name: Extract UltraVaultV2 size
+      - name: Extract UltraVault size
         id: current_size
         shell: bash
         run: |
-          SIZE=$(grep -E '^\|\s*UltraVaultV2\s*\|' build-output.txt | head -n1 | awk -F '|' '{print $3}' | tr -d ', ' | xargs)
+          SIZE=$(grep -E '^\|\s*UltraVault\s*\|' build-output.txt | head -n1 | awk -F '|' '{print $3}' | tr -d ', ' | xargs)
           if [[ -z "$SIZE" ]]; then
-            echo "Failed to parse UltraVaultV2 size from forge output:"
+            echo "Failed to parse UltraVault size from forge output:"
             cat build-output.txt
             exit 1
           fi
           echo "size=$SIZE" >> "$GITHUB_OUTPUT"
-          echo "Current UltraVaultV2 size: $SIZE bytes"
+          echo "Current UltraVault size: $SIZE bytes"
           rm build-output.txt
 
       - name: Fetch target branch benchmark
@@ -50,14 +50,14 @@ jobs:
           git fetch origin "${{ github.base_ref }}"
           if git show "origin/${{ github.base_ref }}:benches/sizes" > /dev/null 2>&1; then
             CONTENT=$(git show "origin/${{ github.base_ref }}:benches/sizes")
-            # Preferred new format: key=value lines, extract UltraVaultV2
-            if echo "$CONTENT" | grep -qE '^UltraVaultV2='; then
-              BASE_SIZE=$(echo "$CONTENT" | awk -F'=' '/^UltraVaultV2=/{print $2}' | tr -d '[:space:]')
+            # Preferred new format: key=value lines, extract UltraVault
+            if echo "$CONTENT" | grep -qE '^UltraVault='; then
+              BASE_SIZE=$(echo "$CONTENT" | awk -F'=' '/^UltraVault=/{print $2}' | tr -d '[:space:]')
             # Backward-compat: legacy file with just a number
             elif echo "$CONTENT" | grep -qE '^[[:space:]]*[0-9]+[[:space:]]*$'; then
               BASE_SIZE=$(echo "$CONTENT" | tr -d '[:space:]')
             else
-              echo "Found benches/sizes but could not parse UltraVaultV2 entry."
+              echo "Found benches/sizes but could not parse UltraVault entry."
               echo "Content was:"
               echo "$CONTENT"
               exit 1
@@ -135,7 +135,7 @@ jobs:
             const status = '${{ steps.compare.outputs.status }}';
             const hasComparison = '${{ steps.compare.outputs.has_comparison }}' === 'true';
 
-            let body = '## 📊 UltraVaultV2 Bytecode Size\n\n';
+            let body = '## 📊 UltraVault Bytecode Size\n\n';
 
             if (hasComparison) {
               const base = '${{ steps.compare.outputs.base }}';
@@ -171,7 +171,7 @@ jobs:
 
             const botComment = comments.find(c =>
               c.user.type === 'Bot' &&
-              c.body.includes('📊 UltraVaultV2 Bytecode Size')
+              c.body.includes('📊 UltraVault Bytecode Size')
             );
 
             if (botComment) {
@@ -193,7 +193,7 @@ jobs:
       - name: Update benchmark file
         run: |
           mkdir -p benches
-          printf "UltraVaultV2=%s\n" "${{ steps.current_size.outputs.size }}" > benches/sizes
+          printf "UltraVault=%s\n" "${{ steps.current_size.outputs.size }}" > benches/sizes
 
       # Only commit back when the PR is from the same repository (not a fork),
       # and avoid looping when the actor is the bot.
@@ -220,6 +220,6 @@ jobs:
         run: |
           CURRENT=${{ steps.compare.outputs.current }}
           if [ "$CURRENT" -gt 24576 ]; then
-            echo "❌ ERROR: UltraVaultV2 bytecode size ($CURRENT bytes) exceeds the EVM limit (24576 bytes)!"
+            echo "❌ ERROR: UltraVault bytecode size ($CURRENT bytes) exceeds the EVM limit (24576 bytes)!"
             exit 1
           fi
