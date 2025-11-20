@@ -37,8 +37,8 @@ struct UltraVaultInitParams {
 
 /// @title UltraVault
 /// @notice ERC-7540 compliant async redeem vault with UltraVaultOracle pricing and multisig asset management
-    using FixedPointMathLib for uint256;
 contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVaultErrors {
+    using FixedPointMathLib for uint256;
     using SafeERC20 for IERC20;
 
     ///////////////
