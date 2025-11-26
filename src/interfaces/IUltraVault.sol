@@ -33,14 +33,6 @@ interface IUltraVaultErrors {
     error ZeroFundsHolderAddress();
     error ZeroOracleAddress();
     error ZeroFeeRecipientAddress();
-    error NoPendingFundsHolderUpdate();
-    error ProposedFundsHolderMismatch();
-    error CannotAcceptFundsHolderYet();
-    error FundsHolderUpdateExpired();
-    error NoOracleProposed();
-    error ProposedOracleMismatch();
-    error CannotAcceptOracleYet();
-    error OracleUpdateExpired();
     error CannotSetBalancesInNonEmptyVault();
     error InvalidFees();
 }
