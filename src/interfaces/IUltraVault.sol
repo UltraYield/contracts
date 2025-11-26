@@ -18,7 +18,7 @@ struct Fees {
     uint256 highwaterMark;
 }
 
-interface IUltraVaultEvents {
+interface IUltraVaultEvents is IBaseVaultEvents {
     event FundsHolderProposed(address indexed proposedFundsHolder);
     event FundsHolderChanged(address indexed oldFundsHolder, address indexed newFundsHolder);
     event OracleProposed(address indexed proposedOracle);
@@ -29,7 +29,7 @@ interface IUltraVaultEvents {
     event WithdrawalFeeCollected(uint256 amount);
 }
 
-interface IUltraVaultErrors {
+interface IUltraVaultErrors is IBaseVaultErrors {
     error ZeroFundsHolderAddress();
     error ZeroOracleAddress();
     error ZeroFeeRecipientAddress();
@@ -39,7 +39,7 @@ interface IUltraVaultErrors {
 
 /// @title IUltraVault
 /// @notice A simplified interface for use in other contracts
-interface IUltraVault is IBaseVault, IUltraVaultEvents, IUltraVaultErrors {
+interface IUltraVault is IBaseVault {
     ////////////////////
     // View Functions //
     ////////////////////
