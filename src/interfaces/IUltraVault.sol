@@ -30,8 +30,6 @@ interface IUltraVaultEvents is IBaseVaultEvents {
 }
 
 interface IUltraVaultErrors is IBaseVaultErrors {
-    error ZeroFundsHolderAddress();
-    error ZeroOracleAddress();
     error ZeroFeeRecipientAddress();
     error CannotSetBalancesInNonEmptyVault();
     error InvalidFees();
