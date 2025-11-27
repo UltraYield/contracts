@@ -95,7 +95,7 @@ abstract contract BaseControlledAsyncRedeem is
         __ERC4626_init(IERC20(params.asset));
 
         // Init self
-        __initAddress(RATE_PROVIDER_KEY, params.rateProvider);
+        _initAddress(RATE_PROVIDER_KEY, params.rateProvider);
 
         // Grant roles to owner
         _grantRole(DEFAULT_ADMIN_ROLE, params.owner);

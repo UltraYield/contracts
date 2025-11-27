@@ -89,8 +89,8 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
     ) external initializer {
         require(params.feeRecipient != address(0), ZeroFeeRecipientAddress());
 
-        __initAddress(FUNDS_HOLDER_KEY, params.fundsHolder);
-        __initAddress(ORACLE_KEY, params.oracle);
+        _initAddress(FUNDS_HOLDER_KEY, params.fundsHolder);
+        _initAddress(ORACLE_KEY, params.oracle);
         _pause();
         
         // Calling at the end since we need oracle to be setup

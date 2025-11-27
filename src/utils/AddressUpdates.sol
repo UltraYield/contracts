@@ -59,7 +59,7 @@ abstract contract AddressUpdatable is IAddressUpdatableErrors {
     // Write Functions //
     /////////////////////
 
-    function __initAddress(bytes32 key, address addr) internal {
+    function _initAddress(bytes32 key, address addr) internal {
         AddressUpdatableStorage storage $ = _getStorage();
         require(addr != address(0), ZeroAddressInput());
         require($.addresses[key] == address(0), AddressAlreadyInitialized());
