@@ -51,6 +51,8 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
     uint64 internal constant MAX_PERFORMANCE_FEE = 30 * ONE_PERCENT; // 30%
     uint64 internal constant MAX_MANAGEMENT_FEE = 5 * ONE_PERCENT; // 5%
     uint64 internal constant MAX_WITHDRAWAL_FEE = ONE_PERCENT; // 1%
+    bytes32 internal constant FUNDS_HOLDER_KEY = keccak256("fundsHolder");
+    bytes32 internal constant ORACLE_KEY = keccak256("oracle");
 
     /////////////
     // Storage //
@@ -58,10 +60,10 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
 
     /// @custom:storage-location erc7201:ultrayield.storage.UltraVault
     struct UltraVaultStorage {
-        address fundsHolder;
-        IPriceSource oracle;
-        AddressUpdateProposal proposedFundsHolder;
-        AddressUpdateProposal proposedOracle;
+        address __fundsHolder; // Deprecated in V2
+        IPriceSource __oracle; // Deprecated in V2
+        AddressUpdateProposal __proposedFundsHolder; // Deprecated in V2
+        AddressUpdateProposal __proposedOracle; // Deprecated in V2
         address feeRecipient;
         Fees fees;
     }
@@ -85,13 +87,10 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
     function initialize(
         UltraVaultInitParams memory params
     ) external initializer {
-        require(params.fundsHolder != address(0), ZeroFundsHolderAddress());
-        require(params.oracle != address(0), ZeroOracleAddress());
         require(params.feeRecipient != address(0), ZeroFeeRecipientAddress());
 
-        UltraVaultStorage storage $ = _getUltraVaultStorage();
-        $.fundsHolder = params.fundsHolder;
-        $.oracle = IPriceSource(params.oracle);
+        __initAddress(FUNDS_HOLDER_KEY, params.fundsHolder);
+        __initAddress(ORACLE_KEY, params.oracle);
         _pause();
         
         // Calling at the end since we need oracle to be setup
@@ -103,7 +102,7 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
             rateProvider: params.rateProvider
         }));
 
-        $.feeRecipient = params.feeRecipient;
+        _getUltraVaultStorage().feeRecipient = params.feeRecipient;
         emit FeesRecipientUpdated(address(0), params.feeRecipient);
         _setFees(params.fees);
     }
@@ -114,24 +113,22 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
 
     /// @notice Get the funds holder address
     function fundsHolder() public view returns (address) {
-        return _getUltraVaultStorage().fundsHolder;
+        return _getCurrentAddress(FUNDS_HOLDER_KEY);
     }
 
     /// @notice Get the oracle address
     function oracle() public view returns (IPriceSource) {
-        return _getUltraVaultStorage().oracle;
+        return IPriceSource(_getCurrentAddress(ORACLE_KEY));
     }
 
     /// @notice Get the proposed funds holder
     function proposedFundsHolder() external view returns (address, uint256) {
-        AddressUpdateProposal storage proposal = _getUltraVaultStorage().proposedFundsHolder;
-        return (proposal.addr, proposal.timestamp);
+        return _getAddressUpdateProposal(FUNDS_HOLDER_KEY);
     }
 
     /// @notice Get the proposed oracle
     function proposedOracle() external view returns (address, uint256) {
-        AddressUpdateProposal storage proposal = _getUltraVaultStorage().proposedOracle;
-        return (proposal.addr, proposal.timestamp);
+        return _getAddressUpdateProposal(ORACLE_KEY);
     }
 
     ////////////////////////////
@@ -300,13 +297,7 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
     /// @param newFundsHolder New fundsHolder address
     /// @dev changing the holder should be used only in case of multisig upgrade after funds transfer
     function proposeFundsHolder(address newFundsHolder) external onlyOwner {
-        require(newFundsHolder != address(0), ZeroFundsHolderAddress());
-
-        _getUltraVaultStorage().proposedFundsHolder = AddressUpdateProposal({
-            addr: newFundsHolder,
-            timestamp: uint96(block.timestamp)
-        });
-
+        _proposeAddressUpdate(FUNDS_HOLDER_KEY, newFundsHolder);
         emit FundsHolderProposed(newFundsHolder);
     }
 
@@ -314,13 +305,7 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
     /// @dev Pauses vault to ensure oracle setup and prevent deposits with faulty prices
     /// @dev Oracle must be switched before unpausing
     function acceptFundsHolder(address newFundsHolder) external onlyOwner {
-        UltraVaultStorage storage $ = _getUltraVaultStorage();
-        AddressUpdateProposal storage proposal = $.proposedFundsHolder;
-        _validateAddressUpdateProposal(proposal, newFundsHolder);
-
-        address oldFundsHolder = $.fundsHolder; 
-        $.fundsHolder = newFundsHolder;
-        delete $.proposedFundsHolder;
+        address oldFundsHolder = _acceptAddressUpdate(FUNDS_HOLDER_KEY, newFundsHolder);
         emit FundsHolderChanged(oldFundsHolder, newFundsHolder);
 
         // Pause to manually check the setup by operators
@@ -334,13 +319,7 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
     /// @notice Propose new oracle for owner acceptance after delay
     /// @param newOracle Address of the new oracle
     function proposeOracle(address newOracle) external onlyOwner {
-        require(newOracle != address(0), ZeroOracleAddress());
-
-        _getUltraVaultStorage().proposedOracle = AddressUpdateProposal({
-            addr: newOracle,
-            timestamp: uint96(block.timestamp)
-        });
-
+        _proposeAddressUpdate(ORACLE_KEY, newOracle);
         emit OracleProposed(newOracle);
     }
 
@@ -348,13 +327,7 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
     /// @dev Pauses vault to ensure oracle setup and prevent deposits with faulty prices
     /// @dev Oracle must be switched before unpausing
     function acceptProposedOracle(address newOracle) external onlyOwner {
-        UltraVaultStorage storage $ = _getUltraVaultStorage();
-        AddressUpdateProposal storage proposal = $.proposedOracle;
-        _validateAddressUpdateProposal(proposal, newOracle);
-
-        address oldOracle = address($.oracle);
-        $.oracle = IPriceSource(newOracle);
-        delete $.proposedOracle;
+        address oldOracle = _acceptAddressUpdate(ORACLE_KEY, newOracle);
         emit OracleUpdated(oldOracle, newOracle);
 
         // Pause to manually check the setup by operators
