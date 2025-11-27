@@ -27,10 +27,10 @@ interface IBaseVaultErrors {
     error InsufficientBalance();
     error AssetNotSupported();
     error MissingRateProvider();
-    error NoRateProviderProposed();
-    error ProposedRateProviderMismatch();
-    error CannotAcceptRateProviderYet();
-    error RateProviderUpdateExpired();
+    error NoPendingUpdateProposal();
+    error UpdateProposalAddressMismatch();
+    error CannotAcceptProposalYet();
+    error UpdateProposalExpired();
 }
 
 interface IBaseVaultEvents {

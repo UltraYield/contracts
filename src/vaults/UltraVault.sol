@@ -123,14 +123,14 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
     }
 
     /// @notice Get the proposed funds holder
-    function proposedFundsHolder() public view returns (address, uint256) {
-        AddressUpdateProposal memory proposal = _getUltraVaultStorage().proposedFundsHolder;
+    function proposedFundsHolder() external view returns (address, uint256) {
+        AddressUpdateProposal storage proposal = _getUltraVaultStorage().proposedFundsHolder;
         return (proposal.addr, proposal.timestamp);
     }
 
     /// @notice Get the proposed oracle
-    function proposedOracle() public view returns (address, uint256) {
-        AddressUpdateProposal memory proposal = _getUltraVaultStorage().proposedOracle;
+    function proposedOracle() external view returns (address, uint256) {
+        AddressUpdateProposal storage proposal = _getUltraVaultStorage().proposedOracle;
         return (proposal.addr, proposal.timestamp);
     }
 
@@ -314,17 +314,14 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
     /// @dev Pauses vault to ensure oracle setup and prevent deposits with faulty prices
     /// @dev Oracle must be switched before unpausing
     function acceptFundsHolder(address newFundsHolder) external onlyOwner {
-        (address proposedHolder, uint256 proposalTimestamp) = proposedFundsHolder();
-        require(proposedHolder != address(0), NoPendingFundsHolderUpdate());
-        require(proposedHolder == newFundsHolder, ProposedFundsHolderMismatch());
-        require(block.timestamp >= proposalTimestamp + ADDRESS_UPDATE_TIMELOCK, CannotAcceptFundsHolderYet());
-        require(block.timestamp <= proposalTimestamp + MAX_ADDRESS_UPDATE_WAIT, FundsHolderUpdateExpired());
-
-        emit FundsHolderChanged(fundsHolder(), newFundsHolder);
-
         UltraVaultStorage storage $ = _getUltraVaultStorage();
+        AddressUpdateProposal storage proposal = $.proposedFundsHolder;
+        _validateAddressUpdateProposal(proposal, newFundsHolder);
+
+        address oldFundsHolder = $.fundsHolder; 
         $.fundsHolder = newFundsHolder;
         delete $.proposedFundsHolder;
+        emit FundsHolderChanged(oldFundsHolder, newFundsHolder);
 
         // Pause to manually check the setup by operators
         _pause();
@@ -351,17 +348,14 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
     /// @dev Pauses vault to ensure oracle setup and prevent deposits with faulty prices
     /// @dev Oracle must be switched before unpausing
     function acceptProposedOracle(address newOracle) external onlyOwner {
-        (address pendingOracle, uint256 proposalTimestamp) = proposedOracle();
-        require(pendingOracle != address(0), NoOracleProposed());
-        require(pendingOracle == newOracle, ProposedOracleMismatch());
-        require(block.timestamp >= proposalTimestamp + ADDRESS_UPDATE_TIMELOCK, CannotAcceptOracleYet());
-        require(block.timestamp <= proposalTimestamp + MAX_ADDRESS_UPDATE_WAIT, OracleUpdateExpired());
-
-        emit OracleUpdated(address(oracle()), newOracle);
-
         UltraVaultStorage storage $ = _getUltraVaultStorage();
+        AddressUpdateProposal storage proposal = $.proposedOracle;
+        _validateAddressUpdateProposal(proposal, newOracle);
+
+        address oldOracle = address($.oracle);
         $.oracle = IPriceSource(newOracle);
         delete $.proposedOracle;
+        emit OracleUpdated(oldOracle, newOracle);
 
         // Pause to manually check the setup by operators
         _pause();
@@ -399,12 +393,13 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
     /// @dev Collects pending fees before update
     function setFeeRecipient(address newFeeRecipient) public onlyOwner whenNotPaused {
         require(newFeeRecipient != address(0), ZeroFeeRecipientAddress());
+        UltraVaultStorage storage $ = _getUltraVaultStorage();
 
-        address currentFeeRecipient = feeRecipient();
-        if (currentFeeRecipient != newFeeRecipient) {
+        address oldFeeRecipient = $.feeRecipient;
+        if (oldFeeRecipient != newFeeRecipient) {
             _collectFees();
-            _getUltraVaultStorage().feeRecipient = newFeeRecipient;
-            emit FeesRecipientUpdated(currentFeeRecipient, newFeeRecipient);
+            $.feeRecipient = newFeeRecipient;
+            emit FeesRecipientUpdated(oldFeeRecipient, newFeeRecipient);
         }
     }
 
@@ -434,25 +429,25 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
         uint256 shareValue;
     }
 
-    function _setFees(Fees memory fees) internal {
+    function _setFees(Fees memory newFees) internal {
         require(
-            fees.performanceFee <= MAX_PERFORMANCE_FEE &&
-            fees.managementFee <= MAX_MANAGEMENT_FEE &&
-            fees.withdrawalFee <= MAX_WITHDRAWAL_FEE,
+            newFees.performanceFee <= MAX_PERFORMANCE_FEE &&
+            newFees.managementFee <= MAX_MANAGEMENT_FEE &&
+            newFees.withdrawalFee <= MAX_WITHDRAWAL_FEE,
             InvalidFees()
         );
 
-        fees.lastUpdateTimestamp = uint64(block.timestamp);
+        newFees.lastUpdateTimestamp = uint64(block.timestamp);
 
         Fees memory currentFees = getFees();
         if (currentFees.highwaterMark == 0) {
-            fees.highwaterMark = 10 ** IERC20Metadata(asset()).decimals();
+            newFees.highwaterMark = 10 ** IERC20Metadata(asset()).decimals();
         } else {
-            fees.highwaterMark = currentFees.highwaterMark;
+            newFees.highwaterMark = currentFees.highwaterMark;
         }
-        _getUltraVaultStorage().fees = fees;
+        _getUltraVaultStorage().fees = newFees;
 
-        emit FeesUpdated(currentFees, fees);
+        emit FeesUpdated(currentFees, newFees);
     }
 
     function _collectFees() internal {

@@ -55,7 +55,7 @@ abstract contract RedeemQueue is IRedeemQueueErrors {
         address user,
         address token
     ) internal view returns (PendingRedeem memory) {
-        PendingRedeemSlot memory redeem = _getRedeemQueueStorage().pendingRedeems[user][token];
+        PendingRedeemSlot storage redeem = _getRedeemQueueStorage().pendingRedeems[user][token];
         return PendingRedeem({
             shares: redeem.shares,
             requestTime: redeem.requestTime
@@ -66,7 +66,7 @@ abstract contract RedeemQueue is IRedeemQueueErrors {
         address user,
         address token
     ) internal view returns (ClaimableRedeem memory) {
-        ClaimableRedeemSlot memory redeem = _getRedeemQueueStorage().claimableRedeems[user][token];
+        ClaimableRedeemSlot storage redeem = _getRedeemQueueStorage().claimableRedeems[user][token];
         return ClaimableRedeem({
             shares: redeem.shares,
             assets: redeem.assets
@@ -78,7 +78,7 @@ abstract contract RedeemQueue is IRedeemQueueErrors {
         address token,
         uint256 assets
     ) internal view returns (uint256 shares) {
-        ClaimableRedeemSlot memory redeem = _getRedeemQueueStorage().claimableRedeems[user][token];
+        ClaimableRedeemSlot storage redeem = _getRedeemQueueStorage().claimableRedeems[user][token];
         if (assets == redeem.assets) {
             return redeem.shares;
         } else {
@@ -92,7 +92,7 @@ abstract contract RedeemQueue is IRedeemQueueErrors {
         address token,
         uint256 shares
     ) internal view returns (uint256 assets) {
-        ClaimableRedeemSlot memory redeem = _getRedeemQueueStorage().claimableRedeems[user][token];
+        ClaimableRedeemSlot storage redeem = _getRedeemQueueStorage().claimableRedeems[user][token];
         if (shares == redeem.shares) {
             return redeem.assets;
         } else {

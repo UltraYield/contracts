@@ -27,7 +27,7 @@ jobs:
           version: nightly
 
       - name: Build contracts (release profile)
-        run: FOUNDRY_PROFILE=release forge build --sizes > build-output.txt 2>&1
+        run: FOUNDRY_PROFILE=release forge build --sizes src/vaults/UltraVault.sol > build-output.txt 2>&1
 
       - name: Extract UltraVault size
         id: current_size

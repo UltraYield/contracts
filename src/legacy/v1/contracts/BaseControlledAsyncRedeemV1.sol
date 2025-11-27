@@ -5,7 +5,7 @@ import { IERC165, IERC7575 } from "ERC-7540/interfaces/IERC7575.sol";
 import { IERC7540Redeem, IERC7540Operator } from "ERC-7540/interfaces/IERC7540.sol";
 import { PausableUpgradeable } from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import { ERC4626Upgradeable } from "@openzeppelin/contracts-upgradeable/token/ERC20/extensions/ERC4626Upgradeable.sol";
-import { TimelockedUUPSUpgradeable } from "src/utils/TimelockedUUPSUpgradeable.sol";
+import { TimelockedUUPSUpgradeableV1 } from "src/legacy/v1/contracts/TimelockedUUPSUpgradeableV1.sol";
 import { SafeERC20, IERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
 import { PendingRedeem, ClaimableRedeem } from "src/interfaces/IRedeemQueue.sol";
@@ -14,7 +14,7 @@ import { IUltraVaultRateProvider } from "src/interfaces/IUltraVaultRateProvider.
 import { OPERATOR_ROLE, PAUSER_ROLE, UPGRADER_ROLE } from "src/utils/Roles.sol";
 import { AccessControlUpgradeable } from "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol";
 import { AddressUpdateProposal } from "src/utils/AddressUpdates.sol";
-import { RedeemQueue } from "src/vaults/accounting/RedeemQueue.sol";
+import { RedeemQueueV1 } from "src/legacy/v1/contracts/RedeemQueueV1.sol";
 import { IBaseVaultV1Errors, IBaseVaultV1Events } from "src/legacy/v1/interfaces/IBaseVaultV1.sol";
 
 // keccak256(abi.encode(uint256(keccak256("ultrayield.storage.BaseControlledAsyncRedeem")) - 1)) & ~bytes32(uint256(0xff));
@@ -41,8 +41,8 @@ abstract contract BaseControlledAsyncRedeemV1 is
     AccessControlUpgradeable,
     ERC4626Upgradeable,
     PausableUpgradeable,
-    TimelockedUUPSUpgradeable,
-    RedeemQueue,
+    TimelockedUUPSUpgradeableV1,
+    RedeemQueueV1,
     IERC7540Operator,
     IRedeemAccountingV1,
     IBaseVaultV1Errors,

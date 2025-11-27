@@ -901,9 +901,9 @@ abstract contract BaseControlledAsyncRedeem is
         return assets;
     }
 
-    ///////////////////////////
-    // Rate Provider Updates //
-    ///////////////////////////
+    /////////////////////
+    // Address Updates //
+    /////////////////////
 
     /// @notice Propose new rate provider for owner acceptance after delay
     /// @param newRateProvider Address of the new rate provider
@@ -923,12 +923,8 @@ abstract contract BaseControlledAsyncRedeem is
     /// @dev Oracle must be switched before unpausing
     function acceptProposedRateProvider(address newRateProvider) external onlyOwner {
         BaseAsyncRedeemStorage storage $ = _getBaseAsyncRedeemStorage();
-        AddressUpdateProposal memory proposal = $.proposedRateProvider;
-
-        require(proposal.addr != address(0), NoRateProviderProposed());
-        require(proposal.addr == newRateProvider, ProposedRateProviderMismatch());
-        require(block.timestamp >= proposal.timestamp + ADDRESS_UPDATE_TIMELOCK, CannotAcceptRateProviderYet());
-        require(block.timestamp <= proposal.timestamp + MAX_ADDRESS_UPDATE_WAIT, RateProviderUpdateExpired());
+        AddressUpdateProposal storage proposal = $.proposedRateProvider;
+        _validateAddressUpdateProposal(proposal, newRateProvider);
 
         address oldRateProvider = address($.rateProvider);
         $.rateProvider = IUltraVaultRateProvider(newRateProvider);
@@ -937,6 +933,15 @@ abstract contract BaseControlledAsyncRedeem is
 
         // Pause to manually check the setup by operators
         _pause();
+    }
+
+    function _validateAddressUpdateProposal(
+        AddressUpdateProposal storage proposal, address newAddress
+    ) internal view {
+        require(proposal.addr != address(0), NoPendingUpdateProposal());
+        require(proposal.addr == newAddress, UpdateProposalAddressMismatch());
+        require(block.timestamp >= proposal.timestamp + ADDRESS_UPDATE_TIMELOCK, CannotAcceptProposalYet());
+        require(block.timestamp <= proposal.timestamp + MAX_ADDRESS_UPDATE_WAIT, UpdateProposalExpired());
     }
 
     ///////////
