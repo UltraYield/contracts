@@ -4,18 +4,17 @@ pragma solidity >=0.8.0;
 import { IPausable } from "src/interfaces/IPausable.sol";
 import { IERC7540Operator } from "ERC-7540/interfaces/IERC7540.sol";
 import { IRedeemAccounting } from "src/interfaces/IRedeemAccounting.sol";
+import { IAddressUpdatableErrors } from "src/interfaces/IAddressUpdatableErrors.sol";
 import { IUltraVaultRateProvider } from "src/interfaces/IUltraVaultRateProvider.sol";
 import { IAccessControlDefaultAdminRules } from "@openzeppelin/contracts/access/extensions/IAccessControlDefaultAdminRules.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { IERC4626 } from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import { IERC165 } from "@openzeppelin/contracts/interfaces/IERC165.sol";
-import { AddressUpdateProposal } from "src/utils/AddressUpdates.sol";
 
-interface IBaseVaultErrors {
+interface IBaseVaultErrors is IAddressUpdatableErrors {
     error NotOwner();
     error AccessDenied();
     error ZeroAssetAddress();
-    error ZeroRateProviderAddress();
     error InputLengthMismatch();
     error CannotPreviewWithdrawInAsyncVault();
     error CannotPreviewRedeemInAsyncVault();
@@ -26,11 +25,6 @@ interface IBaseVaultErrors {
     error NoPendingRedeem();
     error InsufficientBalance();
     error AssetNotSupported();
-    error MissingRateProvider();
-    error NoPendingUpdateProposal();
-    error UpdateProposalAddressMismatch();
-    error CannotAcceptProposalYet();
-    error UpdateProposalExpired();
 }
 
 interface IBaseVaultEvents {
@@ -83,8 +77,8 @@ interface IBaseVault is
     function rateProvider() external view returns (IUltraVaultRateProvider);
 
     /// @notice Returns the proposed rate provider
-    /// @return proposedRateProvider The proposed rate provider
-    function proposedRateProvider() external view returns (AddressUpdateProposal memory);
+    /// @return proposedRateProvider The proposed rate provider address and proposaltimestamp
+    function proposedRateProvider() external view returns (address, uint256);
 
     /// @notice Converts assets to underlying
     /// @param _asset The asset to convert

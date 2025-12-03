@@ -13,7 +13,7 @@ import { IRedeemAccounting } from "src/interfaces/IRedeemAccounting.sol";
 import { IUltraVaultRateProvider } from "src/interfaces/IUltraVaultRateProvider.sol";
 import { OPERATOR_ROLE, PAUSER_ROLE, UPGRADER_ROLE } from "src/utils/Roles.sol";
 import { AccessControlUpgradeable } from "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol";
-import { AddressUpdateProposal } from "src/utils/AddressUpdates.sol";
+import { AddressUpdateProposal, AddressUpdatable } from "src/utils/AddressUpdates.sol";
 import { RedeemQueue } from "src/vaults/accounting/RedeemQueue.sol";
 import { IBaseVaultErrors, IBaseVaultEvents } from "src/interfaces/IBaseVault.sol";
 
@@ -41,6 +41,7 @@ abstract contract BaseControlledAsyncRedeem is
     AccessControlUpgradeable,
     ERC4626Upgradeable,
     PausableUpgradeable,
+    AddressUpdatable,
     TimelockedUUPSUpgradeable,
     RedeemQueue,
     IERC7540Operator,
@@ -56,8 +57,7 @@ abstract contract BaseControlledAsyncRedeem is
     ///////////////
 
     uint256 internal constant REQUEST_ID = 0;
-    uint256 internal constant ADDRESS_UPDATE_TIMELOCK = 3 days;
-    uint256 internal constant MAX_ADDRESS_UPDATE_WAIT = 7 days;
+    bytes32 internal constant RATE_PROVIDER_KEY = keccak256("rateProvider");
 
     /////////////
     // Storage //
@@ -66,8 +66,8 @@ abstract contract BaseControlledAsyncRedeem is
     /// @custom:storage-location erc7201:ultrayield.storage.BaseControlledAsyncRedeem
     struct BaseAsyncRedeemStorage {
         mapping(address => mapping(address => bool)) isOperator;
-        IUltraVaultRateProvider rateProvider;
-        AddressUpdateProposal proposedRateProvider;
+        IUltraVaultRateProvider __rateProvider; // Deprecated in V2
+        AddressUpdateProposal __proposedRateProvider; // Deprecated in V2
     }
 
     function _getBaseAsyncRedeemStorage() private pure returns (BaseAsyncRedeemStorage storage $) {
@@ -86,7 +86,6 @@ abstract contract BaseControlledAsyncRedeem is
         BaseControlledAsyncRedeemInitParams memory params
     ) public virtual onlyInitializing {
         require(params.asset != address(0), ZeroAssetAddress());
-        require(params.rateProvider != address(0), ZeroRateProviderAddress());
 
         // Init parents
         __TimelockedUUPSUpgradeable_init();
@@ -96,7 +95,7 @@ abstract contract BaseControlledAsyncRedeem is
         __ERC4626_init(IERC20(params.asset));
 
         // Init self
-        _getBaseAsyncRedeemStorage().rateProvider = IUltraVaultRateProvider(params.rateProvider);
+        _initAddress(RATE_PROVIDER_KEY, params.rateProvider);
 
         // Grant roles to owner
         _grantRole(DEFAULT_ADMIN_ROLE, params.owner);
@@ -112,13 +111,13 @@ abstract contract BaseControlledAsyncRedeem is
     /// @notice Returns the address of the rate provider
     /// @return rateProvider The address of the rate provider
     function rateProvider() public view returns (IUltraVaultRateProvider) {
-        return _getBaseAsyncRedeemStorage().rateProvider;
+        return IUltraVaultRateProvider(_getCurrentAddress(RATE_PROVIDER_KEY));
     }
 
     /// @notice Returns the proposed rate provider
     /// @return proposedRateProvider The proposed rate provider
-    function proposedRateProvider() public view returns (AddressUpdateProposal memory) {
-        return _getBaseAsyncRedeemStorage().proposedRateProvider;
+    function proposedRateProvider() public view returns (address, uint256) {
+        return _getAddressUpdateProposal(RATE_PROVIDER_KEY);
     }
 
     //////////////
@@ -908,13 +907,7 @@ abstract contract BaseControlledAsyncRedeem is
     /// @notice Propose new rate provider for owner acceptance after delay
     /// @param newRateProvider Address of the new rate provider
     function proposeRateProvider(address newRateProvider) external onlyOwner {
-        require(newRateProvider != address(0), MissingRateProvider());
-
-        _getBaseAsyncRedeemStorage().proposedRateProvider = AddressUpdateProposal({
-            addr: newRateProvider,
-            timestamp: uint96(block.timestamp)
-        });
-
+        _proposeAddressUpdate(RATE_PROVIDER_KEY, newRateProvider);
         emit RateProviderProposed(newRateProvider);
     }
 
@@ -922,26 +915,11 @@ abstract contract BaseControlledAsyncRedeem is
     /// @dev Pauses vault to ensure provider setup and prevent deposits with faulty prices
     /// @dev Oracle must be switched before unpausing
     function acceptProposedRateProvider(address newRateProvider) external onlyOwner {
-        BaseAsyncRedeemStorage storage $ = _getBaseAsyncRedeemStorage();
-        AddressUpdateProposal storage proposal = $.proposedRateProvider;
-        _validateAddressUpdateProposal(proposal, newRateProvider);
-
-        address oldRateProvider = address($.rateProvider);
-        $.rateProvider = IUltraVaultRateProvider(newRateProvider);
-        delete $.proposedRateProvider;
+        address oldRateProvider = _acceptAddressUpdate(RATE_PROVIDER_KEY, newRateProvider);
         emit RateProviderUpdated(oldRateProvider, newRateProvider);
 
         // Pause to manually check the setup by operators
         _pause();
-    }
-
-    function _validateAddressUpdateProposal(
-        AddressUpdateProposal storage proposal, address newAddress
-    ) internal view {
-        require(proposal.addr != address(0), NoPendingUpdateProposal());
-        require(proposal.addr == newAddress, UpdateProposalAddressMismatch());
-        require(block.timestamp >= proposal.timestamp + ADDRESS_UPDATE_TIMELOCK, CannotAcceptProposalYet());
-        require(block.timestamp <= proposal.timestamp + MAX_ADDRESS_UPDATE_WAIT, UpdateProposalExpired());
     }
 
     ///////////
