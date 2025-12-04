@@ -448,7 +448,14 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
             // Mint shares to fee recipient
             _mint(feeRecipient(), feesInShares);
 
-            emit FeesCollected(feesInShares, managementFee, performanceFee);
+            emit FeesCollected(
+                feesInShares, 
+                managementFee, 
+                performanceFee, 
+                totals.totalAssets, 
+                totals.totalSupply, 
+                totals.shareValue
+            );
         }
     }
 
