@@ -26,11 +26,11 @@ interface IUltraVaultEvents is IBaseVaultEvents {
     event FeesRecipientUpdated(address oldRecipient, address newRecipient);
     event FeesUpdated(Fees oldFees, Fees newFees);
     event FeesCollected(
-        uint256 shares, 
-        uint256 managementFee, 
-        uint256 performanceFee, 
-        uint256 totalAssets, 
-        uint256 totalSupply, 
+        uint256 shares,
+        uint256 managementFee,
+        uint256 performanceFee,
+        uint256 totalAssets,
+        uint256 totalSupply,
         uint256 shareValue
     );
     event WithdrawalFeeCollected(uint256 amount);
