@@ -5,7 +5,7 @@ import { IRateProvider } from "src/interfaces/IRateProvider.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { IERC20Metadata } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import { TimelockedUUPSUpgradeableV1 } from "src/legacy/v1/contracts/TimelockedUUPSUpgradeableV1.sol";
-import { IUltraVaultRateProvider, AssetData } from "src/interfaces/IUltraVaultRateProvider.sol";
+import { IUltraVaultRateProviderV1, AssetData } from "src/legacy/v1/interfaces/IUltraVaultRateProviderV1.sol";
 import { Ownable2StepUpgradeable } from "@openzeppelin/contracts-upgradeable/access/Ownable2StepUpgradeable.sol";
 
 // keccak256(abi.encode(uint256(keccak256("ultrayield.storage.UltraVaultRateProvider")) - 1)) & ~bytes32(uint256(0xff));
@@ -13,7 +13,7 @@ bytes32 constant ULTRA_VAULT_RATE_PROVIDER_STORAGE_LOCATION = 0xe24c98638c43dd52
 
 /// @title UltraVaultRateProviderV1
 /// @notice Handles rate calculations between assets for UltraVault
-contract UltraVaultRateProviderV1 is Ownable2StepUpgradeable, TimelockedUUPSUpgradeableV1, IUltraVaultRateProvider {
+contract UltraVaultRateProviderV1 is Ownable2StepUpgradeable, TimelockedUUPSUpgradeableV1, IUltraVaultRateProviderV1 {
     ///////////////
     // Constants //
     ///////////////
@@ -70,28 +70,28 @@ contract UltraVaultRateProviderV1 is Ownable2StepUpgradeable, TimelockedUUPSUpgr
     // IUltraVaultRateProvider //
     /////////////////////////////
 
-    /// @inheritdoc IUltraVaultRateProvider
+    /// @inheritdoc IUltraVaultRateProviderV1
     function baseAsset() public view returns (address) {
         return _getStorage().baseAsset;
     }
 
-    /// @inheritdoc IUltraVaultRateProvider
+    /// @inheritdoc IUltraVaultRateProviderV1
     function decimals() public view returns (uint8) {
         return _getStorage().decimals;
     }
 
-    /// @inheritdoc IUltraVaultRateProvider
+    /// @inheritdoc IUltraVaultRateProviderV1
     function supportedAssets(address asset) public view returns (AssetData memory) {
         return _getStorage().supportedAssets[asset];
     }
 
-    /// @inheritdoc IUltraVaultRateProvider
+    /// @inheritdoc IUltraVaultRateProviderV1
     function isSupported(address asset) external view returns (bool) {
         AssetData memory data = _getStorage().supportedAssets[asset];
         return data.isPegged || data.rateProvider != address(0);
     }
 
-    /// @inheritdoc IUltraVaultRateProvider
+    /// @inheritdoc IUltraVaultRateProviderV1
     function addAsset(address asset, bool isPegged, address rateProvider) external onlyOwner {
         // Checks
         Storage storage $ = _getStorage();
@@ -119,7 +119,7 @@ contract UltraVaultRateProviderV1 is Ownable2StepUpgradeable, TimelockedUUPSUpgr
         }
     }
 
-    /// @inheritdoc IUltraVaultRateProvider
+    /// @inheritdoc IUltraVaultRateProviderV1
     function removeAsset(address asset) external onlyOwner {
         Storage storage $ = _getStorage();
         require(asset != $.baseAsset, CannotUpdateBaseAsset());
@@ -127,7 +127,7 @@ contract UltraVaultRateProviderV1 is Ownable2StepUpgradeable, TimelockedUUPSUpgr
         emit AssetRemoved(asset);
     }
 
-    /// @inheritdoc IUltraVaultRateProvider
+    /// @inheritdoc IUltraVaultRateProviderV1
     function updateRateProvider(address asset, address rateProvider) external onlyOwner {
         Storage storage $ = _getStorage();
         require(asset != $.baseAsset, CannotUpdateBaseAsset());
@@ -138,7 +138,7 @@ contract UltraVaultRateProviderV1 is Ownable2StepUpgradeable, TimelockedUUPSUpgr
         emit RateProviderUpdated(address(asset), rateProvider);
     }
 
-    /// @inheritdoc IUltraVaultRateProvider
+    /// @inheritdoc IUltraVaultRateProviderV1
     function convertToUnderlying(address asset, uint256 assets) external view returns (uint256 result) {
         Storage storage $ = _getStorage();
         AssetData memory data = $.supportedAssets[asset];
@@ -151,7 +151,7 @@ contract UltraVaultRateProviderV1 is Ownable2StepUpgradeable, TimelockedUUPSUpgr
         }
     }
 
-    /// @inheritdoc IUltraVaultRateProvider
+    /// @inheritdoc IUltraVaultRateProviderV1
     function convertFromUnderlying(address asset, uint256 baseAssets) external view returns (uint256 result) {
         Storage storage $ = _getStorage();
         AssetData memory data = $.supportedAssets[asset];
