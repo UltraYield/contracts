@@ -4,7 +4,8 @@ pragma solidity 0.8.28;
 import { SafeERC20, IERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import { IERC20Metadata } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import { IPriceSource } from "src/interfaces/IPriceSource.sol";
-import { Fees, IUltraVaultEvents, IUltraVaultErrors } from "src/interfaces/IUltraVault.sol";
+import { IUltraVaultEvents, IUltraVaultErrors } from "src/interfaces/IUltraVault.sol";
+import { Adjustment, Fees } from "src/interfaces/Types.sol";
 import { AddressUpdateProposal } from "src/utils/AddressUpdates.sol";
 import { FixedPointMathLib } from "src/utils/FixedPointMathLib.sol";
 import { BaseControlledAsyncRedeem, BaseControlledAsyncRedeemInitParams } from "src/vaults/BaseControlledAsyncRedeem.sol";
@@ -219,7 +220,8 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
         
         // Convert shares to underlying assets, then to asset units
         uint256 underlyingAssets = convertToAssets(shares);
-        assets = _convertFromUnderlying(_asset, underlyingAssets);
+        uint256 convertedAssets = _convertFromUnderlying(_asset, underlyingAssets, Adjustment.DOWN);
+        assets = _fulfillRedeem(_asset, convertedAssets, shares, controller);
         
         // Calculate the withdrawal incentive fee directly in asset units
         uint256 withdrawalFee = assets.mulDivDown(getFees().withdrawalFee, ONE_UNIT);
@@ -269,7 +271,7 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
             uint256 _shares = shares[i];
             address _controller = controllers[i];
             uint256 underlyingAssets = _optimizedConvertToAssets(_shares, _totalAssets, _totalSupply);
-            uint256 convertedAssets = _convertFromUnderlying(_asset, underlyingAssets);
+            uint256 convertedAssets = _convertFromUnderlying(_asset, underlyingAssets, Adjustment.DOWN);
 
             // Calculate and transfer withdrawal fee (in asset units)
             uint256 withdrawalFee = convertedAssets.mulDivDown(withdrawalFeeRate, ONE_UNIT);

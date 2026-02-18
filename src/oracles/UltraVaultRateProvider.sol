@@ -1,69 +1,60 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity 0.8.28;
 
-import { IRateProvider } from "src/interfaces/IRateProvider.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { IERC20Metadata } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
-import { TimelockedUUPSUpgradeable } from "src/utils/TimelockedUUPSUpgradeable.sol";
-import { IUltraVaultRateProvider, AssetData } from "src/interfaces/IUltraVaultRateProvider.sol";
-import { Ownable2StepUpgradeable } from "@openzeppelin/contracts-upgradeable/access/Ownable2StepUpgradeable.sol";
-
-// keccak256(abi.encode(uint256(keccak256("ultrayield.storage.UltraVaultRateProvider")) - 1)) & ~bytes32(uint256(0xff));
-bytes32 constant ULTRA_VAULT_RATE_PROVIDER_STORAGE_LOCATION = 0xe24c98638c43dd52672effcbc76556d36ab0c9a1bbbb5f4a3c1e3bd83e851000;
+import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
+import { Ownable2Step } from "@openzeppelin/contracts/access/Ownable2Step.sol";
+import { IRateProvider } from "src/interfaces/IRateProvider.sol";
+import { IUltraVaultRateProvider, Adjustment } from "src/interfaces/IUltraVaultRateProvider.sol";
 
 /// @title UltraVaultRateProvider
 /// @notice Handles rate calculations between assets for UltraVault
-contract UltraVaultRateProvider is Ownable2StepUpgradeable, TimelockedUUPSUpgradeable, IUltraVaultRateProvider {
+contract UltraVaultRateProvider is Ownable2Step, IUltraVaultRateProvider {
     ///////////////
     // Constants //
     ///////////////
 
     uint8 internal constant MIN_DECIMALS = 6;
     uint8 internal constant MAX_DECIMALS = 18;
+    uint256 internal constant SCALE = 1e18; // 100%
+    uint56 internal constant MAX_ADJUSTMENT_RATE = 5e15; // 1e16 = 1%; 5e15 = 0.5%
+
+    ///////////
+    // Types //
+    ///////////
+
+    struct AssetSlot {
+        uint8 decimals;
+        uint56 adjustmentRate; // 1e16 = 1%
+        address rateProvider; // External rate provider if not pegged
+        uint32 __padding;
+    }
 
     /////////////
     // Storage //
     /////////////
 
-    /// @custom:storage-location erc7201:ultrayield.storage.UltraVaultRateProvider
-    struct Storage {
-        address baseAsset;
-        uint8 decimals;
-        mapping(address => AssetData) supportedAssets;
-    }
+    /// @inheritdoc IUltraVaultRateProvider
+    address public immutable baseAsset;
 
-    function _getStorage() private pure returns (Storage storage $) {
-        assembly {
-            $.slot := ULTRA_VAULT_RATE_PROVIDER_STORAGE_LOCATION
-        }
-    }
+    /// @inheritdoc IUltraVaultRateProvider
+    uint8 public immutable baseDecimals;
+
+    /// @dev Mapping of supported assets to their data
+    mapping(address => AssetSlot) internal supportedAssets;
+
+    /// @dev List of supported assets
+    address[] internal assetList;
 
     //////////
     // Init //
     //////////
 
-    constructor() {
-        _disableInitializers();
-    }
-
-    function initialize(address _owner, address _baseAsset) external initializer {
-        __Ownable_init(_owner);
-        __Ownable2Step_init();
-        __TimelockedUUPSUpgradeable_init();
-
-        uint8 _decimals = IERC20Metadata(_baseAsset).decimals();
-        _validateDecimals(_decimals);
-
-        Storage storage $ = _getStorage();
-        $.baseAsset = _baseAsset;
-        $.decimals = _decimals;
-        // Base asset is always supported and pegged to itself
-        $.supportedAssets[_baseAsset] = AssetData({
-            isPegged: true,
-            decimals: _decimals,
-            rateProvider: address(0)
-        });
-        emit AssetAdded(address(_baseAsset), true);
+    constructor(address _owner, address _baseAsset) Ownable(_owner) {
+        baseAsset = _baseAsset;
+        baseDecimals = IERC20Metadata(_baseAsset).decimals();
+        _addAsset(_baseAsset, true, address(0), 0);
     }
 
     /////////////////////////////
@@ -71,102 +62,157 @@ contract UltraVaultRateProvider is Ownable2StepUpgradeable, TimelockedUUPSUpgrad
     /////////////////////////////
 
     /// @inheritdoc IUltraVaultRateProvider
-    function baseAsset() public view returns (address) {
-        return _getStorage().baseAsset;
+    function getAssetInfo(address asset) public view returns (bool isPegged, uint8 decimals, address rateProvider, uint56 adjustmentRate) {
+        AssetSlot memory slot = supportedAssets[asset];
+        bool assetIsSupported = slot.decimals > 0;
+        isPegged = assetIsSupported && slot.rateProvider == address(0);
+        decimals = slot.decimals;
+        rateProvider = slot.rateProvider;
+        adjustmentRate = slot.adjustmentRate;
     }
 
     /// @inheritdoc IUltraVaultRateProvider
-    function decimals() public view returns (uint8) {
-        return _getStorage().decimals;
+    function getSupportedAssets() external view returns (address[] memory) {
+        return assetList;
     }
 
     /// @inheritdoc IUltraVaultRateProvider
-    function supportedAssets(address asset) public view returns (AssetData memory) {
-        return _getStorage().supportedAssets[asset];
+    function isSupported(address asset) public view returns (bool) {
+        return supportedAssets[asset].decimals > 0;
     }
 
     /// @inheritdoc IUltraVaultRateProvider
-    function isSupported(address asset) external view returns (bool) {
-        AssetData memory data = _getStorage().supportedAssets[asset];
-        return data.isPegged || data.rateProvider != address(0);
-    }
-
-    /// @inheritdoc IUltraVaultRateProvider
-    function addAsset(address asset, bool isPegged, address rateProvider) external onlyOwner {
-        // Checks
-        Storage storage $ = _getStorage();
-        AssetData memory data = $.supportedAssets[asset];
-        require(!data.isPegged && data.rateProvider == address(0), AssetAlreadySupported());
-        if (isPegged) {
-            require(rateProvider == address(0), InvalidRateProvider());
-        } else {
-            require(rateProvider != address(0), InvalidRateProvider());
-        }
-
-        // Update storage
-        uint8 _decimals = IERC20Metadata(asset).decimals();
-        _validateDecimals(_decimals);
-        $.supportedAssets[asset] = AssetData({
-            isPegged: isPegged,
-            decimals: _decimals,
-            rateProvider: rateProvider
-        });
-
-        // Emit events
-        emit AssetAdded(address(asset), isPegged);
-        if (!isPegged) {
-            emit RateProviderUpdated(address(asset), rateProvider);
-        }
+    function addAsset(address asset, bool isPegged, address rateProvider, uint56 adjustmentRate) external onlyOwner {
+        _addAsset(asset, isPegged, rateProvider, adjustmentRate);
     }
 
     /// @inheritdoc IUltraVaultRateProvider
     function removeAsset(address asset) external onlyOwner {
-        Storage storage $ = _getStorage();
-        require(asset != $.baseAsset, CannotUpdateBaseAsset());
-        delete $.supportedAssets[asset];
+        // Checks
+        require(asset != baseAsset, CannotUpdateBaseAsset());
+        require(isSupported(asset), AssetNotSupported());
+
+        // Update storage
+        delete supportedAssets[asset];
+        for (uint256 i = 0; i < assetList.length; i++) {
+            if (assetList[i] == asset) {
+                assetList[i] = assetList[assetList.length - 1];
+                assetList.pop();
+                break;
+            }
+        }
+
+        // Emit event
         emit AssetRemoved(asset);
     }
 
     /// @inheritdoc IUltraVaultRateProvider
-    function updateRateProvider(address asset, address rateProvider) external onlyOwner {
-        Storage storage $ = _getStorage();
-        require(asset != $.baseAsset, CannotUpdateBaseAsset());
-        require(!$.supportedAssets[asset].isPegged, AssetNotSupported());
-        require(rateProvider != address(0), InvalidRateProvider());
+    function updateRateProvider(address asset, bool isPegged, address newRateProvider) external onlyOwner {
+        // Checks
+        require(asset != baseAsset, CannotUpdateBaseAsset());
+        require(isSupported(asset), AssetNotSupported());
+        bool rateProviderIsValid = isPegged
+            ? newRateProvider == address(0)
+            : newRateProvider != address(0);
+        require(rateProviderIsValid, InvalidRateProvider());
 
-        $.supportedAssets[asset].rateProvider = rateProvider;
-        emit RateProviderUpdated(address(asset), rateProvider);
+        // Update storage
+        AssetSlot storage slot = supportedAssets[asset];
+        address oldRateProvider = slot.rateProvider;
+        slot.rateProvider = newRateProvider;
+
+        // Emit event
+        emit RateProviderUpdated(asset, oldRateProvider, newRateProvider);
     }
 
     /// @inheritdoc IUltraVaultRateProvider
-    function convertToUnderlying(address asset, uint256 assets) external view returns (uint256 result) {
-        Storage storage $ = _getStorage();
-        AssetData memory data = $.supportedAssets[asset];
-        if (data.isPegged) {
-            return _convertDecimals(assets, data.decimals, $.decimals);
+    function updateAdjustmentRate(address asset, uint56 newAdjustmentRate) external onlyOwner {
+        // Checks
+        require(asset != baseAsset, CannotUpdateBaseAsset());
+        require(isSupported(asset), AssetNotSupported());
+        require(newAdjustmentRate <= MAX_ADJUSTMENT_RATE, AdjustmentRateTooHigh());
+
+        // Update storage
+        AssetSlot storage slot = supportedAssets[asset];
+        uint56 oldAdjustmentRate = slot.adjustmentRate;
+        slot.adjustmentRate = newAdjustmentRate;
+
+        // Emit event
+        emit AdjustmentRateUpdated(asset, oldAdjustmentRate, newAdjustmentRate);
+    }
+
+    /// @inheritdoc IUltraVaultRateProvider
+    function convertToUnderlying(address asset, uint256 assets, Adjustment adjustment) external view returns (uint256 result) {
+        (bool isPegged, uint8 decimals, address rateProvider, uint56 adjustmentRate) = getAssetInfo(asset);
+        if (isPegged) {
+            uint256 amount = _convertDecimals(assets, decimals, baseDecimals);
+            return _applyAdjustment(amount, adjustmentRate, adjustment);
         } else {
-            require(data.rateProvider != address(0), AssetNotSupported());
+            require(rateProvider != address(0), AssetNotSupported());
             // Call external rate provider
-            return IRateProvider(data.rateProvider).convertToUnderlying(asset, assets);
+            uint256 amount = IRateProvider(rateProvider).convertToUnderlying(asset, assets);
+            return _applyAdjustment(amount, adjustmentRate, adjustment);
         }
     }
 
     /// @inheritdoc IUltraVaultRateProvider
-    function convertFromUnderlying(address asset, uint256 baseAssets) external view returns (uint256 result) {
-        Storage storage $ = _getStorage();
-        AssetData memory data = $.supportedAssets[asset];
-        if (data.isPegged) {
-            return _convertDecimals(baseAssets, $.decimals, data.decimals);
+    function convertFromUnderlying(address asset, uint256 baseAssets, Adjustment adjustment) external view returns (uint256 result) {
+        (bool isPegged, uint8 decimals, address rateProvider, uint56 adjustmentRate) = getAssetInfo(asset);
+        if (isPegged) {
+            uint256 amount = _convertDecimals(baseAssets, baseDecimals, decimals);
+            return _applyAdjustment(amount, adjustmentRate, adjustment);
         } else {
-            require(data.rateProvider != address(0), AssetNotSupported());
+            require(rateProvider != address(0), AssetNotSupported());
             // Call external rate provider
-            return IRateProvider(data.rateProvider).convertFromUnderlying(asset, baseAssets);
+            uint256 amount = IRateProvider(rateProvider).convertFromUnderlying(asset, baseAssets);
+            return _applyAdjustment(amount, adjustmentRate, adjustment);
         }
     }
 
     //////////////////////
     // Internal Helpers //
     //////////////////////
+
+    /// @dev Internal function to add an asset
+    function _addAsset(address asset, bool isPegged, address rateProvider, uint56 adjustmentRate) internal {
+        // Ensure not supported
+        require(!isSupported(asset), AssetAlreadySupported());
+        // Ensure pegged value and rate provider are consistent
+        bool rateProviderIsValid = isPegged
+            ? rateProvider == address(0)
+            : rateProvider != address(0);
+        require(rateProviderIsValid, InvalidRateProvider());
+        // Ensure decimals within allowed range
+        uint8 decimals = IERC20Metadata(asset).decimals();
+        require(decimals >= MIN_DECIMALS && decimals <= MAX_DECIMALS, InvalidDecimals());
+        // Ensure adjustment rate is not too high
+        require(adjustmentRate <= MAX_ADJUSTMENT_RATE, AdjustmentRateTooHigh());
+
+        // Update storage
+        supportedAssets[asset] = AssetSlot({
+            decimals: decimals,
+            rateProvider: rateProvider,
+            adjustmentRate: adjustmentRate,
+            __padding: 0
+        });
+        assetList.push(asset);
+
+        // Emit event
+        emit AssetAdded(asset, isPegged, rateProvider, adjustmentRate);
+    }
+
+    function _applyAdjustment(uint256 amount, uint56 adjustmentRate, Adjustment adjustment) internal pure returns (uint256) {
+        if (adjustment == Adjustment.NONE || adjustmentRate == 0) {
+            return amount;
+        }
+        if (adjustment == Adjustment.DOWN) {
+            return amount * (SCALE - uint256(adjustmentRate)) / SCALE;
+        }
+        if (adjustment == Adjustment.UP) {
+            return amount * (SCALE + uint256(adjustmentRate)) / SCALE;
+        }
+        revert UnknownAdjustment();
+    }
 
     /// @dev Helps with decimals accounting
     function _convertDecimals(
@@ -186,19 +232,4 @@ contract UltraVaultRateProvider is Ownable2StepUpgradeable, TimelockedUUPSUpgrad
             return amount / 10 ** diff;
         }
     }
-
-    /// @dev Validates that the given decimals value lies within the allowed range
-    function _validateDecimals(uint8 _decimals) internal pure {
-        require(_decimals >= MIN_DECIMALS && _decimals <= MAX_DECIMALS, InvalidDecimals());
-    }
-
-    ////////////////////////////
-    // Upgrade Access Control //
-    ////////////////////////////
-
-    function _authorizeUpgrade(address newImplementation) internal override onlyOwner {}
-
-    function _authorizeUpgradeProposal() internal override onlyOwner {}
-
-    function _authorizeUpgradeCancellation() internal override onlyOwner {}
-} 
+}
