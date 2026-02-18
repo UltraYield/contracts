@@ -1,19 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity >=0.8.0;
 
-import { IPriceSource } from "./IPriceSource.sol";
-
-/// @notice Price data for base/quote pair
-/// @param price Current price
-/// @param targetPrice Target price for gradual changes
-/// @param timestampForFullVesting Target timestamp for full vesting
-/// @param lastUpdatedTimestamp Last timestamp price was updated
-struct Price {
-    uint256 price;
-    uint256 targetPrice;
-    uint256 timestampForFullVesting;
-    uint256 lastUpdatedTimestamp;
-}
+import { IPriceSource } from "src/interfaces/IPriceSource.sol";
+import { Price } from "src/interfaces/Types.sol";
 
 /// @title IUltraVaultOracle
 /// @notice Interface for push-based price oracle

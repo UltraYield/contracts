@@ -1,15 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity >=0.8.0;
 
-struct PendingRedeem {
-    uint256 shares;
-    uint256 requestTime;
-}
-
-struct ClaimableRedeem {
-    uint256 assets;
-    uint256 shares;
-}
+import { PendingRedeem, ClaimableRedeem } from "src/interfaces/Types.sol";
 
 interface IRedeemQueueErrors {
     error InsufficientPendingShares(uint256 available, uint256 requested);
