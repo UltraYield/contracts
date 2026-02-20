@@ -2,7 +2,8 @@
 pragma solidity 0.8.28;
 
 import { UUPSUpgradeable } from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
-import { IRedeemQueueErrors, PendingRedeem, ClaimableRedeem } from "src/interfaces/IRedeemQueue.sol";
+import { PendingRedeem, ClaimableRedeem } from "src/interfaces/Types.sol";
+import { IRedeemQueueErrors } from "src/interfaces/IRedeemAccounting.sol";
 import { FixedPointMathLib } from "src/utils/FixedPointMathLib.sol";
 
 // keccak256(abi.encode(uint256(keccak256("ultrayield.storage.RedeemQueue")) - 1)) & ~bytes32(uint256(0xff));
