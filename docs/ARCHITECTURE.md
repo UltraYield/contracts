@@ -1,5 +1,24 @@
 # Contract Architecture
 
+## Inheritance diagram
+
+```mermaid
+flowchart TD
+    UltraVault --> BaseControlledAsyncRedeem
+
+    BaseControlledAsyncRedeem --> AccessControl
+
+    BaseControlledAsyncRedeem --> ERC4626
+    ERC4626 --> ERC20
+
+    BaseControlledAsyncRedeem --> Pausable
+
+    BaseControlledAsyncRedeem --> RedeemQueue
+
+    BaseControlledAsyncRedeem --> TimelockedUUPS
+    TimelockedUUPS --> UUPSUpgradeable
+```
+
 ## Inheritance and responsibility split
 
 `UltraVault` inherits from `BaseControlledAsyncRedeem`.
