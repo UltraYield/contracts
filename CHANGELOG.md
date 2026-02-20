@@ -20,7 +20,7 @@
 
 ### Added
 - `UltraVaultRateProvider` additions:
-  - Add functionality to adjust result amount after convertion (per-asset rates)
+  - Add functionality to adjust result amount after conversion (per-asset rates)
   - Add `Adjustment` enum that describes adjustment direction
   - Add `adjustment` param to `convertToUnderlying` and `convertFromUnderlying` functions
   - Add `updateAdjustmentRate` function to update asset's adjustment rate
