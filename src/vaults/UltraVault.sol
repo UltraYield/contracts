@@ -156,9 +156,43 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
     // Accounting //
     ////////////////
 
+    function getSharePrice() public view returns (uint256) {
+        return oracle().currentSharePrice();
+    }
+
     /// @notice Get total assets managed by fundsHolder
     function totalAssets() public view override returns (uint256) {
-        return oracle().getQuote(totalSupply(), share(), asset());
+        uint256 sharePrice = getSharePrice();
+        uint256 totalShares = totalSupply();
+        return _optimizedConvertToAssets(totalShares, sharePrice);
+    }
+
+    function convertToAssets(uint256 shares) public view override returns (uint256) {
+        uint256 sharePrice = getSharePrice();
+        return _optimizedConvertToAssets(shares, sharePrice);
+    }
+
+    function convertToShares(uint256 assets) public view override returns (uint256) {
+        uint256 sharePrice = getSharePrice();
+        return _optimizedConvertToShares(assets, sharePrice);
+    }
+
+    /// @dev Optimized function mirroring `convertToAssets` in OZ ERC4626 v5.4.0
+    /// @dev Uses pre-fetched totals. Always rounds down like `convertToAssets` does in the OZ implementation
+    function _optimizedConvertToAssets(
+        uint256 shares,
+        uint256 sharePrice
+    ) internal pure returns (uint256 assets) {
+        return shares.mulDivDown(sharePrice, ONE_UNIT);
+    }
+
+    /// @dev Optimized function mirroring `convertToShares` in OZ ERC4626 v5.4.0
+    /// @dev Uses pre-fetched totals. Always rounds down like `convertToShares` does in the OZ implementation
+    function _optimizedConvertToShares(
+        uint256 assets,
+        uint256 sharePrice
+    ) internal pure returns (uint256 shares) {
+        return assets.mulDivDown(ONE_UNIT, sharePrice);
     }
 
     ////////////////////
@@ -216,9 +250,9 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
     ) external override onlyRole(OPERATOR_ROLE) returns (uint256 assets) {
         // Collect fees accrued to date
         _collectFees();
-        
+        uint256 sharePrice = getSharePrice();
         // Convert shares to underlying assets, then to asset units
-        uint256 underlyingAssets = convertToAssets(shares);
+        uint256 underlyingAssets = _optimizedConvertToAssets(shares, sharePrice);
         assets = _convertFromUnderlying(_asset, underlyingAssets);
         
         // Calculate the withdrawal incentive fee directly in asset units
@@ -259,8 +293,7 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
 
         // Prepare values for calculations
         uint256 totalShares;
-        uint256 _totalAssets = totalAssets();
-        uint256 _totalSupply = totalSupply();
+        uint256 sharePrice = getSharePrice();
         uint256 withdrawalFeeRate = getFees().withdrawalFee;
         uint256[] memory result = new uint256[](length);
         for (uint256 i; i < length; ) {
@@ -268,7 +301,7 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
             address _asset = assets[i];
             uint256 _shares = shares[i];
             address _controller = controllers[i];
-            uint256 underlyingAssets = _optimizedConvertToAssets(_shares, _totalAssets, _totalSupply);
+            uint256 underlyingAssets = _optimizedConvertToAssets(_shares, sharePrice);
             uint256 convertedAssets = _convertFromUnderlying(_asset, underlyingAssets);
 
             // Calculate and transfer withdrawal fee (in asset units)
@@ -398,8 +431,8 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
     /// @dev Struct wrapping total assets, supply and share value to optimize fee calculations
     struct Totals {
         uint256 totalAssets;
-        uint256 totalSupply;
-        uint256 shareValue;
+        uint256 totalShares;
+        uint256 sharePrice;
     }
 
     function _setFees(Fees memory newFees) internal {
@@ -434,8 +467,8 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
         uint256 totalFeesInAssets = managementFee + performanceFee;
 
         // Update highwater mark
-        if (totals.shareValue > fees.highwaterMark) {
-            _getUltraVaultStorage().fees.highwaterMark = totals.shareValue;
+        if (totals.sharePrice > fees.highwaterMark) {
+            _getUltraVaultStorage().fees.highwaterMark = totals.sharePrice;
         }
         // Collect fees as shares if non-zero
         if (totalFeesInAssets > 0) {
@@ -443,7 +476,7 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
             _getUltraVaultStorage().fees.lastUpdateTimestamp = uint64(block.timestamp);
 
             // Convert fees to shares
-            uint256 feesInShares = _optimizedConvertToShares(totalFeesInAssets, totals.totalAssets, totals.totalSupply);
+            uint256 feesInShares = _optimizedConvertToShares(totalFeesInAssets, totals.sharePrice);
 
             // Mint shares to fee recipient
             _mint(feeRecipient(), feesInShares);
@@ -453,19 +486,19 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
                 managementFee, 
                 performanceFee, 
                 totals.totalAssets, 
-                totals.totalSupply, 
-                totals.shareValue
+                totals.totalShares, 
+                totals.sharePrice
             );
         }
     }
 
     function _snapshotTotals() internal view returns (Totals memory) {
-        uint256 _totalAssets = totalAssets();
-        uint256 _totalSupply = totalSupply();
+        uint256 sharePrice = getSharePrice();
+        uint256 totalShares = totalSupply();
         return Totals({
-            totalAssets: _totalAssets,
-            totalSupply: _totalSupply,
-            shareValue: _optimizedConvertToAssets(10 ** decimals(), _totalAssets, _totalSupply)
+            totalAssets: _optimizedConvertToAssets(totalShares, sharePrice),
+            totalShares: totalShares,
+            sharePrice: sharePrice
         });
     }
 
@@ -477,11 +510,11 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
         Totals memory totals
     ) internal view returns (uint256) {
         uint256 performanceFee = fees.performanceFee;
-        if (performanceFee == 0 || totals.shareValue <= fees.highwaterMark) {
+        if (performanceFee == 0 || totals.sharePrice <= fees.highwaterMark) {
             return 0;
         }
         return performanceFee.mulDivDown(
-            (totals.shareValue - fees.highwaterMark) * totals.totalSupply,
+            (totals.sharePrice - fees.highwaterMark) * totals.totalShares,
             (10 ** (18 + decimals()))
         );
     }

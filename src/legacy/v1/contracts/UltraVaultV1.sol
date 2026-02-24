@@ -3,7 +3,7 @@ pragma solidity 0.8.28;
 
 import { SafeERC20, IERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import { IERC20Metadata } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
-import { IPriceSource } from "src/interfaces/IPriceSource.sol";
+import { IPriceSourceV1 } from "src/legacy/v1/interfaces/IPriceSourceV1.sol";
 import { Fees, IUltraVaultV1Events, IUltraVaultV1Errors } from "src/legacy/v1/interfaces/IUltraVaultV1.sol";
 import { AddressUpdateProposal } from "src/utils/AddressUpdates.sol";
 import { FixedPointMathLib } from "src/utils/FixedPointMathLib.sol";
@@ -59,7 +59,7 @@ contract UltraVaultV1 is BaseControlledAsyncRedeemV1, IUltraVaultV1Events, IUltr
     /// @custom:storage-location erc7201:ultrayield.storage.UltraVault
     struct UltraVaultStorage {
         address fundsHolder;
-        IPriceSource oracle;
+        IPriceSourceV1 oracle;
         AddressUpdateProposal proposedFundsHolder;
         AddressUpdateProposal proposedOracle;
         address feeRecipient;
@@ -91,7 +91,7 @@ contract UltraVaultV1 is BaseControlledAsyncRedeemV1, IUltraVaultV1Events, IUltr
 
         UltraVaultStorage storage $ = _getUltraVaultStorage();
         $.fundsHolder = params.fundsHolder;
-        $.oracle = IPriceSource(params.oracle);
+        $.oracle = IPriceSourceV1(params.oracle);
         _pause();
         
         // Calling at the end since we need oracle to be setup
@@ -118,7 +118,7 @@ contract UltraVaultV1 is BaseControlledAsyncRedeemV1, IUltraVaultV1Events, IUltr
     }
 
     /// @notice Get the oracle address
-    function oracle() public view returns (IPriceSource) {
+    function oracle() public view returns (IPriceSourceV1) {
         return _getUltraVaultStorage().oracle;
     }
 
@@ -360,7 +360,7 @@ contract UltraVaultV1 is BaseControlledAsyncRedeemV1, IUltraVaultV1Events, IUltr
         emit OracleUpdated(address(oracle()), newOracle);
 
         UltraVaultStorage storage $ = _getUltraVaultStorage();
-        $.oracle = IPriceSource(newOracle);
+        $.oracle = IPriceSourceV1(newOracle);
         delete $.proposedOracle;
 
         // Pause to manually check the setup by operators

@@ -2,7 +2,7 @@
 pragma solidity >=0.8.0;
 
 import { IBaseVaultV1, IBaseVaultV1Events, IBaseVaultV1Errors } from "src/legacy/v1/interfaces/IBaseVaultV1.sol";
-import { IPriceSource } from "src/interfaces/IPriceSource.sol";
+import { IPriceSourceV1 } from "src/legacy/v1/interfaces/IPriceSourceV1.sol";
 
 /// @dev Vault fee configuration
 struct Fees {
@@ -58,7 +58,7 @@ interface IUltraVaultV1 is IBaseVaultV1, IUltraVaultV1Events, IUltraVaultV1Error
 
     /// @notice Returns the oracle address of the vault
     /// @return oracle The address of the oracle
-    function oracle() external view returns (IPriceSource);
+    function oracle() external view returns (IPriceSourceV1);
 
     /// @notice Returns the current fees configuration
     /// @return fees The current fees configuration

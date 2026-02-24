@@ -30,8 +30,8 @@ interface IUltraVaultEvents is IBaseVaultEvents {
         uint256 managementFee,
         uint256 performanceFee,
         uint256 totalAssets,
-        uint256 totalSupply,
-        uint256 shareValue
+        uint256 totalShares,
+        uint256 sharePrice
     );
     event WithdrawalFeeCollected(uint256 amount);
 }

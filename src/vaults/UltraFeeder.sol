@@ -93,11 +93,7 @@ contract UltraFeeder is BaseControlledAsyncRedeem, IUltraFeederErrors {
     /// @notice Returns the total assets in the vault
     /// @return The total assets in the vault
     function totalAssets() public view override returns (uint256) {
-        return mainVault().oracle().getQuote(
-            totalSupply(),
-            address(mainVault()),
-            address(asset())
-        );
+        return mainVault().convertToAssets(totalSupply());
     }
 
     ////////////////////////
