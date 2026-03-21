@@ -16,6 +16,8 @@ struct Fees {
     uint64 lastUpdateTimestamp;
     // High water mark for performance fees
     uint256 highwaterMark;
+    // Instant redeem premium fee rate (on top of withdrawal fee) (100% = 1e18)
+    uint64 instantRedeemPremium;
 }
 
 interface IUltraVaultEvents is IBaseVaultEvents {
@@ -27,12 +29,21 @@ interface IUltraVaultEvents is IBaseVaultEvents {
     event FeesUpdated(Fees oldFees, Fees newFees);
     event FeesCollected(uint256 shares, uint256 managementFee, uint256 performanceFee);
     event WithdrawalFeeCollected(uint256 amount);
+    event InstantRedeemExecuted(
+        address indexed controller,
+        address indexed receiver,
+        address indexed asset,
+        uint256 shares,
+        uint256 assets,
+        uint256 fee
+    );
 }
 
 interface IUltraVaultErrors is IBaseVaultErrors {
     error ZeroFeeRecipientAddress();
     error CannotSetBalancesInNonEmptyVault();
     error InvalidFees();
+    error InsufficientLiquidity(address asset, uint256 requested, uint256 available);
 }
 
 /// @title IUltraVault
@@ -68,6 +79,31 @@ interface IUltraVault is IBaseVault {
     
     /// @notice Get the proposed oracle
     function proposedOracle() external view returns (address, uint256);
+
+    ////////////////////
+    // Instant Redeem //
+    ////////////////////
+
+    // TODO: add doc
+    function maxInstantRedeem(
+        address asset,
+        address controller
+    ) external view returns (uint256 assets);
+
+    // TODO: add doc
+    function previewInstantRedeem(
+        address _asset,
+        uint256 shares,
+        address controller
+    ) external view returns (uint256 assets);
+
+    // TODO: add doc
+    function instantRedeem(
+        address asset,
+        uint256 shares,
+        address receiver,
+        address controller
+    ) external returns (uint256 assets);
 
     /////////////////////
     // Admin Functions //

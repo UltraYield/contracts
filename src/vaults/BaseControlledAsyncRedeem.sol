@@ -714,8 +714,7 @@ abstract contract BaseControlledAsyncRedeem is
         address controller,
         address owner
     ) external returns (uint256 requestId) {
-        // Validate that the asset is supported by the rate provider
-        require(rateProvider().isSupported(_asset), AssetNotSupported());
+        _ensureIsSupported(_asset);
         return _requestRedeemOfAsset(_asset, shares, controller, owner);
     }
 
@@ -898,6 +897,10 @@ abstract contract BaseControlledAsyncRedeem is
         afterFulfillRedeem(_asset, assets, shares, controller);
 
         return assets;
+    }
+
+    function _ensureIsSupported(address _asset) internal view {
+        require(rateProvider().isSupported(_asset), AssetNotSupported());
     }
 
     /////////////////////

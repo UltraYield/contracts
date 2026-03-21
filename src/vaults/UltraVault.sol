@@ -46,13 +46,30 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
     ///////////////
 
     uint256 internal constant ONE_YEAR = 365 * 24 * 60 * 60; // 31_536_000 seconds
-    uint256 internal constant ONE_UNIT = 1e18; // Default scale
-    uint64 internal constant ONE_PERCENT = uint64(ONE_UNIT) / 100;
+    uint256 internal constant SCALE = 1e18; // Default scale
+    uint64 internal constant ONE_PERCENT = uint64(SCALE) / 100;
     uint64 internal constant MAX_PERFORMANCE_FEE = 30 * ONE_PERCENT; // 30%
     uint64 internal constant MAX_MANAGEMENT_FEE = 5 * ONE_PERCENT; // 5%
     uint64 internal constant MAX_WITHDRAWAL_FEE = ONE_PERCENT; // 1%
     bytes32 internal constant FUNDS_HOLDER_KEY = keccak256("fundsHolder");
     bytes32 internal constant ORACLE_KEY = keccak256("oracle");
+    ////////////////
+    // Data Types //
+    ////////////////
+
+    /// @dev Vault fee storage slot
+    struct FeesSlot {
+        // 1st slot: 64 * 4 = 256 bits
+        uint64 performanceFee;
+        uint64 managementFee;
+        uint64 withdrawalFee;
+        uint64 lastUpdateTimestamp;
+        // 2nd slot: 256 bits
+        uint256 highwaterMark;
+        // 3rd slot: 64 + 192 = 256 bits
+        uint64 instantRedeemPremium;
+        uint192 __gap;
+    }
 
     /////////////
     // Storage //
@@ -65,7 +82,7 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
         AddressUpdateProposal __proposedFundsHolder; // Deprecated in V2
         AddressUpdateProposal __proposedOracle; // Deprecated in V2
         address feeRecipient;
-        Fees fees;
+        FeesSlot fees;
     }
 
     function _getUltraVaultStorage() private pure returns (UltraVaultStorage storage $) {
@@ -200,6 +217,64 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
         assets = super._mintWithAsset(_asset, shares, receiver);
     }
 
+    ////////////////////
+    // Instant Redeem //
+    ////////////////////
+
+    // TODO: add doc
+    function maxInstantRedeem(
+        address _asset,
+        address controller
+    ) external view returns (uint256 shares) {
+        uint256 liquidity = IERC20(_asset).balanceOf(fundsHolder());
+        uint256 shareBalance = balanceOf(controller);
+        if (liquidity == 0 || shareBalance == 0) {
+            return 0;
+        }
+        Fees memory fees = getFees();
+        uint256 instantRedeemFeeRate = fees.withdrawalFee + fees.instantRedeemPremium;
+        uint256 maxAssetsBeforeFee = liquidity.mulDivDown(SCALE, SCALE - instantRedeemFeeRate);
+        uint256 maxShares = convertToShares(maxAssetsBeforeFee);
+        return maxShares < shareBalance ? maxShares : shareBalance;
+    }
+
+    // TODO: add doc
+    function previewInstantRedeem(
+        address _asset,
+        uint256 shares,
+        address controller
+    ) public view returns (uint256 assets) {
+        // TODO: implement
+    }
+
+    // TODO: add doc
+    function instantRedeem(
+        address _asset,
+        uint256 shares,
+        address receiver,
+        address controller
+    ) external checkAccess(controller) whenNotPaused returns (uint256 assets) {
+        _ensureIsSupported(_asset);
+        require(shares != 0, NothingToRedeem());
+        require(balanceOf(controller) >= shares, InsufficientBalance());
+
+        beforeRequestRedeem(_asset, shares, controller, controller);
+        _spendAllowance(controller, address(this), shares);
+
+        // calculate instant redeem fee in shares
+        // transfer fee in shares to fee recipient
+        // burn "shares minus redeem fee" amount of shares
+        uint256 underlyingAssets = convertToAssets(shares);
+        assets = _convertFromUnderlying(_asset, underlyingAssets);
+        // emit InstantRedeemExecuted event
+
+        uint256 availableLiquidity = IERC20(_asset).balanceOf(fundsHolder());
+        if (assets < availableLiquidity) {
+            revert InsufficientLiquidity(_asset, assets, availableLiquidity);
+        }
+        IERC20(_asset).safeTransferFrom(fundsHolder(), receiver, assets);
+    }
+
     ////////////////////////
     // Redeem Fulfillment //
     ////////////////////////
@@ -222,7 +297,7 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
         assets = _convertFromUnderlying(_asset, underlyingAssets);
         
         // Calculate the withdrawal incentive fee directly in asset units
-        uint256 withdrawalFee = assets.mulDivDown(getFees().withdrawalFee, ONE_UNIT);
+        uint256 withdrawalFee = assets.mulDivDown(getFees().withdrawalFee, SCALE);
 
         // Fulfill request with asset units (base contract expects asset units)
         uint256 withdrawalAmount = assets - withdrawalFee;
@@ -272,7 +347,7 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
             uint256 convertedAssets = _convertFromUnderlying(_asset, underlyingAssets);
 
             // Calculate and transfer withdrawal fee (in asset units)
-            uint256 withdrawalFee = convertedAssets.mulDivDown(withdrawalFeeRate, ONE_UNIT);
+            uint256 withdrawalFee = convertedAssets.mulDivDown(withdrawalFeeRate, SCALE);
             _transferWithdrawalFeeInAsset(_asset, withdrawalFee);
 
             // Fulfill redeem
@@ -340,7 +415,15 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
 
     /// @notice Get vault fee parameters
     function getFees() public view returns (Fees memory) {
-        return _getUltraVaultStorage().fees;
+        FeesSlot memory slot = _getUltraVaultStorage().fees;
+        return Fees({
+            performanceFee: slot.performanceFee,
+            managementFee: slot.managementFee,
+            withdrawalFee: slot.withdrawalFee,
+            lastUpdateTimestamp: slot.lastUpdateTimestamp,
+            highwaterMark: slot.highwaterMark,
+            instantRedeemPremium: slot.instantRedeemPremium
+        });
     }
 
     /// @notice Get vault fee recipient
@@ -358,7 +441,7 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
 
     /// @notice Get the withdrawal fee
     function calculateWithdrawalFee(uint256 assets) external view returns (uint256) {
-        return assets.mulDivDown(getFees().withdrawalFee, ONE_UNIT);
+        return assets.mulDivDown(getFees().withdrawalFee, SCALE);
     }
 
     /// @notice Update vault's fee recipient
@@ -403,6 +486,7 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
     }
 
     function _setFees(Fees memory newFees) internal {
+        // Validate fees
         require(
             newFees.performanceFee <= MAX_PERFORMANCE_FEE &&
             newFees.managementFee <= MAX_MANAGEMENT_FEE &&
@@ -418,7 +502,15 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
         } else {
             newFees.highwaterMark = currentFees.highwaterMark;
         }
-        _getUltraVaultStorage().fees = newFees;
+        _getUltraVaultStorage().fees = FeesSlot({
+            performanceFee: newFees.performanceFee,
+            managementFee: newFees.managementFee,
+            withdrawalFee: newFees.withdrawalFee,
+            lastUpdateTimestamp: newFees.lastUpdateTimestamp,
+            highwaterMark: newFees.highwaterMark,
+            instantRedeemPremium: newFees.instantRedeemPremium,
+            __gap: 0
+        });
 
         emit FeesUpdated(currentFees, newFees);
     }
@@ -488,7 +580,7 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
             return 0;
         }
         uint256 timePassed = block.timestamp - fees.lastUpdateTimestamp;
-        return managementFee.mulDivDown(totals.totalAssets * timePassed, ONE_YEAR) / ONE_UNIT;
+        return managementFee.mulDivDown(totals.totalAssets * timePassed, ONE_YEAR) / SCALE;
     }
 
     /// @notice Transfer withdrawal fee to fee recipient
