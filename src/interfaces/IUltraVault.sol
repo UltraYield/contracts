@@ -84,20 +84,41 @@ interface IUltraVault is IBaseVault {
     // Instant Redeem //
     ////////////////////
 
-    // TODO: add doc
+    /// @notice Returns the available liquidity for instant redeem of a given asset
+    /// @param asset The asset address to check liquidity for
+    /// @return liquidity The available liquidity (minimum of fundsHolder balance and allowance to this vault)
+    function getLiquidity(address asset) external view returns (uint256 liquidity);
+
+    /// @notice Returns the maximum shares a controller can instant-redeem for a given asset
+    /// @dev Considers both the controller's share balance and available liquidity (min of fundsHolder balance and allowance)
+    /// @param asset The asset address to redeem for
+    /// @param controller The address whose shares would be redeemed
+    /// @return shares The maximum redeemable shares
     function maxInstantRedeem(
         address asset,
         address controller
-    ) external view returns (uint256 assets);
+    ) external view returns (uint256 shares);
 
-    // TODO: add doc
+    /// @notice Previews the net assets a receiver would get for instant-redeeming a given number of shares
+    /// @dev Returns gross assets minus the additive fee (withdrawalFee + instantRedeemPremium)
+    /// @param _asset The asset address to receive
+    /// @param shares The number of shares to redeem
+    /// @param controller The controller address (reserved for future per-user limits)
+    /// @return assets The net asset amount after fee deduction
     function previewInstantRedeem(
         address _asset,
         uint256 shares,
         address controller
     ) external view returns (uint256 assets);
 
-    // TODO: add doc
+    /// @notice Instantly redeems shares for assets, bypassing the async redemption queue
+    /// @dev Burns shares from controller, transfers net assets to receiver, transfers fee to feeRecipient.
+    ///      Collects accrued fees before processing. Reverts if insufficient liquidity.
+    /// @param asset The asset address to receive
+    /// @param shares The number of shares to redeem
+    /// @param receiver The address to receive the net assets
+    /// @param controller The address whose shares are burned
+    /// @return assets The net asset amount transferred to receiver (after fee deduction)
     function instantRedeem(
         address asset,
         uint256 shares,
