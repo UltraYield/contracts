@@ -6,7 +6,7 @@ import { IERC7540Operator } from "ERC-7540/interfaces/IERC7540.sol";
 import { IRedeemAccounting } from "src/interfaces/IRedeemAccounting.sol";
 import { IAddressUpdatableErrors } from "src/interfaces/IAddressUpdatableErrors.sol";
 import { IUltraVaultRateProvider } from "src/interfaces/IUltraVaultRateProvider.sol";
-import { IAccessControlDefaultAdminRules } from "@openzeppelin/contracts/access/extensions/IAccessControlDefaultAdminRules.sol";
+import { IAccessControl } from "@openzeppelin/contracts/access/IAccessControl.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { IERC4626 } from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import { IERC165 } from "@openzeppelin/contracts/interfaces/IERC165.sol";
@@ -59,7 +59,7 @@ interface IBaseVault is
   IERC20,
   IERC165,
   IERC4626,
-  IAccessControlDefaultAdminRules,
+  IAccessControl,
   IPausable,
   IERC7540Operator,
   IRedeemAccounting 
@@ -81,11 +81,11 @@ interface IBaseVault is
     function proposedRateProvider() external view returns (address, uint256);
 
     /// @notice Converts assets to underlying
-    /// @param _asset The asset to convert
+    /// @param asset The asset to convert
     /// @param assets The amount of assets to convert
     /// @return baseAssets The amount of underlying received
     function convertToUnderlying(
-        address _asset,
+        address asset,
         uint256 assets
     ) external view returns (uint256 baseAssets);
 

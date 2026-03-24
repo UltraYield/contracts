@@ -210,8 +210,8 @@ abstract contract BaseControlledAsyncRedeem is
         uint256 shares,
         uint256 _totalAssets,
         uint256 _totalSupply
-    ) internal view returns (uint256 assets) {
-        return shares.mulDiv(_totalAssets + 1, _totalSupply + 10 ** _decimalsOffset(), Math.Rounding.Floor);
+    ) internal pure returns (uint256 assets) {
+        return shares.mulDiv(_totalAssets + 1, _totalSupply + 1, Math.Rounding.Floor);
     }
 
     /// @dev Optimized function mirroring `convertToShares` in OZ ERC4626 v5.4.0
@@ -220,8 +220,8 @@ abstract contract BaseControlledAsyncRedeem is
         uint256 assets,
         uint256 _totalAssets,
         uint256 _totalSupply
-    ) internal view returns (uint256 shares) {
-        return assets.mulDiv(_totalSupply + 10 ** _decimalsOffset(), _totalAssets + 1, Math.Rounding.Floor);
+    ) internal pure returns (uint256 shares) {
+        return assets.mulDiv(_totalSupply + 1, _totalAssets + 1, Math.Rounding.Floor);
     }
 
     ////////////////////
@@ -584,7 +584,7 @@ abstract contract BaseControlledAsyncRedeem is
     function previewDeposit(
         uint256 assets
     ) public view virtual override returns (uint256) {
-        return paused() ? 0 : super.previewDeposit(assets);
+        return previewDepositForAsset(asset(), assets);
     }
 
     /// @notice Preview shares for deposit
@@ -608,7 +608,7 @@ abstract contract BaseControlledAsyncRedeem is
     function previewMint(
         uint256 shares
     ) public view virtual override returns (uint256) {
-        return paused() ? 0 : super.previewMint(shares);
+        return previewMintForAsset(asset(), shares);
     }
 
     /// @notice Preview assets for mint
@@ -665,7 +665,7 @@ abstract contract BaseControlledAsyncRedeem is
     function maxWithdraw(
         address controller
     ) public view override returns (uint256) {
-        return _getClaimableRedeem(controller, asset()).assets;
+        return maxWithdrawForAsset(asset(), controller);
     }
 
     /// @notice Get max assets for withdraw
@@ -675,7 +675,7 @@ abstract contract BaseControlledAsyncRedeem is
     function maxWithdrawForAsset(
         address _asset,
         address controller
-    ) external view returns (uint256) {
+    ) public view returns (uint256) {
         return _getClaimableRedeem(controller, _asset).assets;
     }
 
@@ -684,7 +684,7 @@ abstract contract BaseControlledAsyncRedeem is
     function maxRedeem(
         address controller
     ) public view override returns (uint256) {
-        return _getClaimableRedeem(controller, asset()).shares;
+        return maxRedeemForAsset(asset(), controller);
     }
 
     /// @notice Get max shares for redeem
@@ -694,7 +694,7 @@ abstract contract BaseControlledAsyncRedeem is
     function maxRedeemForAsset(
         address _asset,
         address controller
-    ) external view returns (uint256) {
+    ) public view returns (uint256) {
         return _getClaimableRedeem(controller, _asset).shares;
     }
 
