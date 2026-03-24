@@ -250,7 +250,8 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
         Fees memory fees = getFees();
         uint256 instantRedeemFeeRate = fees.withdrawalFee + fees.instantRedeemPremium;
         uint256 maxGrossAssets = liquidity.mulDivDown(SCALE, SCALE - instantRedeemFeeRate);
-        uint256 maxShares = convertToShares(maxGrossAssets);
+        uint256 maxGrossUnderlyingAssets = _convertToUnderlying(_asset, maxGrossAssets);
+        uint256 maxShares = convertToShares(maxGrossUnderlyingAssets);
         return maxShares < shareBalance ? maxShares : shareBalance;
     }
 
@@ -291,6 +292,7 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
 
         // Prepare instant redeem amounts
         (uint256 grossAssets, uint256 fee, uint256 netAssets) = _previewInstantRedeem(_asset, shares);
+        require(netAssets != 0, NothingToWithdraw());
 
         // Check liquidity
         uint256 availableLiquidity = getLiquidity(_asset);
