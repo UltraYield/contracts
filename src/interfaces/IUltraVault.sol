@@ -164,14 +164,4 @@ interface IUltraVault is IBaseVault {
     /// @dev Pauses vault to ensure oracle setup and prevent deposits with faulty prices
     /// @dev Oracle must be switched before unpausing
     function acceptProposedOracle(address newOracle) external;
-
-    /// @notice Setup initial balances in the vault without depositing the funds
-    /// @notice We expect the funds to be separately sent to funds holder
-    /// @param users Array of users to setup balances
-    /// @param shares Shares of respective users
-    /// @dev Reverts if arrays length mismatch
-    function setupInitialBalances(
-        address[] memory users,
-        uint256[] memory shares
-    ) external;
 } 

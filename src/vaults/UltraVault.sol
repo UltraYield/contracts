@@ -149,27 +149,6 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
         return _getAddressUpdateProposal(ORACLE_KEY);
     }
 
-    ////////////////////////////
-    // Initial Balances Setup //
-    ////////////////////////////
-
-    /// @notice Setup initial balances in the vault without depositing the funds
-    /// @notice We expect the funds to be separately sent to funds holder
-    /// @param users Array of users to setup balances
-    /// @param shares Shares of respective users
-    /// @dev Reverts if arrays length mismatch
-    function setupInitialBalances(
-        address[] memory users,
-        uint256[] memory shares
-    ) external onlyOwner {
-        require(totalSupply() == 0, CannotSetBalancesInNonEmptyVault());
-        require(users.length == shares.length, InputLengthMismatch());
-
-        for (uint256 i; i < users.length; i++) {
-            _mint(users[i], shares[i]);
-        }
-    }
-
     ////////////////
     // Accounting //
     ////////////////
