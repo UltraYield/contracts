@@ -103,12 +103,10 @@ interface IUltraVault is IBaseVault {
     /// @dev Returns gross assets minus the additive fee (withdrawalFee + instantRedeemPremium)
     /// @param _asset The asset address to receive
     /// @param shares The number of shares to redeem
-    /// @param controller The controller address (reserved for future per-user limits)
     /// @return assets The net asset amount after fee deduction
     function previewInstantRedeem(
         address _asset,
-        uint256 shares,
-        address controller
+        uint256 shares
     ) external view returns (uint256 assets);
 
     /// @notice Instantly redeems shares for assets, bypassing the async redemption queue
