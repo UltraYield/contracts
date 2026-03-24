@@ -51,6 +51,7 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
     uint64 internal constant MAX_PERFORMANCE_FEE = 30 * ONE_PERCENT; // 30%
     uint64 internal constant MAX_MANAGEMENT_FEE = 5 * ONE_PERCENT; // 5%
     uint64 internal constant MAX_WITHDRAWAL_FEE = ONE_PERCENT; // 1%
+    uint64 internal constant MAX_INSTANT_REDEEM_PREMIUM = ONE_PERCENT / 2; // 0.5%
     bytes32 internal constant FUNDS_HOLDER_KEY = keccak256("fundsHolder");
     bytes32 internal constant ORACLE_KEY = keccak256("oracle");
     ////////////////
@@ -221,58 +222,97 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
     // Instant Redeem //
     ////////////////////
 
-    // TODO: add doc
+    /// @notice Returns the available liquidity for instant redeem of a given asset
+    /// @param _asset The asset address to check liquidity for
+    /// @return liquidity The available liquidity (minimum of fundsHolder balance and allowance to this vault)
+    function getLiquidity(address _asset) public view returns (uint256 liquidity) {
+        address holder = fundsHolder();
+        uint256 balance = IERC20(_asset).balanceOf(holder);
+        uint256 allowance = IERC20(_asset).allowance(holder, address(this));
+        liquidity = balance < allowance ? balance : allowance;
+    }
+
+    /// @notice Returns the maximum shares a controller can instant-redeem for a given asset
+    /// @dev Considers both the controller's share balance and available liquidity.
+    ///      Computes max gross assets from liquidity using fee rate, converts to shares, and caps at controller balance.
+    /// @param _asset The asset address to redeem for
+    /// @param controller The address whose shares would be redeemed
+    /// @return shares The maximum redeemable shares
     function maxInstantRedeem(
         address _asset,
         address controller
     ) external view returns (uint256 shares) {
-        uint256 liquidity = IERC20(_asset).balanceOf(fundsHolder());
+        uint256 liquidity = getLiquidity(_asset);
         uint256 shareBalance = balanceOf(controller);
         if (liquidity == 0 || shareBalance == 0) {
             return 0;
         }
         Fees memory fees = getFees();
         uint256 instantRedeemFeeRate = fees.withdrawalFee + fees.instantRedeemPremium;
-        uint256 maxAssetsBeforeFee = liquidity.mulDivDown(SCALE, SCALE - instantRedeemFeeRate);
-        uint256 maxShares = convertToShares(maxAssetsBeforeFee);
+        uint256 maxGrossAssets = liquidity.mulDivDown(SCALE, SCALE - instantRedeemFeeRate);
+        uint256 maxShares = convertToShares(maxGrossAssets);
         return maxShares < shareBalance ? maxShares : shareBalance;
     }
 
-    // TODO: add doc
+    /// @notice Previews the net assets a receiver would get for instant-redeeming a given number of shares
+    /// @dev Converts shares to gross assets via oracle, then deducts the additive instant redeem fee
+    /// @param _asset The asset address to receive
+    /// @param shares The number of shares to redeem
+    /// @return assets The net asset amount after fee deduction
     function previewInstantRedeem(
         address _asset,
-        uint256 shares,
-        address controller
-    ) public view returns (uint256 assets) {
-        // TODO: implement
+        uint256 shares
+    ) public view returns (uint256) {
+        (, , uint256 netAssets) = _previewInstantRedeem(_asset, shares);
+        return netAssets;
     }
 
-    // TODO: add doc
+    /// @notice Instantly redeems shares for assets, bypassing the async redemption queue
+    /// @dev Collects accrued fees, calculates additive fee (withdrawalFee + instantRedeemPremium),
+    ///      burns shares from controller, transfers net assets to receiver, transfers fee to feeRecipient.
+    ///      Reverts if insufficient liquidity in fundsHolder.
+    /// @param _asset The asset address to receive
+    /// @param shares The number of shares to redeem
+    /// @param receiver The address to receive the net assets
+    /// @param controller The address whose shares are burned
+    /// @return assets The net asset amount transferred to receiver (after fee deduction)
     function instantRedeem(
         address _asset,
         uint256 shares,
         address receiver,
         address controller
-    ) external checkAccess(controller) whenNotPaused returns (uint256 assets) {
+    ) external checkAccess(controller) whenNotPaused returns (uint256) {
         _ensureIsSupported(_asset);
         require(shares != 0, NothingToRedeem());
         require(balanceOf(controller) >= shares, InsufficientBalance());
 
-        beforeRequestRedeem(_asset, shares, controller, controller);
-        _spendAllowance(controller, address(this), shares);
+        // Collect accrued fees before processing (consistent with deposits and fulfillRedeem)
+        _collectFees();
 
-        // calculate instant redeem fee in shares
-        // transfer fee in shares to fee recipient
-        // burn "shares minus redeem fee" amount of shares
-        uint256 underlyingAssets = convertToAssets(shares);
-        assets = _convertFromUnderlying(_asset, underlyingAssets);
-        // emit InstantRedeemExecuted event
+        // Prepare instant redeem amounts
+        (uint256 grossAssets, uint256 fee, uint256 netAssets) = _previewInstantRedeem(_asset, shares);
 
-        uint256 availableLiquidity = IERC20(_asset).balanceOf(fundsHolder());
-        if (assets < availableLiquidity) {
-            revert InsufficientLiquidity(_asset, assets, availableLiquidity);
+        // Check liquidity
+        uint256 availableLiquidity = getLiquidity(_asset);
+        if (grossAssets > availableLiquidity) {
+            revert InsufficientLiquidity(_asset, grossAssets, availableLiquidity);
         }
-        IERC20(_asset).safeTransferFrom(fundsHolder(), receiver, assets);
+
+        // Burn shares from controller
+        _burn(controller, shares);
+
+        // Transfer net assets to receiver
+        address holder = fundsHolder();
+        IERC20(_asset).safeTransferFrom(holder, receiver, netAssets);
+
+        // Transfer fee to feeRecipient
+        if (fee > 0) {
+            IERC20(_asset).safeTransferFrom(holder, feeRecipient(), fee);
+        }
+
+        emit InstantRedeemExecuted(controller, receiver, _asset, shares, netAssets, fee);
+
+        return netAssets;
     }
 
     ////////////////////////
@@ -490,7 +530,8 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
         require(
             newFees.performanceFee <= MAX_PERFORMANCE_FEE &&
             newFees.managementFee <= MAX_MANAGEMENT_FEE &&
-            newFees.withdrawalFee <= MAX_WITHDRAWAL_FEE,
+            newFees.withdrawalFee <= MAX_WITHDRAWAL_FEE &&
+            newFees.instantRedeemPremium <= MAX_INSTANT_REDEEM_PREMIUM,
             InvalidFees()
         );
 
@@ -581,6 +622,26 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
         }
         uint256 timePassed = block.timestamp - fees.lastUpdateTimestamp;
         return managementFee.mulDivDown(totals.totalAssets * timePassed, ONE_YEAR) / SCALE;
+    }
+
+    function _previewInstantRedeem(address _asset, uint256 shares) 
+        internal 
+        view 
+        returns (uint256 grossAssets, uint256 fee, uint256 netAssets)
+    {
+        uint256 underlyingAssets = convertToAssets(shares);
+        grossAssets = _convertFromUnderlying(_asset, underlyingAssets);
+        fee = _calculateInstantRedeemFee(grossAssets);
+        netAssets = grossAssets - fee;
+    }
+
+    /// @dev Calculate the instant redeem fee for a given gross asset amount
+    /// @param grossAssets The gross asset amount before fee deduction
+    /// @return fee The fee amount in assets
+    function _calculateInstantRedeemFee(uint256 grossAssets) internal view returns (uint256) {
+        Fees memory fees = getFees();
+        uint256 instantRedeemFeeRate = fees.withdrawalFee + fees.instantRedeemPremium;
+        return grossAssets.mulDivDown(instantRedeemFeeRate, SCALE);
     }
 
     /// @notice Transfer withdrawal fee to fee recipient
