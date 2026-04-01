@@ -53,7 +53,7 @@ library RedeemQueueLib {
     function getPendingRedeem(
         address user,
         address token
-    ) public view returns (PendingRedeem memory) {
+    ) external view returns (PendingRedeem memory) {
         PendingRedeemSlot storage redeem = _getStorage().pendingRedeems[user][token];
         return PendingRedeem({
             shares: redeem.shares,
@@ -64,7 +64,7 @@ library RedeemQueueLib {
     function getClaimableRedeem(
         address user,
         address token
-    ) public view returns (ClaimableRedeem memory) {
+    ) external view returns (ClaimableRedeem memory) {
         ClaimableRedeemSlot storage redeem = _getStorage().claimableRedeems[user][token];
         return ClaimableRedeem({
             shares: redeem.shares,
@@ -80,7 +80,7 @@ library RedeemQueueLib {
         address user,
         address token,
         uint256 assets
-    ) public view returns (uint256 shares) {
+    ) external view returns (uint256 shares) {
         ClaimableRedeemSlot storage redeem = _getStorage().claimableRedeems[user][token];
         if (assets == redeem.assets) {
             return redeem.shares;
@@ -94,7 +94,7 @@ library RedeemQueueLib {
         address user,
         address token,
         uint256 shares
-    ) public view returns (uint256 assets) {
+    ) external view returns (uint256 assets) {
         ClaimableRedeemSlot storage redeem = _getStorage().claimableRedeems[user][token];
         if (shares == redeem.shares) {
             return redeem.assets;
@@ -112,7 +112,7 @@ library RedeemQueueLib {
         address user,
         address token,
         uint256 amount
-    ) public {
+    ) external {
         PendingRedeemSlot storage pending = _getStorage().pendingRedeems[user][token];
         uint256 newShares = uint256(pending.shares) + amount;
         require(newShares <= UINT128_MAX, IRedeemQueueErrors.TooManyShares(newShares));
@@ -124,7 +124,7 @@ library RedeemQueueLib {
         address user,
         address token,
         uint256 amount
-    ) public {
+    ) external {
         PendingRedeemSlot storage pending = _getStorage().pendingRedeems[user][token];
         require(amount <= pending.shares, IRedeemQueueErrors.InsufficientPendingShares(pending.shares, amount));
         pending.shares -= uint128(amount);
@@ -142,7 +142,7 @@ library RedeemQueueLib {
         address token,
         uint256 assets,
         uint256 shares
-    ) public {
+    ) external {
         ClaimableRedeemSlot storage redeem = _getStorage().claimableRedeems[user][token];
         uint256 newAssets = uint256(redeem.assets) + assets;
         uint256 newShares = uint256(redeem.shares) + shares;
@@ -157,7 +157,7 @@ library RedeemQueueLib {
         address token,
         uint256 assets,
         uint256 shares
-    ) public {
+    ) external {
         ClaimableRedeemSlot storage redeem = _getStorage().claimableRedeems[user][token];
         require(assets <= redeem.assets, IRedeemQueueErrors.InsufficientClaimableAssets(redeem.assets, assets));
         require(shares <= redeem.shares, IRedeemQueueErrors.InsufficientClaimableShares(redeem.shares, shares));
