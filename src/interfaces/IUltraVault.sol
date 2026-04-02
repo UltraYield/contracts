@@ -180,4 +180,14 @@ interface IUltraVault is IBaseVault {
     /// @notice Accept proposed instant redeem exitpoint
     /// @dev Pauses vault to manually check the setup by operators
     function acceptInstantRedeemExitpoint(address newExitpoint) external;
+
+    /// @notice Setup initial balances in the vault without depositing the funds
+    /// @notice We expect the funds to be separately sent to funds holder
+    /// @param users Array of users to setup balances
+    /// @param shares Shares of respective users
+    /// @dev Reverts if arrays length mismatch
+    function setupInitialBalances(
+        address[] memory users,
+        uint256[] memory shares
+    ) external;
 }
