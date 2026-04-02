@@ -108,8 +108,8 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
     }
 
     /// @notice V1 -> V2 migration hook
-    /// @dev Dev migration only: copies the live V1 contract addresses into the V2 address registry.
-    /// @dev Pending V1 address-update proposals are intentionally not migrated.
+    /// @dev Copies only the live V1 contract addresses into the V2 address registry
+    /// @dev Pending V1 address-update proposals are intentionally not migrated
     function initializeV2() external reinitializer(2) {
         _migrateBaseControlledAsyncRedeemStateFromV1();
 

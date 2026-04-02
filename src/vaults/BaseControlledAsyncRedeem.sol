@@ -76,6 +76,12 @@ abstract contract BaseControlledAsyncRedeem is
         }
     }
 
+    /// @dev Copies the legacy V1 rate provider address into V2 address-update storage
+    function _migrateBaseControlledAsyncRedeemStateFromV1() internal {
+        BaseAsyncRedeemStorage storage $ = _getBaseAsyncRedeemStorage();
+        _migrateAddress(RATE_PROVIDER_KEY, address($.__rateProvider));
+    }
+
     //////////
     // Init //
     //////////
@@ -118,12 +124,6 @@ abstract contract BaseControlledAsyncRedeem is
     /// @return proposedRateProvider The proposed rate provider
     function proposedRateProvider() public view returns (address, uint256) {
         return _getAddressUpdateProposal(RATE_PROVIDER_KEY);
-    }
-
-    /// @dev Copies the legacy V1 rate provider address into V2 address-update storage.
-    function _migrateBaseControlledAsyncRedeemStateFromV1() internal {
-        BaseAsyncRedeemStorage storage $ = _getBaseAsyncRedeemStorage();
-        _migrateAddress(RATE_PROVIDER_KEY, address($.__rateProvider));
     }
 
     //////////////
