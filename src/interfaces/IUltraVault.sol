@@ -25,6 +25,8 @@ interface IUltraVaultEvents is IBaseVaultEvents {
     event FundsHolderChanged(address indexed oldFundsHolder, address indexed newFundsHolder);
     event OracleProposed(address indexed proposedOracle);
     event OracleUpdated(address indexed oldOracle, address indexed newOracle);
+    event InstantRedeemExitpointProposed(address indexed proposedExitpoint);
+    event InstantRedeemExitpointChanged(address indexed oldExitpoint, address indexed newExitpoint);
     event FeesRecipientUpdated(address oldRecipient, address newRecipient);
     event FeesUpdated(Fees oldFees, Fees newFees);
     event FeesCollected(
@@ -87,17 +89,23 @@ interface IUltraVault is IBaseVault {
     /// @notice Get the proposed oracle
     function proposedOracle() external view returns (address, uint256);
 
+    /// @notice Returns the instant redeem exitpoint address
+    function instantRedeemExitpoint() external view returns (address);
+
+    /// @notice Get the proposed instant redeem exitpoint
+    function proposedInstantRedeemExitpoint() external view returns (address, uint256);
+
     ////////////////////
     // Instant Redeem //
     ////////////////////
 
     /// @notice Returns the available liquidity for instant redeem of a given asset
     /// @param asset The asset address to check liquidity for
-    /// @return liquidity The available liquidity (minimum of fundsHolder balance and allowance to this vault)
+    /// @return liquidity The available liquidity (minimum of exitpoint balance and allowance to this vault)
     function getLiquidity(address asset) external view returns (uint256 liquidity);
 
     /// @notice Returns the maximum shares a controller can instant-redeem for a given asset
-    /// @dev Considers both the controller's share balance and available liquidity (min of fundsHolder balance and allowance)
+    /// @dev Considers both the controller's share balance and available liquidity (min of exitpoint balance and allowance)
     /// @param asset The asset address to redeem for
     /// @param controller The address whose shares would be redeemed
     /// @return shares The maximum redeemable shares
@@ -164,4 +172,12 @@ interface IUltraVault is IBaseVault {
     /// @dev Pauses vault to ensure oracle setup and prevent deposits with faulty prices
     /// @dev Oracle must be switched before unpausing
     function acceptProposedOracle(address newOracle) external;
-} 
+
+    /// @notice Propose instant redeem exitpoint change, can be accepted after delay
+    /// @param newExitpoint New exitpoint address
+    function proposeInstantRedeemExitpoint(address newExitpoint) external;
+
+    /// @notice Accept proposed instant redeem exitpoint
+    /// @dev Pauses vault to manually check the setup by operators
+    function acceptInstantRedeemExitpoint(address newExitpoint) external;
+}

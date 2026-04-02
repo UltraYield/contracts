@@ -33,6 +33,8 @@ struct UltraVaultInitParams {
     address oracle;
     // FundsHolder which will manage the assets
     address fundsHolder;
+    // Exitpoint address for instant redeems
+    address instantRedeemExitpoint;
 }
 
 /// @title UltraVault
@@ -54,6 +56,8 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
     uint64 internal constant MAX_INSTANT_REDEEM_PREMIUM = ONE_PERCENT / 2; // 0.5%
     bytes32 internal constant FUNDS_HOLDER_KEY = keccak256("fundsHolder");
     bytes32 internal constant ORACLE_KEY = keccak256("oracle");
+    bytes32 internal constant INSTANT_REDEEM_EXITPOINT_KEY = keccak256("instantRedeemExitpoint");
+
     ////////////////
     // Data Types //
     ////////////////
@@ -109,6 +113,7 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
 
         _initAddress(FUNDS_HOLDER_KEY, params.fundsHolder);
         _initAddress(ORACLE_KEY, params.oracle);
+        _initAddress(INSTANT_REDEEM_EXITPOINT_KEY, params.instantRedeemExitpoint);
         _pause();
         
         // Calling at the end since we need oracle to be setup
@@ -139,6 +144,11 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
         return IPriceSource(_getCurrentAddress(ORACLE_KEY));
     }
 
+    /// @notice Get the instant redeem exitpoint address
+    function instantRedeemExitpoint() public view returns (address) {
+        return _getCurrentAddress(INSTANT_REDEEM_EXITPOINT_KEY);
+    }
+
     /// @notice Get the proposed funds holder
     function proposedFundsHolder() external view returns (address, uint256) {
         return _getAddressUpdateProposal(FUNDS_HOLDER_KEY);
@@ -147,6 +157,11 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
     /// @notice Get the proposed oracle
     function proposedOracle() external view returns (address, uint256) {
         return _getAddressUpdateProposal(ORACLE_KEY);
+    }
+
+    /// @notice Get the proposed instant redeem exitpoint
+    function proposedInstantRedeemExitpoint() external view returns (address, uint256) {
+        return _getAddressUpdateProposal(INSTANT_REDEEM_EXITPOINT_KEY);
     }
 
     ////////////////
@@ -203,12 +218,12 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
 
     /// @notice Returns the available liquidity for instant redeem of a given asset
     /// @param _asset The asset address to check liquidity for
-    /// @return liquidity The available liquidity (minimum of fundsHolder balance and allowance to this vault)
+    /// @return liquidity The available liquidity (minimum of exitpoint balance and allowance to this vault)
     function getLiquidity(address _asset) public view returns (uint256 liquidity) {
-        address holder = fundsHolder();
-        uint256 balance = IERC20(_asset).balanceOf(holder);
-        uint256 allowance = IERC20(_asset).allowance(holder, address(this));
-        liquidity = balance < allowance ? balance : allowance;
+        address exitpoint = instantRedeemExitpoint();
+        uint256 balance = IERC20(_asset).balanceOf(exitpoint);
+        uint256 allowed = IERC20(_asset).allowance(exitpoint, address(this));
+        liquidity = balance < allowed ? balance : allowed;
     }
 
     /// @notice Returns the maximum shares a controller can instant-redeem for a given asset
@@ -250,7 +265,7 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
     /// @notice Instantly redeems shares for assets, bypassing the async redemption queue
     /// @dev Collects accrued fees, calculates additive fee (withdrawalFee + instantRedeemPremium),
     ///      burns shares from controller, transfers net assets to receiver, transfers fee to feeRecipient.
-    ///      Reverts if insufficient liquidity in fundsHolder.
+    ///      Reverts if insufficient liquidity in instantRedeemExitpoint.
     /// @param _asset The asset address to receive
     /// @param shares The number of shares to redeem
     /// @param receiver The address to receive the net assets
@@ -283,12 +298,12 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
         _burn(controller, shares);
 
         // Transfer net assets to receiver
-        address holder = fundsHolder();
-        IERC20(_asset).safeTransferFrom(holder, receiver, netAssets);
+        address exitpoint = instantRedeemExitpoint();
+        IERC20(_asset).safeTransferFrom(exitpoint, receiver, netAssets);
 
         // Transfer fee to feeRecipient
         if (fee > 0) {
-            IERC20(_asset).safeTransferFrom(holder, feeRecipient(), fee);
+            IERC20(_asset).safeTransferFrom(exitpoint, feeRecipient(), fee);
         }
 
         emit InstantRedeemExecuted(controller, receiver, _asset, shares, netAssets, fee);
@@ -425,6 +440,27 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
     function acceptProposedOracle(address newOracle) external onlyOwner {
         address oldOracle = _acceptAddressUpdate(ORACLE_KEY, newOracle);
         emit OracleUpdated(oldOracle, newOracle);
+
+        // Pause to manually check the setup by operators
+        _pause();
+    }
+
+    /////////////////////////////////////////
+    // Instant Redeem Exitpoint Updates //
+    /////////////////////////////////////////
+
+    /// @notice Propose instant redeem exitpoint change, can be accepted after delay
+    /// @param newExitpoint New exitpoint address
+    function proposeInstantRedeemExitpoint(address newExitpoint) external onlyOwner {
+        _proposeAddressUpdate(INSTANT_REDEEM_EXITPOINT_KEY, newExitpoint);
+        emit InstantRedeemExitpointProposed(newExitpoint);
+    }
+
+    /// @notice Accept proposed instant redeem exitpoint
+    /// @dev Pauses vault to manually check the setup by operators
+    function acceptInstantRedeemExitpoint(address newExitpoint) external onlyOwner {
+        address oldExitpoint = _acceptAddressUpdate(INSTANT_REDEEM_EXITPOINT_KEY, newExitpoint);
+        emit InstantRedeemExitpointChanged(oldExitpoint, newExitpoint);
 
         // Pause to manually check the setup by operators
         _pause();
