@@ -133,15 +133,16 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
     /// @notice V1 -> V2 migration hook
     /// @dev Copies only the live V1 contract addresses into the V2 address registry
     /// @dev Pending V1 address-update proposals are intentionally not migrated
-    /// @param instantRedeemExitpoint Address for the new instant redeem exitpoint (not present in V1)
-    function initializeV2(address instantRedeemExitpoint) external reinitializer(2) {
+    /// @param _instantRedeemExitpoint Address for the new instant redeem exitpoint (not present in V1)
+    function initializeV2(address _instantRedeemExitpoint) external reinitializer(2) {
         _migrateBaseControlledAsyncRedeemStateFromV1();
 
         UltraVaultStorage storage $ = _getUltraVaultStorage();
         _migrateAddress(FUNDS_HOLDER_KEY, $.__fundsHolder);
         _migrateAddress(ORACLE_KEY, address($.__oracle));
+        _initAddress(INSTANT_REDEEM_EXITPOINT_KEY, _instantRedeemExitpoint);
 
-        _initAddress(INSTANT_REDEEM_EXITPOINT_KEY, instantRedeemExitpoint);
+        _pause();
     }
 
     /////////////
