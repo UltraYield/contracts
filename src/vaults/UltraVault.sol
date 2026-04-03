@@ -58,24 +58,6 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
     bytes32 internal constant ORACLE_KEY = keccak256("oracle");
     bytes32 internal constant INSTANT_REDEEM_EXITPOINT_KEY = keccak256("instantRedeemExitpoint");
 
-    ////////////////
-    // Data Types //
-    ////////////////
-
-    /// @dev Vault fee storage slot
-    struct FeesSlot {
-        // 1st slot: 64 * 4 = 256 bits
-        uint64 performanceFee;
-        uint64 managementFee;
-        uint64 withdrawalFee;
-        uint64 lastUpdateTimestamp;
-        // 2nd slot: 256 bits
-        uint256 highwaterMark;
-        // 3rd slot: 64 + 192 = 256 bits
-        uint64 instantRedeemPremium;
-        uint192 __gap;
-    }
-
     /////////////
     // Storage //
     /////////////
@@ -87,7 +69,7 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
         AddressUpdateProposal __proposedFundsHolder; // Deprecated in V2
         AddressUpdateProposal __proposedOracle; // Deprecated in V2
         address feeRecipient;
-        FeesSlot fees;
+        Fees fees;
     }
 
     function _getUltraVaultStorage() private pure returns (UltraVaultStorage storage $) {
@@ -508,15 +490,7 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
 
     /// @notice Get vault fee parameters
     function getFees() public view returns (Fees memory) {
-        FeesSlot memory slot = _getUltraVaultStorage().fees;
-        return Fees({
-            performanceFee: slot.performanceFee,
-            managementFee: slot.managementFee,
-            withdrawalFee: slot.withdrawalFee,
-            lastUpdateTimestamp: slot.lastUpdateTimestamp,
-            highwaterMark: slot.highwaterMark,
-            instantRedeemPremium: slot.instantRedeemPremium
-        });
+        return _getUltraVaultStorage().fees;
     }
 
     /// @notice Get vault fee recipient
@@ -596,15 +570,7 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
         } else {
             newFees.highwaterMark = currentFees.highwaterMark;
         }
-        _getUltraVaultStorage().fees = FeesSlot({
-            performanceFee: newFees.performanceFee,
-            managementFee: newFees.managementFee,
-            withdrawalFee: newFees.withdrawalFee,
-            lastUpdateTimestamp: newFees.lastUpdateTimestamp,
-            highwaterMark: newFees.highwaterMark,
-            instantRedeemPremium: newFees.instantRedeemPremium,
-            __gap: 0
-        });
+        _getUltraVaultStorage().fees = newFees;
 
         emit FeesUpdated(currentFees, newFees);
     }
