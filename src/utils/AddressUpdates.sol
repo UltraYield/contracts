@@ -30,7 +30,7 @@ abstract contract AddressUpdatable is IAddressUpdatableErrors {
         mapping(bytes32 => AddressUpdateProposal) proposals;
     }
 
-    function _getStorage() private pure returns (AddressUpdatableStorage storage $) {
+    function _getStorage() internal pure returns (AddressUpdatableStorage storage $) {
         assembly {
             $.slot := ADDRESS_UPDATABLE_STORAGE_LOCATION
         }
@@ -64,6 +64,16 @@ abstract contract AddressUpdatable is IAddressUpdatableErrors {
         require(addr != address(0), ZeroAddressInput());
         require($.addresses[key] == address(0), AddressAlreadyInitialized());
         $.addresses[key] = addr;
+    }
+
+    /// @notice Migrate a legacy address into the shared address-update storage
+    /// @dev Only writes into empty destination slots, so it is safe to call during V1 -> V2 migration
+    function _migrateAddress(bytes32 key, address addr) internal {
+        AddressUpdatableStorage storage $ = _getStorage();
+
+        if ($.addresses[key] == address(0) && addr != address(0)) {
+            $.addresses[key] = addr;
+        }
     }
 
     /// @notice Propose an address update for a given key
