@@ -187,7 +187,7 @@ interface IUltraVault is IBaseVault {
     /// @param shares Shares of respective users
     /// @dev Reverts if arrays length mismatch
     function setupInitialBalances(
-        address[] memory users,
-        uint256[] memory shares
+        address[] calldata users,
+        uint256[] calldata shares
     ) external;
 }

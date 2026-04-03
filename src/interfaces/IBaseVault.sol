@@ -326,9 +326,9 @@ interface IBaseVault is
     /// @param controllers Array of controllers
     /// @return Array of fulfilled amounts in requested asset
     function fulfillMultipleRedeems(
-        address[] memory assets,
-        uint256[] memory shares,
-        address[] memory controllers
+        address[] calldata assets,
+        uint256[] calldata shares,
+        address[] calldata controllers
     ) external returns (uint256[] memory);
 
     ////////////////////////

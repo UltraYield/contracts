@@ -841,9 +841,9 @@ abstract contract BaseControlledAsyncRedeem is
     /// @dev Reverts if arrays length mismatch
     /// @dev Collects withdrawal fee to incentivize manager
     function fulfillMultipleRedeems(
-        address[] memory assets,
-        uint256[] memory shares,
-        address[] memory controllers
+        address[] calldata assets,
+        uint256[] calldata shares,
+        address[] calldata controllers
     ) external virtual onlyRole(OPERATOR_ROLE) returns (uint256[] memory) {
         uint256 length = assets.length;
         require(length == shares.length && length == controllers.length, InputLengthMismatch());
