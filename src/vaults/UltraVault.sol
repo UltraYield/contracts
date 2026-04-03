@@ -279,7 +279,7 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
         Fees memory fees = getFees();
         uint256 instantRedeemFeeRate = fees.withdrawalFee + fees.instantRedeemPremium;
         uint256 maxGrossAssets = liquidity.mulDivDown(SCALE, SCALE - instantRedeemFeeRate);
-        uint256 maxGrossUnderlyingAssets = _convertToUnderlying(_asset, maxGrossAssets);
+        uint256 maxGrossUnderlyingAssets = convertToUnderlying(_asset, maxGrossAssets);
         uint256 maxShares = convertToShares(maxGrossUnderlyingAssets);
         return maxShares < shareBalance ? maxShares : shareBalance;
     }
@@ -365,7 +365,7 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
         
         // Convert shares to underlying assets, then to asset units
         uint256 underlyingAssets = convertToAssets(shares);
-        assets = _convertFromUnderlying(_asset, underlyingAssets);
+        assets = convertFromUnderlying(_asset, underlyingAssets);
         
         // Calculate the withdrawal incentive fee directly in asset units
         uint256 withdrawalFee = assets.mulDivDown(getFees().withdrawalFee, SCALE);
@@ -415,7 +415,7 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
             uint256 _shares = shares[i];
             address _controller = controllers[i];
             uint256 underlyingAssets = _optimizedConvertToAssets(_shares, _totalAssets, _totalSupply);
-            uint256 convertedAssets = _convertFromUnderlying(_asset, underlyingAssets);
+            uint256 convertedAssets = convertFromUnderlying(_asset, underlyingAssets);
 
             // Calculate and transfer withdrawal fee (in asset units)
             uint256 withdrawalFee = convertedAssets.mulDivDown(withdrawalFeeRate, SCALE);
@@ -689,7 +689,7 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
         returns (uint256 grossAssets, uint256 fee, uint256 netAssets)
     {
         uint256 underlyingAssets = convertToAssets(shares);
-        grossAssets = _convertFromUnderlying(_asset, underlyingAssets);
+        grossAssets = convertFromUnderlying(_asset, underlyingAssets);
         fee = _calculateInstantRedeemFee(grossAssets);
         netAssets = grossAssets - fee;
     }

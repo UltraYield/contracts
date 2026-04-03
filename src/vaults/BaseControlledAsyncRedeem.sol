@@ -169,8 +169,13 @@ abstract contract BaseControlledAsyncRedeem is
     function convertToUnderlying(
         address _asset,
         uint256 assets
-    ) external view returns (uint256 baseAssets) {
-        return _convertToUnderlying(_asset, assets);
+    ) public view returns (uint256 baseAssets) {
+        // If asset is the same as base asset, no conversion needed
+        if (_asset == this.asset()) {
+            return assets;
+        }
+        // Call reverts if asset not supported
+        return rateProvider().convertToUnderlying(_asset, assets);
     }
 
     /// @notice Converts underlying to assets
@@ -180,28 +185,7 @@ abstract contract BaseControlledAsyncRedeem is
     function convertFromUnderlying(
         address _asset,
         uint256 baseAssets
-    ) external view returns (uint256 assets) {
-        return _convertFromUnderlying(_asset, baseAssets);
-    }
-
-    /// @dev Internal function to convert assets to underlying
-    function _convertToUnderlying(
-        address _asset,
-        uint256 assets
-    ) internal view returns (uint256 baseAssets) {
-        // If asset is the same as base asset, no conversion needed
-        if (_asset == this.asset()) {
-            return assets;
-        }
-        // Call reverts if asset not supported
-        return rateProvider().convertToUnderlying(_asset, assets);
-    }
-
-    /// @dev Internal function to convert underlying to assets
-    function _convertFromUnderlying(
-        address _asset,
-        uint256 baseAssets
-    ) internal view returns (uint256 assets) {
+    ) public view returns (uint256 assets) {
         // If asset is the same as base asset, no conversion needed
         if (_asset == this.asset()) {
             return baseAssets;
@@ -603,7 +587,7 @@ abstract contract BaseControlledAsyncRedeem is
         uint256 assets
     ) public view virtual returns (uint256) {
         // Convert to underlying for share calculation
-        uint256 baseAssets = _convertToUnderlying(_asset, assets);
+        uint256 baseAssets = convertToUnderlying(_asset, assets);
         return paused() ? 0 : super.previewDeposit(baseAssets);
     }
 
@@ -628,7 +612,7 @@ abstract contract BaseControlledAsyncRedeem is
     ) public view virtual returns (uint256) {
         // Calculate assets needed in underlying units, then convert to asset units
         uint256 baseAssets = super.previewMint(shares);
-        return paused() ? 0 : _convertFromUnderlying(_asset, baseAssets);
+        return paused() ? 0 : convertFromUnderlying(_asset, baseAssets);
     }
 
     /// @dev Preview withdraw not supported for async flows
@@ -829,7 +813,7 @@ abstract contract BaseControlledAsyncRedeem is
     ) external virtual onlyRole(OPERATOR_ROLE) returns (uint256 assets) {
         // Convert shares to underlying assets, then to asset units
         uint256 underlyingAssets = convertToAssets(shares);
-        assets = _fulfillRedeem(_asset, _convertFromUnderlying(_asset, underlyingAssets), shares, controller);
+        assets = _fulfillRedeem(_asset, convertFromUnderlying(_asset, underlyingAssets), shares, controller);
         _burn(address(this), shares);
     }
 
@@ -860,7 +844,7 @@ abstract contract BaseControlledAsyncRedeem is
             uint256 underlyingAssets = _optimizedConvertToAssets(_shares, _totalAssets, _totalSupply);
             uint256 assetsFulfilled = _fulfillRedeem(
                 _asset, 
-                _convertFromUnderlying(_asset, underlyingAssets), 
+                convertFromUnderlying(_asset, underlyingAssets), 
                 _shares, 
                 _controller
             );
