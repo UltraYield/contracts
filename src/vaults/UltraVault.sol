@@ -130,6 +130,17 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
         _setFees(params.fees);
     }
 
+    /// @notice V1 -> V2 migration hook
+    /// @dev Copies only the live V1 contract addresses into the V2 address registry
+    /// @dev Pending V1 address-update proposals are intentionally not migrated
+    function initializeV2() external reinitializer(2) {
+        _migrateBaseControlledAsyncRedeemStateFromV1();
+
+        UltraVaultStorage storage $ = _getUltraVaultStorage();
+        _migrateAddress(FUNDS_HOLDER_KEY, $.__fundsHolder);
+        _migrateAddress(ORACLE_KEY, address($.__oracle));
+    }
+
     /////////////
     // Getters //
     /////////////
