@@ -150,7 +150,7 @@ abstract contract BaseControlledAsyncRedeem is
         address operator,
         bool approved
     ) external returns (bool success) {
-        require(msg.sender != operator, "ERC7540Vault/cannot-set-self-as-operator");
+        require(msg.sender != operator, CannotSetSelfAsOperator());
         if (isOperator(msg.sender, operator) != approved) {
             _getBaseAsyncRedeemStorage().isOperator[msg.sender][operator] = approved;
             emit OperatorSet(msg.sender, operator, approved);

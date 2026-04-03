@@ -25,6 +25,7 @@ interface IBaseVaultErrors is IAddressUpdatableErrors {
     error NoPendingRedeem();
     error InsufficientBalance();
     error AssetNotSupported();
+    error CannotSetSelfAsOperator();
 }
 
 interface IBaseVaultEvents {
