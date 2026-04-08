@@ -533,7 +533,7 @@ abstract contract BaseControlledAsyncRedeem is
 
     /// @inheritdoc IRedeemAccounting
     function pendingRedeemRequest(
-        uint256,
+        uint256, // requestId
         address _controller
     ) external view returns (uint256) {
         return _getPendingRedeem(_controller, asset()).shares;
@@ -541,7 +541,7 @@ abstract contract BaseControlledAsyncRedeem is
 
     /// @inheritdoc IRedeemAccounting
     function claimableRedeemRequest(
-        uint256,
+        uint256, // requestId
         address _controller
     ) external view returns (uint256) {
         return _getClaimableRedeem(_controller, asset()).shares;
