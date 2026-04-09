@@ -333,40 +333,6 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
     // Redeem Fulfillment //
     ////////////////////////
 
-    /// @notice Fulfill redeem request
-    /// @param _asset Asset
-    /// @param shares Amount to redeem
-    /// @param controller Controller address
-    /// @return assets Amount of claimable assets
-    function fulfillRedeem(
-        address _asset,
-        uint256 shares,
-        address controller
-    ) external override onlyRole(OPERATOR_ROLE) returns (uint256 assets) {
-        // Collect fees accrued to date
-        _collectFees();
-        
-        // Convert shares to underlying assets, then to asset units
-        uint256 underlyingAssets = convertToAssets(shares);
-        assets = convertFromUnderlying(_asset, underlyingAssets);
-        
-        // Calculate the withdrawal incentive fee directly in asset units
-        uint256 withdrawalFee = assets.mulDivDown(getFees().withdrawalFee, SCALE);
-
-        // Fulfill request with asset units (base contract expects asset units)
-        uint256 withdrawalAmount = assets - withdrawalFee;
-        _fulfillRedeem(_asset, withdrawalAmount, shares, controller);
-
-        // Burn shares
-        _burn(address(this), shares);
-
-        // Collect withdrawal fee in asset units
-        _transferWithdrawalFeeInAsset(_asset, withdrawalFee);
-
-        // Return the amount in asset units for consistency with base contract
-        return withdrawalAmount;
-    }
-
     /// @notice Fulfill multiple redeem requests
     /// @param assets Array of assets
     /// @param shares Array of share amounts

@@ -310,17 +310,6 @@ interface IBaseVault is
     // Redeem Fulfillment //
     ////////////////////////
 
-    /// @notice Fulfill redeem request
-    /// @param asset Asset
-    /// @param shares Amount to redeem
-    /// @param controller Controller address
-    /// @return assets Amount of claimable assets
-    function fulfillRedeem(
-        address asset,
-        uint256 shares,
-        address controller
-    ) external returns (uint256);
-
     /// @notice Fulfill multiple redeem requests
     /// @param assets Array of assets
     /// @param shares Array of share amounts

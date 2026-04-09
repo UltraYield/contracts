@@ -501,13 +501,6 @@ abstract contract BaseControlledAsyncRedeem is
 
     /// @inheritdoc IRedeemAccounting
     function getPendingRedeem(
-        address controller
-    ) external view returns (PendingRedeem memory) {
-        return _getPendingRedeem(controller, asset());
-    }
-
-    /// @inheritdoc IRedeemAccounting
-    function getPendingRedeemForAsset(
         address _asset,
         address _controller
     ) external view returns (PendingRedeem memory) {
@@ -516,13 +509,6 @@ abstract contract BaseControlledAsyncRedeem is
 
     /// @inheritdoc IRedeemAccounting
     function getClaimableRedeem(
-        address _controller
-    ) external view returns (ClaimableRedeem memory) {
-        return _getClaimableRedeem(_controller, asset());
-    }
-
-    /// @inheritdoc IRedeemAccounting
-    function getClaimableRedeemForAsset(
         address _asset,
         address _controller
     ) external view returns (ClaimableRedeem memory) {
@@ -538,29 +524,11 @@ abstract contract BaseControlledAsyncRedeem is
     }
 
     /// @inheritdoc IRedeemAccounting
-    function pendingRedeemRequestForAsset(
-        address _asset,
-        uint256, // requestId
-        address _controller
-    ) external view returns (uint256) {
-        return _getPendingRedeem(_controller, _asset).shares;
-    }
-
-    /// @inheritdoc IRedeemAccounting
     function claimableRedeemRequest(
         uint256, // requestId
         address _controller
     ) external view returns (uint256) {
         return _getClaimableRedeem(_controller, asset()).shares;
-    }
-
-    /// @inheritdoc IRedeemAccounting
-    function claimableRedeemRequestForAsset(
-        address _asset,
-        uint256, // requestId
-        address _controller
-    ) external view returns (uint256) {
-        return _getClaimableRedeem(_controller, _asset).shares;
     }
 
     /////////////////////////////////
@@ -800,22 +768,6 @@ abstract contract BaseControlledAsyncRedeem is
     ////////////////////////
     // Redeem Fulfillment //
     ////////////////////////
-
-    /// @notice Fulfill redeem request
-    /// @param _asset Asset
-    /// @param shares Amount to redeem
-    /// @param controller Controller address
-    /// @return assets Amount of claimable assets
-    function fulfillRedeem(
-        address _asset,
-        uint256 shares,
-        address controller
-    ) external virtual onlyRole(OPERATOR_ROLE) returns (uint256 assets) {
-        // Convert shares to underlying assets, then to asset units
-        uint256 underlyingAssets = convertToAssets(shares);
-        assets = _fulfillRedeem(_asset, convertFromUnderlying(_asset, underlyingAssets), shares, controller);
-        _burn(address(this), shares);
-    }
 
     /// @notice Fulfill multiple redeem requests
     /// @param assets Array of assets
