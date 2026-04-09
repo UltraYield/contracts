@@ -93,7 +93,7 @@ contract UltraFrontendHelper is IUltraFrontendHelper, Ownable2StepUpgradeable, U
         for (uint256 i = 0; i < users.length; i++) {
             address user = users[i];
             for (uint256 j = 0; j < assets.length; j++) {
-                uint256 shares = vault.getPendingRedeemForAsset(assets[j], user).shares;
+                uint256 shares = vault.getPendingRedeem(assets[j], user).shares;
                 if (shares > 0) {
                     totalRedeems++;
                 }
@@ -108,7 +108,7 @@ contract UltraFrontendHelper is IUltraFrontendHelper, Ownable2StepUpgradeable, U
             address user = users[i];
             for (uint256 j = 0; j < assets.length; j++) {
                 address asset = assets[j];
-                uint256 shares = vault.getPendingRedeemForAsset(asset, user).shares;
+                uint256 shares = vault.getPendingRedeem(asset, user).shares;
                 if (shares > 0) {
                     redeems[index] = Redeem({ user: user, asset: asset, shares: shares });
                     index++;
