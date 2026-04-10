@@ -332,7 +332,7 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
 
         // Standard ERC-4626 event so generic indexers can track instant-redeem flows
         emit Withdraw(msg.sender, receiver, controller, netAssets, shares);
-        emit InstantRedeemExecuted(controller, receiver, _asset, shares, netAssets, fee);
+        emit InstantRedeem(controller, receiver, _asset, shares, netAssets, fee);
 
         return netAssets;
     }

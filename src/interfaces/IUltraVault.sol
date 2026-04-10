@@ -38,7 +38,7 @@ interface IUltraVaultEvents is IBaseVaultEvents {
         uint256 shareValue
     );
     event WithdrawalFeeCollected(uint256 amount);
-    event InstantRedeemExecuted(
+    event InstantRedeem(
         address indexed controller,
         address indexed receiver,
         address indexed asset,
