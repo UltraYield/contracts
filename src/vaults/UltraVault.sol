@@ -284,14 +284,17 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
     /// @dev Collects accrued fees, calculates additive fee (withdrawalFee + instantRedeemPremium),
     ///      burns shares from controller, transfers net assets to receiver, transfers fee to feeRecipient.
     ///      Reverts if insufficient liquidity in instantRedeemExitpoint.
+    ///      Reverts with InstantRedeemSlippageExceeded if netAssets < minAssets.
     /// @param _asset The asset address to receive
     /// @param shares The number of shares to redeem
+    /// @param minAssets Minimum net assets the receiver must receive; reverts InstantRedeemSlippageExceeded if not met. Pass 0 to disable.
     /// @param receiver The address to receive the net assets
     /// @param controller The address whose shares are burned
     /// @return assets The net asset amount transferred to receiver (after fee deduction)
     function instantRedeem(
         address _asset,
         uint256 shares,
+        uint256 minAssets,
         address receiver,
         address controller
     ) external checkAccess(controller) whenNotPaused returns (uint256) {
@@ -305,6 +308,11 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
         // Prepare instant redeem amounts
         (uint256 grossAssets, uint256 fee, uint256 netAssets) = _previewInstantRedeem(_asset, shares);
         require(netAssets != 0, NothingToWithdraw());
+
+        // Slippage protection — bound caller's worst-case received amount
+        if (netAssets < minAssets) {
+            revert InstantRedeemSlippageExceeded(netAssets, minAssets);
+        }
 
         // Check liquidity
         uint256 availableLiquidity = getLiquidity(_asset);
@@ -324,6 +332,8 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
             IERC20(_asset).safeTransferFrom(exitpoint, feeRecipient(), fee);
         }
 
+        // Standard ERC-4626 event so generic indexers can track instant-redeem flows
+        emit Withdraw(msg.sender, receiver, controller, netAssets, shares);
         emit InstantRedeemExecuted(controller, receiver, _asset, shares, netAssets, fee);
 
         return netAssets;
