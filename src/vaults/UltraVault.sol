@@ -542,7 +542,7 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
 
         Fees memory currentFees = getFees();
         if (currentFees.highwaterMark == 0) {
-            newFees.highwaterMark = 10 ** IERC20Metadata(asset()).decimals();
+            newFees.highwaterMark = 10 ** decimals();
         } else {
             newFees.highwaterMark = currentFees.highwaterMark;
         }
