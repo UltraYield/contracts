@@ -246,7 +246,8 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
 
     /// @notice Returns the maximum shares a controller can instant-redeem for a given asset
     /// @dev Considers both the controller's share balance and available liquidity.
-    ///      Computes max gross assets from liquidity using fee rate, converts to shares, and caps at controller balance.
+    ///      Liquidity bounds the gross payout (netAssets + fee are both pulled from the exitpoint),
+    ///      so the shares are derived from liquidity directly and capped at controller balance.
     /// @param _asset The asset address to redeem for
     /// @param controller The address whose shares would be redeemed
     /// @return shares The maximum redeemable shares
@@ -259,11 +260,8 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
         if (liquidity == 0 || shareBalance == 0) {
             return 0;
         }
-        Fees memory fees = getFees();
-        uint256 instantRedeemFeeRate = fees.withdrawalFee + fees.instantRedeemPremium;
-        uint256 maxGrossAssets = liquidity.mulDivDown(SCALE, SCALE - instantRedeemFeeRate);
-        uint256 maxGrossUnderlyingAssets = convertToUnderlying(_asset, maxGrossAssets);
-        uint256 maxShares = convertToShares(maxGrossUnderlyingAssets);
+        uint256 maxUnderlyingAssets = convertToUnderlying(_asset, liquidity);
+        uint256 maxShares = convertToShares(maxUnderlyingAssets);
         return maxShares < shareBalance ? maxShares : shareBalance;
     }
 
