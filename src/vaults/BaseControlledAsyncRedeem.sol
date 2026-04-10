@@ -587,14 +587,14 @@ abstract contract BaseControlledAsyncRedeem is
     function previewWithdraw(
         uint256
     ) public pure override returns (uint256) {
-        revert CannotPreviewWithdrawInAsyncVault();
+        revert();
     }
 
     /// @dev Preview redeem not supported for async flows
     function previewRedeem(
         uint256
     ) public pure override returns (uint256) {
-        revert CannotPreviewRedeemInAsyncVault();
+        revert();
     }
 
     ///////////////////////////////

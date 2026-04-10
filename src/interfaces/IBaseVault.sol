@@ -16,8 +16,6 @@ interface IBaseVaultErrors is IAddressUpdatableErrors {
     error AccessDenied();
     error ZeroAssetAddress();
     error InputLengthMismatch();
-    error CannotPreviewWithdrawInAsyncVault();
-    error CannotPreviewRedeemInAsyncVault();
     error EmptyDeposit();
     error NothingToMint();
     error NothingToRedeem();
