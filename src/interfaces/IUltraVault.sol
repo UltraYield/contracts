@@ -53,6 +53,7 @@ interface IUltraVaultErrors is IBaseVaultErrors {
     error CannotSetBalancesInNonEmptyVault();
     error InvalidFees();
     error InsufficientLiquidity(address asset, uint256 requested, uint256 available);
+    error InstantRedeemSlippageExceeded(uint256 received, uint256 minAssets);
 }
 
 /// @title IUltraVault
@@ -127,14 +128,17 @@ interface IUltraVault is IBaseVault {
     /// @notice Instantly redeems shares for assets, bypassing the async redemption queue
     /// @dev Burns shares from controller, transfers net assets to receiver, transfers fee to feeRecipient.
     ///      Collects accrued fees before processing. Reverts if insufficient liquidity.
+    ///      Reverts with InstantRedeemSlippageExceeded if netAssets < minAssets.
     /// @param asset The asset address to receive
     /// @param shares The number of shares to redeem
+    /// @param minAssets Minimum net assets the receiver must receive; reverts InstantRedeemSlippageExceeded if not met. Pass 0 to disable.
     /// @param receiver The address to receive the net assets
     /// @param controller The address whose shares are burned
     /// @return assets The net asset amount transferred to receiver (after fee deduction)
     function instantRedeem(
         address asset,
         uint256 shares,
+        uint256 minAssets,
         address receiver,
         address controller
     ) external returns (uint256 assets);
