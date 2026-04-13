@@ -16,6 +16,8 @@ struct Fees {
     uint64 lastUpdateTimestamp;
     // High water mark for performance fees
     uint256 highwaterMark;
+    // Instant redeem premium fee rate (on top of withdrawal fee) (100% = 1e18)
+    uint64 instantRedeemPremium;
 }
 
 interface IUltraVaultEvents is IBaseVaultEvents {
@@ -23,6 +25,8 @@ interface IUltraVaultEvents is IBaseVaultEvents {
     event FundsHolderChanged(address indexed oldFundsHolder, address indexed newFundsHolder);
     event OracleProposed(address indexed proposedOracle);
     event OracleUpdated(address indexed oldOracle, address indexed newOracle);
+    event InstantRedeemExitpointProposed(address indexed proposedExitpoint);
+    event InstantRedeemExitpointChanged(address indexed oldExitpoint, address indexed newExitpoint);
     event FeesRecipientUpdated(address oldRecipient, address newRecipient);
     event FeesUpdated(Fees oldFees, Fees newFees);
     event FeesCollected(
@@ -34,12 +38,22 @@ interface IUltraVaultEvents is IBaseVaultEvents {
         uint256 shareValue
     );
     event WithdrawalFeeCollected(uint256 amount);
+    event InstantRedeem(
+        address indexed controller,
+        address indexed receiver,
+        address indexed asset,
+        uint256 shares,
+        uint256 assets,
+        uint256 fee
+    );
 }
 
 interface IUltraVaultErrors is IBaseVaultErrors {
     error ZeroFeeRecipientAddress();
     error CannotSetBalancesInNonEmptyVault();
     error InvalidFees();
+    error InsufficientLiquidity(address asset, uint256 requested, uint256 available);
+    error InstantRedeemSlippageExceeded(uint256 received, uint256 minAssets);
 }
 
 /// @title IUltraVault
@@ -76,6 +90,59 @@ interface IUltraVault is IBaseVault {
     /// @notice Get the proposed oracle
     function proposedOracle() external view returns (address, uint256);
 
+    /// @notice Returns the instant redeem exitpoint address
+    function instantRedeemExitpoint() external view returns (address);
+
+    /// @notice Get the proposed instant redeem exitpoint
+    function proposedInstantRedeemExitpoint() external view returns (address, uint256);
+
+    ////////////////////
+    // Instant Redeem //
+    ////////////////////
+
+    /// @notice Returns the available liquidity for instant redeem of a given asset
+    /// @param asset The asset address to check liquidity for
+    /// @return liquidity The available liquidity (minimum of exitpoint balance and allowance to this vault)
+    function getLiquidity(address asset) external view returns (uint256 liquidity);
+
+    /// @notice Returns the maximum shares a controller can instant-redeem for a given asset
+    /// @dev Considers both the controller's share balance and available liquidity (min of exitpoint balance and allowance)
+    /// @param asset The asset address to redeem for
+    /// @param controller The address whose shares would be redeemed
+    /// @return shares The maximum redeemable shares
+    function maxInstantRedeem(
+        address asset,
+        address controller
+    ) external view returns (uint256 shares);
+
+    /// @notice Previews the net assets a receiver would get for instant-redeeming a given number of shares
+    /// @dev Returns gross assets minus the additive fee (withdrawalFee + instantRedeemPremium)
+    /// @param _asset The asset address to receive
+    /// @param shares The number of shares to redeem
+    /// @return assets The net asset amount after fee deduction
+    function previewInstantRedeem(
+        address _asset,
+        uint256 shares
+    ) external view returns (uint256 assets);
+
+    /// @notice Instantly redeems shares for assets, bypassing the async redemption queue
+    /// @dev Burns shares from controller, transfers net assets to receiver, transfers fee to feeRecipient.
+    ///      Collects accrued fees before processing. Reverts if insufficient liquidity.
+    ///      Reverts with InstantRedeemSlippageExceeded if netAssets < minAssets.
+    /// @param asset The asset address to receive
+    /// @param shares The number of shares to redeem
+    /// @param minAssets Minimum net assets the receiver must receive; reverts InstantRedeemSlippageExceeded if not met. Pass 0 to disable.
+    /// @param receiver The address to receive the net assets
+    /// @param controller The address whose shares are burned
+    /// @return assets The net asset amount transferred to receiver (after fee deduction)
+    function instantRedeem(
+        address asset,
+        uint256 shares,
+        uint256 minAssets,
+        address receiver,
+        address controller
+    ) external returns (uint256 assets);
+
     /////////////////////
     // Admin Functions //
     /////////////////////
@@ -110,13 +177,21 @@ interface IUltraVault is IBaseVault {
     /// @dev Oracle must be switched before unpausing
     function acceptProposedOracle(address newOracle) external;
 
+    /// @notice Propose instant redeem exitpoint change, can be accepted after delay
+    /// @param newExitpoint New exitpoint address
+    function proposeInstantRedeemExitpoint(address newExitpoint) external;
+
+    /// @notice Accept proposed instant redeem exitpoint
+    /// @dev Pauses vault to manually check the setup by operators
+    function acceptInstantRedeemExitpoint(address newExitpoint) external;
+
     /// @notice Setup initial balances in the vault without depositing the funds
     /// @notice We expect the funds to be separately sent to funds holder
     /// @param users Array of users to setup balances
     /// @param shares Shares of respective users
     /// @dev Reverts if arrays length mismatch
     function setupInitialBalances(
-        address[] memory users,
-        uint256[] memory shares
+        address[] calldata users,
+        uint256[] calldata shares
     ) external;
-} 
+}
