@@ -41,7 +41,7 @@ interface IUltraVaultOracle is IPriceSource {
     // Write Fns //
     ///////////////
 
-    /// @notice Set base/quote pair price
+    /// @notice Set new share price instantly
     /// @param vault The target vault
     /// @param newPrice The new price of the vault's share in terms of the base asset
     function setPriceInstantly(
@@ -49,7 +49,7 @@ interface IUltraVaultOracle is IPriceSource {
         uint256 newPrice
     ) external;
 
-    /// @notice Set base/quote pair price with gradual change
+    /// @notice Set new share price with vesting
     /// @param vault The target vault
     /// @param targetPrice The target price of the vault's share in terms of the base asset
     /// @param vestingDuration The duration over which vesting would occur

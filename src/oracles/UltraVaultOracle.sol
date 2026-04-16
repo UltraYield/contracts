@@ -26,10 +26,10 @@ contract UltraVaultOracle is Ownable2Step, IUltraVaultOracle {
     }
 
     struct PriceUpdateSlot {
-        uint64 startPrice;
-        uint64 targetPrice;
-        uint64 vestingDuration;
-        uint64 timestamp;
+        uint88 startPrice;
+        uint88 targetPrice;
+        uint40 vestingDuration;
+        uint40 timestamp;
     }
 
     ///////////////
@@ -90,8 +90,8 @@ contract UltraVaultOracle is Ownable2Step, IUltraVaultOracle {
     // Write Functions //
     /////////////////////
 
-    /// @notice Set base/quote pair price
-    /// @param _vault The vault asset
+    /// @notice Set new share price instantly
+    /// @param _vault The target vault
     /// @param newPrice The new price of the vault's share in terms of the base asset
     function setPriceInstantly(
         address _vault,
@@ -105,7 +105,7 @@ contract UltraVaultOracle is Ownable2Step, IUltraVaultOracle {
     // Vesting Price Update //
     //////////////////////////
 
-    /// @notice Set base/quote pair price with gradual change
+    /// @notice Set new share price with vesting
     /// @param _vault The target vault
     /// @param targetPrice The target price of the vault's share in terms of the base asset
     /// @param vestingDuration The duration over which vesting would occur
@@ -148,15 +148,17 @@ contract UltraVaultOracle is Ownable2Step, IUltraVaultOracle {
         if (vestingDuration > 0) {
             require(targetPrice > startPrice, DrawdownVestingNotAllowed());
         }
-        uint64 maxValue = type(uint64).max;
-        require(startPrice <= maxValue, Overflow());
-        require(targetPrice <= maxValue, Overflow());
-        require(vestingDuration <= maxValue, Overflow());
+        uint88 maxPrice = type(uint88).max;
+        require(startPrice <= maxPrice, Overflow());
+        require(targetPrice <= maxPrice, Overflow());
+        uint40 maxTimestamp = type(uint40).max;
+        require(vestingDuration <= maxTimestamp, Overflow());
+        require(block.timestamp <= maxTimestamp, Overflow());
         PriceUpdateSlot memory newPriceUpdate = PriceUpdateSlot({
-            startPrice: uint64(startPrice),
-            targetPrice: uint64(targetPrice),
-            vestingDuration: uint64(vestingDuration),
-            timestamp: uint64(block.timestamp)
+            startPrice: uint88(startPrice),
+            targetPrice: uint88(targetPrice),
+            vestingDuration: uint40(vestingDuration),
+            timestamp: uint40(block.timestamp)
         });
 
         _lastUpdate = newPriceUpdate;
