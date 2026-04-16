@@ -4,7 +4,6 @@ pragma solidity 0.8.28;
 import { FixedPointMathLib } from "src/utils/FixedPointMathLib.sol";
 import { IUltraVaultOracle } from "src/interfaces/IUltraVaultOracle.sol";
 import { IOwnable } from "src/interfaces/IOwnable.sol";
-import { IERC20Supply } from "src/interfaces/IERC20Supply.sol";
 import { IPausable } from "src/interfaces/IPausable.sol";
 import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
 import { Ownable2Step } from "@openzeppelin/contracts/access/Ownable2Step.sol";
@@ -29,7 +28,6 @@ contract VaultPriceManager is Ownable2Step {
 
     error ZeroAddress();
     error InvalidVault();
-    error CannotConnectNonEmptyVault();
     error NotAdminOrOwner();
     error InvalidLimit();
     error AlreadyAdmin();
@@ -41,7 +39,6 @@ contract VaultPriceManager is Ownable2Step {
 
     uint256 internal constant SCALE = 1e18;
     uint256 public constant MAX_JUMP_LIMIT = SCALE;
-    uint256 public constant MAX_DRAWDOWN_LIMIT = SCALE;
 
     ///////////
     // Types //
@@ -49,10 +46,10 @@ contract VaultPriceManager is Ownable2Step {
 
     /// @notice Safety limits for price updates
     struct Limits {
-        // Maximum allowed price jump from one update to the next (1e18 = 100%)
-        uint256 jump;
-        // Maximum allowed drawdown from the highwaterMark (1e18 = 100%)
-        uint256 drawdown;
+        // Maximum allowed upward price jump from one update to the next (1e18 = 100%)
+        uint128 jumpUp;
+        // Maximum allowed downward price jump from one update to the next (1e18 = 100%)
+        uint128 jumpDown;
     }
 
     /////////////
@@ -62,7 +59,6 @@ contract VaultPriceManager is Ownable2Step {
     IUltraVaultOracle public immutable oracle;
     address public immutable vault;
     Limits public limits;
-    uint256 public highwaterMark;
     mapping(address => bool) public isAdmin;
 
     /////////////////
@@ -79,23 +75,18 @@ contract VaultPriceManager is Ownable2Step {
 
         require(_vault != address(0), ZeroAddress());
         require(_vault == oracle.vault(), InvalidVault());
-        require(IERC20Supply(_vault).totalSupply() == 0, CannotConnectNonEmptyVault());
         vault = _vault;
-        
-        uint256 initialPrice = SCALE;
-        highwaterMark = initialPrice;
-        oracle.setPriceInstantly(vault, initialPrice);
     }
 
     //////////////////
     // Oracle Logic //
     //////////////////
 
-    /// @notice Update vault price and highwaterMark
+    /// @notice Update vault price instantly
     /// @param _vault Target vault address
     /// @param newPrice New price
-    /// @dev Pauses vault on large price jumps or drawdowns
-    function updatePriceInstantly(address _vault, uint256 newPrice) external onlyAdminOrOwner {
+    /// @dev Pauses vault on large price jumps
+    function instantPriceUpdate(address _vault, uint256 newPrice) external onlyAdminOrOwner {
         require(_vault == vault, InvalidVault());
         _checkSuddenMovements(newPrice);
         oracle.setPriceInstantly(
@@ -104,12 +95,12 @@ contract VaultPriceManager is Ownable2Step {
         );
     }
 
-    /// @notice Update vault price gradually over multiple blocks
+    /// @notice Update vault price linearly over a duration
     /// @param _vault Target vault address
     /// @param newPrice New price
     /// @param duration Vesting duration
     /// @dev Pauses vault on large price jumps
-    function updatePriceWithVesting(
+    function linearPriceUpdate(
         address _vault,
         uint256 newPrice,
         uint256 duration
@@ -154,18 +145,18 @@ contract VaultPriceManager is Ownable2Step {
     ///////////////////
 
     /// @notice Set vault price limits
-    /// @param jump Maximum allowed price jump from one update to the next (1e18 = 100%)
-    /// @param drawdown Maximum allowed drawdown from the highwaterMark (1e18 = 100%)
-    function updateLimits(uint256 jump, uint256 drawdown) external onlyOwner {
-        require(jump <= MAX_JUMP_LIMIT && drawdown <= MAX_DRAWDOWN_LIMIT, InvalidLimit());
+    /// @param jumpUp Maximum allowed upward price jump from one update to the next (1e18 = 100%)
+    /// @param jumpDown Maximum allowed downward price jump from one update to the next (1e18 = 100%)
+    function updateLimits(uint128 jumpUp, uint128 jumpDown) external onlyOwner {
+        require(jumpUp <= MAX_JUMP_LIMIT && jumpDown <= MAX_JUMP_LIMIT, InvalidLimit());
         Limits memory oldLimits = limits;
         Limits memory newLimits = Limits({
-            jump: jump,
-            drawdown: drawdown
+            jumpUp: jumpUp,
+            jumpDown: jumpDown
         });
         if (
-            newLimits.jump != oldLimits.jump || 
-            newLimits.drawdown != oldLimits.drawdown
+            newLimits.jumpUp != oldLimits.jumpUp ||
+            newLimits.jumpDown != oldLimits.jumpDown
         ) {
             limits = newLimits;
             emit LimitsUpdated(oldLimits, newLimits);
@@ -185,24 +176,20 @@ contract VaultPriceManager is Ownable2Step {
     // Internal //
     //////////////
 
-    /// @notice Check price update for sudden price swings and update highwatermark
+    /// @notice Check price update for sudden price swings
     function _checkSuddenMovements(uint256 newPrice) internal {
         uint256 lastPrice = oracle.currentSharePrice();
-        uint256 _highwaterMark = highwaterMark;
         Limits memory _limits = limits;
+        // pause if update is out of the limits
         if (
             // Sudden drop
-            newPrice < lastPrice.mulDivDown(SCALE - _limits.jump, SCALE) ||
+            newPrice < lastPrice.mulDivDown(SCALE - _limits.jumpDown, SCALE) ||
             // Sudden increase
-            newPrice > lastPrice.mulDivDown(SCALE + _limits.jump, SCALE) ||
-            // Drawdown check
-            newPrice < _highwaterMark.mulDivDown(SCALE - _limits.drawdown, SCALE)
+            newPrice > lastPrice.mulDivDown(SCALE + _limits.jumpUp, SCALE)
         ) {
             if (!IPausable(vault).paused()) {
                 IPausable(vault).pause();
             }
-        } else if (newPrice > _highwaterMark) {
-            highwaterMark = newPrice;
         }
     }
 }
