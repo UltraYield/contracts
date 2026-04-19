@@ -6,6 +6,7 @@ import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
 import { Ownable2Step } from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import { Checkpoints } from "@openzeppelin/contracts/utils/structs/Checkpoints.sol";
 import { IUltraVaultOracle } from "src/interfaces/IUltraVaultOracle.sol";
+import { IPriceSourceV1 } from "src/legacy/v1/interfaces/IPriceSourceV1.sol";
 import { IERC4626 } from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 
 /// @title UltraVaultOracle
@@ -37,6 +38,7 @@ contract UltraVaultOracle is Ownable2Step, IUltraVaultOracle {
     ///////////////
 
     address public immutable vault;
+    address public immutable asset;
 
     uint256 public constant MIN_VESTING_DURATION = 24 hours;
     uint256 public constant MAX_VESTING_DURATION = 7 days;
@@ -59,9 +61,10 @@ contract UltraVaultOracle is Ownable2Step, IUltraVaultOracle {
         require(_vault != address(0), ZeroAddress());
         vault = _vault;
 
-        address asset = IERC4626(vault).asset();
-        require(asset != address(0), ZeroAddress());
-        uint8 assetDecimals = IERC20Metadata(asset).decimals();
+        address _asset = IERC4626(vault).asset();
+        require(_asset != address(0), ZeroAddress());
+        asset = _asset;
+        uint8 assetDecimals = IERC20Metadata(_asset).decimals();
         uint8 vaultDecimals = IERC20Metadata(vault).decimals();
         require(assetDecimals == vaultDecimals, DecimalsMismatch());
 
@@ -84,6 +87,22 @@ contract UltraVaultOracle is Ownable2Step, IUltraVaultOracle {
     function historicalSharePrice(uint256 timestamp) external view returns (uint256) {
         PriceUpdate memory update = _getPriceUpdateAtTimestamp(timestamp);
         return _priceAtTimestamp(update, timestamp);
+    }
+
+    /// @inheritdoc IPriceSourceV1
+    /// @dev Backwards-compatibility shim for V1 vaults, which call
+    /// `oracle().getQuote(totalSupply(), share(), asset())`. Only the
+    /// (vault, asset) pair is supported; any other combination reverts.
+    /// @dev Vault and asset decimals are required to match in the constructor,
+    /// so the V1 decimal-scaling formula collapses to `inAmount * price / 1e18`.
+    function getQuote(
+        uint256 inAmount,
+        address base,
+        address quote
+    ) external view returns (uint256) {
+        require(base == vault, VaultMismatch());
+        require(quote == asset, AssetMismatch());
+        return inAmount * _getCurrentSharePrice() / 1e18;
     }
 
     /////////////////////

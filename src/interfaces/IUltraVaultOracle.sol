@@ -2,11 +2,13 @@
 pragma solidity >=0.8.0;
 
 import { IPriceSource } from "src/interfaces/IPriceSource.sol";
+import { IPriceSourceV1 } from "src/legacy/v1/interfaces/IPriceSourceV1.sol";
 
 /// @title IUltraVaultOracle
 /// @notice Interface for push-based price oracle
 /// @dev Extends IPriceSource with price setting capabilities
-interface IUltraVaultOracle is IPriceSource {
+/// @dev Also implements IPriceSourceV1 for backwards compatibility with V1 vaults
+interface IUltraVaultOracle is IPriceSource, IPriceSourceV1 {
     ////////////
     // Events //
     ////////////
@@ -23,6 +25,7 @@ interface IUltraVaultOracle is IPriceSource {
 
     error ZeroAddress();
     error VaultMismatch();
+    error AssetMismatch();
     error DecimalsMismatch();
     error NoPriceData();
     error InvalidVestingDuration();
