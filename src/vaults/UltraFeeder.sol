@@ -96,6 +96,18 @@ contract UltraFeeder is BaseControlledAsyncRedeem, IUltraFeederErrors {
         return mainVault().convertToAssets(totalSupply());
     }
 
+    /// @dev Delegate to mainVault so feeder conversions match the underlying
+    ///      oracle-based math. Using the ERC4626 default (virtual-offset) would
+    ///      drift by 1 wei against mainVault and break the exact-equality check
+    ///      in `beforeFulfillRedeem`.
+    function convertToAssets(uint256 shares) public view override returns (uint256) {
+        return mainVault().convertToAssets(shares);
+    }
+
+    function convertToShares(uint256 assets) public view override returns (uint256) {
+        return mainVault().convertToShares(assets);
+    }
+
     ////////////////////////
     // ERC-4626 Overrides //
     ////////////////////////
