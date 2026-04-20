@@ -212,7 +212,7 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
         uint256 shares,
         uint256 sharePrice
     ) internal pure returns (uint256 assets) {
-        return shares.mulDivDown(sharePrice, ONE_UNIT);
+        return shares.mulDivDown(sharePrice, SCALE);
     }
 
     /// @dev Optimized function for converting assets to shares.
@@ -221,7 +221,7 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
         uint256 assets,
         uint256 sharePrice
     ) internal pure returns (uint256 shares) {
-        return assets.mulDivDown(ONE_UNIT, sharePrice);
+        return assets.mulDivDown(SCALE, sharePrice);
     }
 
     ////////////////////
