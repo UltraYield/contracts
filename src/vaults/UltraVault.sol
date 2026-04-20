@@ -3,6 +3,7 @@ pragma solidity 0.8.28;
 
 import { SafeERC20, IERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import { IERC20Metadata } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
+import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
 import { IPriceSource } from "src/interfaces/IPriceSource.sol";
 import { Fees, IUltraVaultEvents, IUltraVaultErrors } from "src/interfaces/IUltraVault.sol";
 import { AddressUpdateProposal } from "src/utils/AddressUpdates.sol";
@@ -41,6 +42,7 @@ struct UltraVaultInitParams {
 /// @notice ERC-7540 compliant async redeem vault with UltraVaultOracle pricing and multisig asset management
 contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVaultErrors {
     using FixedPointMathLib for uint256;
+    using Math for uint256;
     using SafeERC20 for IERC20;
 
     ///////////////
@@ -222,6 +224,18 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
         uint256 sharePrice
     ) internal pure returns (uint256 shares) {
         return assets.mulDivDown(SCALE, sharePrice);
+    }
+
+    /// @dev Oracle-based conversion used by ERC4626 preview/deposit/mint/withdraw/redeem.
+    ///      Overriding these ensures the deposit path uses the same math as the public
+    ///      convertToShares/convertToAssets (oracle-driven), avoiding a virtual-offset
+    ///      mispricing on first deposit when the oracle is not 1:1.
+    function _convertToShares(uint256 assets, Math.Rounding rounding) internal view override returns (uint256) {
+        return assets.mulDiv(SCALE, getSharePrice(), rounding);
+    }
+
+    function _convertToAssets(uint256 shares, Math.Rounding rounding) internal view override returns (uint256) {
+        return shares.mulDiv(getSharePrice(), SCALE, rounding);
     }
 
     ////////////////////
