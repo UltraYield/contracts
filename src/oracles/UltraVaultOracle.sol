@@ -181,9 +181,10 @@ contract UltraVaultOracle is Ownable2Step, IUltraVaultOracle {
         });
 
         _lastUpdate = newPriceUpdate;
-        uint256 index = _priceUpdatesHistory.length;
         _priceUpdatesHistory.push(newPriceUpdate);
-        _priceUpdatesHistoryIndex.push(uint48(block.timestamp), uint208(index));
+        // Store a 1-based position so `0` is reserved as the "no checkpoint"
+        // sentinel returned by `upperLookupRecent`. Retrieval subtracts 1.
+        _priceUpdatesHistoryIndex.push(uint48(block.timestamp), uint208(_priceUpdatesHistory.length));
     }
 
     function _getCurrentSharePrice() internal view returns (uint256) {
