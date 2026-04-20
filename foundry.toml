@@ -23,7 +23,7 @@ remappings = [
 
 [profile.release]
 optimizer = true
-optimizer_runs = 50
+optimizer_runs = 5
 dotenv = true
 
 [rpc_endpoints]
