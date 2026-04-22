@@ -20,6 +20,8 @@ struct Fees {
     uint64 lastUpdateTimestamp;
     // High water mark for performance fees
     uint256 highwaterMark;
+    // Instant redeem premium fee rate (on top of withdrawal fee) (100% = 1e18)
+    uint64 instantRedeemPremium;
 }
 
 /// @notice Price data for base/quote pair

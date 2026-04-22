@@ -76,6 +76,12 @@ abstract contract BaseControlledAsyncRedeem is
         }
     }
 
+    /// @dev Copies the legacy V1 rate provider address into V2 address-update storage
+    function _migrateBaseControlledAsyncRedeemStateFromV1() internal {
+        BaseAsyncRedeemStorage storage $ = _getBaseAsyncRedeemStorage();
+        _migrateAddress(RATE_PROVIDER_KEY, address($.__rateProvider));
+    }
+
     //////////
     // Init //
     //////////
@@ -144,7 +150,7 @@ abstract contract BaseControlledAsyncRedeem is
         address operator,
         bool approved
     ) external returns (bool success) {
-        require(msg.sender != operator, "ERC7540Vault/cannot-set-self-as-operator");
+        require(msg.sender != operator, CannotSetSelfAsOperator());
         if (isOperator(msg.sender, operator) != approved) {
             _getBaseAsyncRedeemStorage().isOperator[msg.sender][operator] = approved;
             emit OperatorSet(msg.sender, operator, approved);
@@ -165,8 +171,13 @@ abstract contract BaseControlledAsyncRedeem is
         address _asset,
         uint256 assets,
         Adjustment adjustment
-    ) external view returns (uint256 baseAssets) {
-        return _convertToUnderlying(_asset, assets, adjustment);
+    ) public view returns (uint256 baseAssets) {
+        // If asset is the same as base asset, no conversion needed
+        if (_asset == this.asset()) {
+            return assets;
+        }
+        // Call reverts if asset not supported
+        return rateProvider().convertToUnderlying(_asset, assets);
     }
 
     /// @notice Converts underlying to assets
@@ -178,56 +189,13 @@ abstract contract BaseControlledAsyncRedeem is
         address _asset,
         uint256 baseAssets,
         Adjustment adjustment
-    ) external view returns (uint256 assets) {
-        return _convertFromUnderlying(_asset, baseAssets, adjustment);
-    }
-
-    /// @dev Internal function to convert assets to underlying
-    function _convertToUnderlying(
-        address _asset,
-        uint256 assets,
-        Adjustment adjustment
-    ) internal view returns (uint256 baseAssets) {
-        // If asset is the same as base asset, no conversion needed
-        if (_asset == this.asset()) {
-            return assets;
-        }
-        // Call reverts if asset not supported
-        return rateProvider().convertToUnderlying(_asset, assets, adjustment);
-    }
-
-    /// @dev Internal function to convert underlying to assets
-    function _convertFromUnderlying(
-        address _asset,
-        uint256 baseAssets,
-        Adjustment adjustment
-    ) internal view returns (uint256 assets) {
+    ) public view returns (uint256 assets) {
         // If asset is the same as base asset, no conversion needed
         if (_asset == this.asset()) {
             return baseAssets;
         }
         // Call reverts if asset not supported
         return rateProvider().convertFromUnderlying(_asset, baseAssets, adjustment);
-    }
-
-    /// @dev Optimized function mirroring `convertToAssets` in OZ ERC4626 v5.4.0
-    /// @dev Uses pre-fetched totals. Always rounds down like `convertToAssets` does in the OZ implementation
-    function _optimizedConvertToAssets(
-        uint256 shares,
-        uint256 _totalAssets,
-        uint256 _totalSupply
-    ) internal view returns (uint256 assets) {
-        return shares.mulDiv(_totalAssets + 1, _totalSupply + 10 ** _decimalsOffset(), Math.Rounding.Floor);
-    }
-
-    /// @dev Optimized function mirroring `convertToShares` in OZ ERC4626 v5.4.0
-    /// @dev Uses pre-fetched totals. Always rounds down like `convertToShares` does in the OZ implementation
-    function _optimizedConvertToShares(
-        uint256 assets,
-        uint256 _totalAssets,
-        uint256 _totalSupply
-    ) internal view returns (uint256 shares) {
-        return assets.mulDiv(_totalSupply + 10 ** _decimalsOffset(), _totalAssets + 1, Math.Rounding.Floor);
     }
 
     ////////////////////
@@ -517,13 +485,6 @@ abstract contract BaseControlledAsyncRedeem is
 
     /// @inheritdoc IRedeemAccounting
     function getPendingRedeem(
-        address controller
-    ) external view returns (PendingRedeem memory) {
-        return _getPendingRedeem(controller, asset());
-    }
-
-    /// @inheritdoc IRedeemAccounting
-    function getPendingRedeemForAsset(
         address _asset,
         address _controller
     ) external view returns (PendingRedeem memory) {
@@ -532,13 +493,6 @@ abstract contract BaseControlledAsyncRedeem is
 
     /// @inheritdoc IRedeemAccounting
     function getClaimableRedeem(
-        address _controller
-    ) external view returns (ClaimableRedeem memory) {
-        return _getClaimableRedeem(_controller, asset());
-    }
-
-    /// @inheritdoc IRedeemAccounting
-    function getClaimableRedeemForAsset(
         address _asset,
         address _controller
     ) external view returns (ClaimableRedeem memory) {
@@ -554,29 +508,11 @@ abstract contract BaseControlledAsyncRedeem is
     }
 
     /// @inheritdoc IRedeemAccounting
-    function pendingRedeemRequestForAsset(
-        address _asset,
-        uint256, // requestId
-        address _controller
-    ) external view returns (uint256) {
-        return _getPendingRedeem(_controller, _asset).shares;
-    }
-
-    /// @inheritdoc IRedeemAccounting
     function claimableRedeemRequest(
         uint256, // requestId
         address _controller
     ) external view returns (uint256) {
         return _getClaimableRedeem(_controller, asset()).shares;
-    }
-
-    /// @inheritdoc IRedeemAccounting
-    function claimableRedeemRequestForAsset(
-        address _asset,
-        uint256, // requestId
-        address _controller
-    ) external view returns (uint256) {
-        return _getClaimableRedeem(_controller, _asset).shares;
     }
 
     /////////////////////////////////
@@ -590,7 +526,7 @@ abstract contract BaseControlledAsyncRedeem is
     function previewDeposit(
         uint256 assets
     ) public view virtual override returns (uint256) {
-        return paused() ? 0 : super.previewDeposit(assets);
+        return previewDepositForAsset(asset(), assets);
     }
 
     /// @notice Preview shares for deposit
@@ -603,7 +539,7 @@ abstract contract BaseControlledAsyncRedeem is
         uint256 assets
     ) public view virtual returns (uint256) {
         // Convert to underlying for share calculation
-        uint256 baseAssets = _convertToUnderlying(_asset, assets, Adjustment.DOWN);
+        uint256 baseAssets = convertToUnderlying(_asset, assets, Adjustment.DOWN);
         return paused() ? 0 : super.previewDeposit(baseAssets);
     }
 
@@ -614,7 +550,7 @@ abstract contract BaseControlledAsyncRedeem is
     function previewMint(
         uint256 shares
     ) public view virtual override returns (uint256) {
-        return paused() ? 0 : super.previewMint(shares);
+        return previewMintForAsset(asset(), shares);
     }
 
     /// @notice Preview assets for mint
@@ -628,21 +564,21 @@ abstract contract BaseControlledAsyncRedeem is
     ) public view virtual returns (uint256) {
         // Calculate assets needed in underlying units, then convert to asset units
         uint256 baseAssets = super.previewMint(shares);
-        return paused() ? 0 : _convertFromUnderlying(_asset, baseAssets, Adjustment.UP);
+        return paused() ? 0 : convertFromUnderlying(_asset, baseAssets, Adjustment.UP);
     }
 
     /// @dev Preview withdraw not supported for async flows
     function previewWithdraw(
         uint256
     ) public pure override returns (uint256) {
-        revert CannotPreviewWithdrawInAsyncVault();
+        revert();
     }
 
     /// @dev Preview redeem not supported for async flows
     function previewRedeem(
         uint256
     ) public pure override returns (uint256) {
-        revert CannotPreviewRedeemInAsyncVault();
+        revert();
     }
 
     ///////////////////////////////
@@ -671,7 +607,7 @@ abstract contract BaseControlledAsyncRedeem is
     function maxWithdraw(
         address controller
     ) public view override returns (uint256) {
-        return _getClaimableRedeem(controller, asset()).assets;
+        return maxWithdrawForAsset(asset(), controller);
     }
 
     /// @notice Get max assets for withdraw
@@ -681,7 +617,7 @@ abstract contract BaseControlledAsyncRedeem is
     function maxWithdrawForAsset(
         address _asset,
         address controller
-    ) external view returns (uint256) {
+    ) public view returns (uint256) {
         return _getClaimableRedeem(controller, _asset).assets;
     }
 
@@ -690,7 +626,7 @@ abstract contract BaseControlledAsyncRedeem is
     function maxRedeem(
         address controller
     ) public view override returns (uint256) {
-        return _getClaimableRedeem(controller, asset()).shares;
+        return maxRedeemForAsset(asset(), controller);
     }
 
     /// @notice Get max shares for redeem
@@ -700,7 +636,7 @@ abstract contract BaseControlledAsyncRedeem is
     function maxRedeemForAsset(
         address _asset,
         address controller
-    ) external view returns (uint256) {
+    ) public view returns (uint256) {
         return _getClaimableRedeem(controller, _asset).shares;
     }
 
@@ -720,8 +656,7 @@ abstract contract BaseControlledAsyncRedeem is
         address controller,
         address owner
     ) external returns (uint256 requestId) {
-        // Validate that the asset is supported by the rate provider
-        require(rateProvider().isSupported(_asset), AssetNotSupported());
+        _ensureIsSupported(_asset);
         return _requestRedeemOfAsset(_asset, shares, controller, owner);
     }
 
@@ -818,23 +753,6 @@ abstract contract BaseControlledAsyncRedeem is
     // Redeem Fulfillment //
     ////////////////////////
 
-    /// @notice Fulfill redeem request
-    /// @param _asset Asset
-    /// @param shares Amount to redeem
-    /// @param controller Controller address
-    /// @return assets Amount of claimable assets
-    function fulfillRedeem(
-        address _asset,
-        uint256 shares,
-        address controller
-    ) external virtual onlyRole(OPERATOR_ROLE) returns (uint256 assets) {
-        // Convert shares to underlying assets, then to asset units
-        uint256 underlyingAssets = convertToAssets(shares);
-        uint256 convertedAssets = _convertFromUnderlying(_asset, underlyingAssets, Adjustment.DOWN);
-        assets = _fulfillRedeem(_asset, convertedAssets, shares, controller);
-        _burn(address(this), shares);
-    }
-
     /// @notice Fulfill multiple redeem requests
     /// @param assets Array of assets
     /// @param shares Array of share amounts
@@ -843,28 +761,26 @@ abstract contract BaseControlledAsyncRedeem is
     /// @dev Reverts if arrays length mismatch
     /// @dev Collects withdrawal fee to incentivize manager
     function fulfillMultipleRedeems(
-        address[] memory assets,
-        uint256[] memory shares,
-        address[] memory controllers
+        address[] calldata assets,
+        uint256[] calldata shares,
+        address[] calldata controllers
     ) external virtual onlyRole(OPERATOR_ROLE) returns (uint256[] memory) {
         uint256 length = assets.length;
         require(length == shares.length && length == controllers.length, InputLengthMismatch());
 
         uint256 totalShares;
-        uint256 _totalAssets = totalAssets();
-        uint256 _totalSupply = totalSupply();
         uint256[] memory result = new uint256[](length);
         for (uint256 i; i < length; ) {
             // Fulfill redeem
             address _asset = assets[i];
             uint256 _shares = shares[i];
             address _controller = controllers[i];
-            uint256 underlyingAssets = _optimizedConvertToAssets(_shares, _totalAssets, _totalSupply);
-            uint256 convertedAssets = _convertFromUnderlying(_asset, underlyingAssets, Adjustment.DOWN);
+            uint256 underlyingAssets = convertToAssets(_shares);
+            uint256 convertedAssets = convertFromUnderlying(_asset, underlyingAssets, Adjustment.DOWN);
             uint256 assetsFulfilled = _fulfillRedeem(
-                _asset, 
-                convertedAssets, 
-                _shares, 
+                _asset,
+                convertedAssets,
+                _shares,
                 _controller
             );
 
@@ -906,6 +822,10 @@ abstract contract BaseControlledAsyncRedeem is
         afterFulfillRedeem(_asset, assets, shares, controller);
 
         return assets;
+    }
+
+    function _ensureIsSupported(address _asset) internal view {
+        require(rateProvider().isSupported(_asset), AssetNotSupported());
     }
 
     /////////////////////

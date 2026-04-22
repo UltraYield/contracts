@@ -93,11 +93,19 @@ contract UltraFeeder is BaseControlledAsyncRedeem, IUltraFeederErrors {
     /// @notice Returns the total assets in the vault
     /// @return The total assets in the vault
     function totalAssets() public view override returns (uint256) {
-        return mainVault().oracle().getQuote(
-            totalSupply(),
-            address(mainVault()),
-            address(asset())
-        );
+        return mainVault().convertToAssets(totalSupply());
+    }
+
+    /// @dev Delegate to mainVault so feeder conversions match the underlying
+    ///      oracle-based math. Using the ERC4626 default (virtual-offset) would
+    ///      drift by 1 wei against mainVault and break the exact-equality check
+    ///      in `beforeFulfillRedeem`.
+    function convertToAssets(uint256 shares) public view override returns (uint256) {
+        return mainVault().convertToAssets(shares);
+    }
+
+    function convertToShares(uint256 assets) public view override returns (uint256) {
+        return mainVault().convertToShares(assets);
     }
 
     ////////////////////////
@@ -187,8 +195,14 @@ contract UltraFeeder is BaseControlledAsyncRedeem, IUltraFeederErrors {
     /// @dev "assets" will already be correct given the token user requested
     function beforeFulfillRedeem(address _asset, uint256 assets, uint256 shares) internal override {
         IUltraVault mainVault_ = mainVault();
-        // Fulfill redeem in main vault. Returns asset units
-        mainVault_.fulfillRedeem(_asset, shares, address(this));
+        // Fulfill redeem in main vault
+        address[] memory _assets = new address[](1);
+        uint256[] memory _shares = new uint256[](1);
+        address[] memory _controllers = new address[](1);
+        _assets[0] = _asset;
+        _shares[0] = shares;
+        _controllers[0] = address(this);
+        mainVault_.fulfillMultipleRedeems(_assets, _shares, _controllers);
         uint256 mainAssetsClaimed = mainVault_.redeemAsset(_asset, shares, address(this), address(this));
 
         // Deduct the expected withdrawal fee from the total amount of assets

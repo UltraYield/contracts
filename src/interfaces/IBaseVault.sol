@@ -11,14 +11,16 @@ import { IRedeemAccounting } from "src/interfaces/IRedeemAccounting.sol";
 import { IAddressUpdatableErrors } from "src/interfaces/IAddressUpdatableErrors.sol";
 import { IUltraVaultRateProvider } from "src/interfaces/IUltraVaultRateProvider.sol";
 import { Adjustment } from "src/interfaces/Types.sol";
+import { IAccessControl } from "@openzeppelin/contracts/access/IAccessControl.sol";
+import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import { IERC4626 } from "@openzeppelin/contracts/interfaces/IERC4626.sol";
+import { IERC165 } from "@openzeppelin/contracts/interfaces/IERC165.sol";
 
 interface IBaseVaultErrors is IAddressUpdatableErrors {
     error NotOwner();
     error AccessDenied();
     error ZeroAssetAddress();
     error InputLengthMismatch();
-    error CannotPreviewWithdrawInAsyncVault();
-    error CannotPreviewRedeemInAsyncVault();
     error EmptyDeposit();
     error NothingToMint();
     error NothingToRedeem();
@@ -26,6 +28,7 @@ interface IBaseVaultErrors is IAddressUpdatableErrors {
     error NoPendingRedeem();
     error InsufficientBalance();
     error AssetNotSupported();
+    error CannotSetSelfAsOperator();
 }
 
 interface IBaseVaultEvents {
@@ -60,7 +63,7 @@ interface IBaseVault is
   IERC20,
   IERC165,
   IERC4626,
-  IAccessControlDefaultAdminRules,
+  IAccessControl,
   IPausable,
   IERC7540Operator,
   IRedeemAccounting 
@@ -82,12 +85,12 @@ interface IBaseVault is
     function proposedRateProvider() external view returns (address, uint256);
 
     /// @notice Converts assets to underlying
-    /// @param _asset The asset to convert
+    /// @param asset The asset to convert
     /// @param assets The amount of assets to convert
     /// @param adjustment The adjustment to apply
     /// @return baseAssets The amount of underlying received
     function convertToUnderlying(
-        address _asset,
+        address asset,
         uint256 assets,
         Adjustment adjustment
     ) external view returns (uint256 baseAssets);
@@ -314,26 +317,15 @@ interface IBaseVault is
     // Redeem Fulfillment //
     ////////////////////////
 
-    /// @notice Fulfill redeem request
-    /// @param asset Asset
-    /// @param shares Amount to redeem
-    /// @param controller Controller address
-    /// @return assets Amount of claimable assets
-    function fulfillRedeem(
-        address asset,
-        uint256 shares,
-        address controller
-    ) external returns (uint256);
-
     /// @notice Fulfill multiple redeem requests
     /// @param assets Array of assets
     /// @param shares Array of share amounts
     /// @param controllers Array of controllers
     /// @return Array of fulfilled amounts in requested asset
     function fulfillMultipleRedeems(
-        address[] memory assets,
-        uint256[] memory shares,
-        address[] memory controllers
+        address[] calldata assets,
+        uint256[] calldata shares,
+        address[] calldata controllers
     ) external returns (uint256[] memory);
 
     ////////////////////////
