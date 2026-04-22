@@ -177,7 +177,7 @@ abstract contract BaseControlledAsyncRedeem is
             return assets;
         }
         // Call reverts if asset not supported
-        return rateProvider().convertToUnderlying(_asset, assets);
+        return rateProvider().convertToUnderlying(_asset, assets, adjustment);
     }
 
     /// @notice Converts underlying to assets

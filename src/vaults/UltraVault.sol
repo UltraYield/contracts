@@ -308,7 +308,7 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
         if (liquidity == 0 || shareBalance == 0) {
             return 0;
         }
-        uint256 maxUnderlyingAssets = convertToUnderlying(_asset, liquidity);
+        uint256 maxUnderlyingAssets = convertToUnderlying(_asset, liquidity, Adjustment.DOWN);
         uint256 maxShares = convertToShares(maxUnderlyingAssets);
         return maxShares < shareBalance ? maxShares : shareBalance;
     }
@@ -677,7 +677,7 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
         returns (uint256 grossAssets, uint256 fee, uint256 netAssets)
     {
         uint256 underlyingAssets = convertToAssets(shares);
-        grossAssets = convertFromUnderlying(_asset, underlyingAssets);
+        grossAssets = convertFromUnderlying(_asset, underlyingAssets, Adjustment.DOWN);
         fee = _calculateInstantRedeemFee(grossAssets);
         netAssets = grossAssets - fee;
     }

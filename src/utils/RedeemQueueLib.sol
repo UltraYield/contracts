@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity 0.8.28;
 
-import { IRedeemQueueErrors, PendingRedeem, ClaimableRedeem } from "src/interfaces/IRedeemQueue.sol";
+import { PendingRedeem, ClaimableRedeem } from "src/interfaces/Types.sol";
+import { IRedeemQueueErrors } from "src/interfaces/IRedeemAccounting.sol";
 import { FixedPointMathLib } from "src/utils/FixedPointMathLib.sol";
 import { REDEEM_QUEUE_STORAGE_LOCATION } from "src/vaults/accounting/RedeemQueue.sol";
 
