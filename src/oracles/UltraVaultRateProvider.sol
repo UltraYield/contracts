@@ -3,6 +3,7 @@ pragma solidity 0.8.28;
 
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { IERC20Metadata } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
+import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
 import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
 import { Ownable2Step } from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import { IRateProvider } from "src/interfaces/IRateProvider.sol";
@@ -206,10 +207,11 @@ contract UltraVaultRateProvider is Ownable2Step, IUltraVaultRateProvider {
             return amount;
         }
         if (adjustment == Adjustment.DOWN) {
-            return amount * (SCALE - uint256(adjustmentRate)) / SCALE;
+            return Math.mulDiv(amount, SCALE - uint256(adjustmentRate), SCALE, Math.Rounding.Floor);
         }
         if (adjustment == Adjustment.UP) {
-            return amount * (SCALE + uint256(adjustmentRate)) / SCALE;
+            // Inverse of DOWN: ceil(amount * SCALE / (SCALE - adjustmentRate))
+            return Math.mulDiv(amount, SCALE, SCALE - uint256(adjustmentRate), Math.Rounding.Ceil);
         }
         revert UnknownAdjustment();
     }
