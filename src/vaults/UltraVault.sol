@@ -308,7 +308,7 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
         if (liquidity == 0 || shareBalance == 0) {
             return 0;
         }
-        uint256 maxUnderlyingAssets = convertToUnderlying(_asset, liquidity, Adjustment.DOWN);
+        uint256 maxUnderlyingAssets = convertToUnderlying(_asset, liquidity, Adjustment.UP);
         uint256 maxShares = convertToShares(maxUnderlyingAssets);
         return maxShares < shareBalance ? maxShares : shareBalance;
     }
