@@ -11,7 +11,7 @@ struct AssetData {
     address rateProvider; // External rate provider if not pegged
 }
 
-/// @title IUltraVaultRateProvider
+/// @title IUltraVaultRateProviderV1
 /// @notice Handles rate calculations between assets for UltraVault
 interface IUltraVaultRateProviderV1 {
     ////////////
