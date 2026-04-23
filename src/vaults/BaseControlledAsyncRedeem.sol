@@ -194,26 +194,6 @@ abstract contract BaseControlledAsyncRedeem is
         return rateProvider().convertFromUnderlying(_asset, baseAssets);
     }
 
-    /// @dev Optimized function mirroring `convertToAssets` in OZ ERC4626 v5.4.0
-    /// @dev Uses pre-fetched totals. Always rounds down like `convertToAssets` does in the OZ implementation
-    function _optimizedConvertToAssets(
-        uint256 shares,
-        uint256 _totalAssets,
-        uint256 _totalSupply
-    ) internal pure returns (uint256 assets) {
-        return shares.mulDiv(_totalAssets + 1, _totalSupply + 1, Math.Rounding.Floor);
-    }
-
-    /// @dev Optimized function mirroring `convertToShares` in OZ ERC4626 v5.4.0
-    /// @dev Uses pre-fetched totals. Always rounds down like `convertToShares` does in the OZ implementation
-    function _optimizedConvertToShares(
-        uint256 assets,
-        uint256 _totalAssets,
-        uint256 _totalSupply
-    ) internal pure returns (uint256 shares) {
-        return assets.mulDiv(_totalSupply + 1, _totalAssets + 1, Math.Rounding.Floor);
-    }
-
     ////////////////////
     // Deposit & Mint //
     ////////////////////
@@ -785,15 +765,13 @@ abstract contract BaseControlledAsyncRedeem is
         require(length == shares.length && length == controllers.length, InputLengthMismatch());
 
         uint256 totalShares;
-        uint256 _totalAssets = totalAssets();
-        uint256 _totalSupply = totalSupply();
         uint256[] memory result = new uint256[](length);
         for (uint256 i; i < length; ) {
             // Fulfill redeem
             address _asset = assets[i];
             uint256 _shares = shares[i];
             address _controller = controllers[i];
-            uint256 underlyingAssets = _optimizedConvertToAssets(_shares, _totalAssets, _totalSupply);
+            uint256 underlyingAssets = convertToAssets(_shares);
             uint256 assetsFulfilled = _fulfillRedeem(
                 _asset, 
                 convertFromUnderlying(_asset, underlyingAssets), 
