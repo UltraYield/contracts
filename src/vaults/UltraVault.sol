@@ -36,6 +36,8 @@ struct UltraVaultInitParams {
     address fundsHolder;
     // Exitpoint address for instant redeems
     address instantRedeemExitpoint;
+    // External timelocked upgrade module
+    address upgradeModule;
 }
 
 /// @title UltraVault
@@ -106,7 +108,8 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
             asset: params.asset,
             name: params.name,
             symbol: params.symbol,
-            rateProvider: params.rateProvider
+            rateProvider: params.rateProvider,
+            upgradeModule: params.upgradeModule
         }));
 
         _getUltraVaultStorage().feeRecipient = params.feeRecipient;
@@ -118,13 +121,18 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
     /// @dev Copies only the live V1 contract addresses into the V2 address registry
     /// @dev Pending V1 address-update proposals are intentionally not migrated
     /// @param _instantRedeemExitpoint Address for the new instant redeem exitpoint (not present in V1)
-    function initializeV2(address _instantRedeemExitpoint) external reinitializer(2) {
+    /// @param _upgradeModule Address of the external timelocked upgrade module (not present in V1)
+    function initializeV2(
+        address _instantRedeemExitpoint,
+        address _upgradeModule
+    ) external reinitializer(2) {
         _migrateBaseControlledAsyncRedeemStateFromV1();
 
         UltraVaultStorage storage $ = _getUltraVaultStorage();
         _migrateAddress(FUNDS_HOLDER_KEY, $.__fundsHolder);
         _migrateAddress(ORACLE_KEY, address($.__oracle));
         _initAddress(INSTANT_REDEEM_EXITPOINT_KEY, _instantRedeemExitpoint);
+        _initAddress(UPGRADE_MODULE_KEY, _upgradeModule);
 
         _pause();
     }
