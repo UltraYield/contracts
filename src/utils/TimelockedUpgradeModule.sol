@@ -166,17 +166,4 @@ contract TimelockedUpgradeModule {
         require(pending.dataHash == keccak256(data), UpgradeDataMismatch());
         return block.timestamp >= pending.executionTime;
     }
-
-    /// @notice Get the pending upgrade details
-    /// @return implementation The implementation address (address(0) if none pending)
-    /// @return dataHash The hash of call data for the upgrade
-    /// @return executionTime The earliest time the upgrade can be executed (0 if none pending)
-    function getPendingUpgrade() external view returns (
-        address implementation,
-        bytes32 dataHash,
-        uint256 executionTime
-    ) {
-        PendingUpgrade memory pending = pendingUpgrade;
-        return (pending.implementation, pending.dataHash, pending.executionTime);
-    }
 }

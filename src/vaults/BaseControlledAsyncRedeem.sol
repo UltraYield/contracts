@@ -946,7 +946,7 @@ abstract contract BaseControlledAsyncRedeem is
     /// @dev Restricts upgrades to the registered upgrade module
     /// @dev Timelock and UPGRADER_ROLE checks are enforced by the module before it calls back here
     function _authorizeUpgrade(address) internal view override {
-        require(msg.sender == upgradeModule(), Unauthorized());
+        require(msg.sender == upgradeModule(), AccessDenied());
     }
 
     ////////////

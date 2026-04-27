@@ -24,7 +24,6 @@ interface IBaseVaultErrors is IAddressUpdatableErrors {
     error InsufficientBalance();
     error AssetNotSupported();
     error CannotSetSelfAsOperator();
-    error Unauthorized();
 }
 
 interface IBaseVaultEvents {
