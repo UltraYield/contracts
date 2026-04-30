@@ -17,8 +17,8 @@ abstract contract AddressUpdatable is IAddressUpdatableErrors {
     // Constants //
     ///////////////
 
-    uint256 internal constant ADDRESS_UPDATE_TIMELOCK = 3 days;
-    uint256 internal constant MAX_ADDRESS_UPDATE_WAIT = 7 days;
+    /// @dev Time window for accepting a proposal once its timelock has elapsed
+    uint256 internal constant ADDRESS_ACCEPTANCE_WINDOW = 7 days;
 
     /////////////
     // Storage //
@@ -88,22 +88,26 @@ abstract contract AddressUpdatable is IAddressUpdatableErrors {
         });
     }
 
-    /// @notice Accept an addressupdate for a given key
+    /// @notice Accept an address update for a given key
     /// @param key The key to accept the update for
     /// @param newAddress The new address to accept
+    /// @param timelockDuration Required delay between proposal and acceptance for this key
     /// @return oldAddress The old address for the given key
     /// @dev The new address must match the proposed address
-    /// @dev The proposal must be accepted within the timelock period
-    /// @dev The proposal must not have expired
-    function _acceptAddressUpdate(bytes32 key, address newAddress) internal returns (address oldAddress) {
+    function _acceptAddressUpdate(
+        bytes32 key,
+        address newAddress,
+        uint256 timelockDuration
+    ) internal returns (address oldAddress) {
         AddressUpdatableStorage storage $ = _getStorage();
         AddressUpdateProposal storage proposal = $.proposals[key];
-        
+
         // Validate proposal
         require(proposal.addr != address(0), NoPendingUpdateProposal());
         require(proposal.addr == newAddress, UpdateProposalAddressMismatch());
-        require(block.timestamp >= proposal.timestamp + ADDRESS_UPDATE_TIMELOCK, CannotAcceptProposalYet());
-        require(block.timestamp <= proposal.timestamp + MAX_ADDRESS_UPDATE_WAIT, UpdateProposalExpired());
+        uint256 timelockEnd = proposal.timestamp + timelockDuration;
+        require(block.timestamp >= timelockEnd, CannotAcceptProposalYet());
+        require(block.timestamp <= timelockEnd + ADDRESS_ACCEPTANCE_WINDOW, UpdateProposalExpired());
 
         // Update address
         oldAddress = $.addresses[key];

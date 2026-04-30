@@ -62,6 +62,12 @@ abstract contract BaseControlledAsyncRedeem is
     bytes32 internal constant RATE_PROVIDER_KEY = keccak256("rateProvider");
     bytes32 internal constant UPGRADE_MODULE_KEY = keccak256("upgradeModule");
 
+    /// @dev Default timelock between proposal and acceptance for address updates
+    uint256 internal constant DEFAULT_ADDRESS_TIMELOCK = 3 days;
+    /// @dev Longer timelock for upgrade-module swaps; matches the upgrade timelock so
+    ///      a compromised admin cannot bypass it by swapping in a no-delay module
+    uint256 internal constant UPGRADE_MODULE_TIMELOCK = 7 days;
+
     /////////////
     // Storage //
     /////////////
@@ -854,7 +860,7 @@ abstract contract BaseControlledAsyncRedeem is
     /// @dev Pauses vault to ensure provider setup and prevent deposits with faulty prices
     /// @dev Oracle must be switched before unpausing
     function acceptProposedRateProvider(address newRateProvider) external onlyOwner {
-        address oldRateProvider = _acceptAddressUpdate(RATE_PROVIDER_KEY, newRateProvider);
+        address oldRateProvider = _acceptAddressUpdate(RATE_PROVIDER_KEY, newRateProvider, DEFAULT_ADDRESS_TIMELOCK);
         emit RateProviderUpdated(oldRateProvider, newRateProvider);
 
         // Pause to manually check the setup by operators
@@ -871,7 +877,7 @@ abstract contract BaseControlledAsyncRedeem is
     /// @notice Accept proposed upgrade module
     /// @dev Pauses vault to manually check the setup by operators
     function acceptUpgradeModule(address newUpgradeModule) external onlyOwner {
-        address oldUpgradeModule = _acceptAddressUpdate(UPGRADE_MODULE_KEY, newUpgradeModule);
+        address oldUpgradeModule = _acceptAddressUpdate(UPGRADE_MODULE_KEY, newUpgradeModule, UPGRADE_MODULE_TIMELOCK);
         emit UpgradeModuleChanged(oldUpgradeModule, newUpgradeModule);
 
         // Pause to manually check the setup by operators

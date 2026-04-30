@@ -462,7 +462,7 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
     /// @dev Pauses vault to ensure oracle setup and prevent deposits with faulty prices
     /// @dev Oracle must be switched before unpausing
     function acceptFundsHolder(address newFundsHolder) external onlyOwner {
-        address oldFundsHolder = _acceptAddressUpdate(FUNDS_HOLDER_KEY, newFundsHolder);
+        address oldFundsHolder = _acceptAddressUpdate(FUNDS_HOLDER_KEY, newFundsHolder, DEFAULT_ADDRESS_TIMELOCK);
         emit FundsHolderChanged(oldFundsHolder, newFundsHolder);
 
         // Pause to manually check the setup by operators
@@ -484,7 +484,7 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
     /// @dev Pauses vault to ensure oracle setup and prevent deposits with faulty prices
     /// @dev Oracle must be switched before unpausing
     function acceptProposedOracle(address newOracle) external onlyOwner {
-        address oldOracle = _acceptAddressUpdate(ORACLE_KEY, newOracle);
+        address oldOracle = _acceptAddressUpdate(ORACLE_KEY, newOracle, DEFAULT_ADDRESS_TIMELOCK);
         emit OracleUpdated(oldOracle, newOracle);
 
         // Pause to manually check the setup by operators
@@ -505,7 +505,7 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
     /// @notice Accept proposed instant redeem exitpoint
     /// @dev Pauses vault to manually check the setup by operators
     function acceptInstantRedeemExitpoint(address newExitpoint) external onlyOwner {
-        address oldExitpoint = _acceptAddressUpdate(INSTANT_REDEEM_EXITPOINT_KEY, newExitpoint);
+        address oldExitpoint = _acceptAddressUpdate(INSTANT_REDEEM_EXITPOINT_KEY, newExitpoint, DEFAULT_ADDRESS_TIMELOCK);
         emit InstantRedeemExitpointChanged(oldExitpoint, newExitpoint);
 
         // Pause to manually check the setup by operators
