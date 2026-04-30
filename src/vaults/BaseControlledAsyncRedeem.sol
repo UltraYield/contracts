@@ -61,11 +61,7 @@ abstract contract BaseControlledAsyncRedeem is
     uint256 internal constant REQUEST_ID = 0;
     bytes32 internal constant RATE_PROVIDER_KEY = keccak256("rateProvider");
     bytes32 internal constant UPGRADE_MODULE_KEY = keccak256("upgradeModule");
-
-    /// @dev Default timelock between proposal and acceptance for address updates
     uint256 internal constant DEFAULT_ADDRESS_TIMELOCK = 3 days;
-    /// @dev Longer timelock for upgrade-module swaps; matches the upgrade timelock so
-    ///      a compromised admin cannot bypass it by swapping in a no-delay module
     uint256 internal constant UPGRADE_MODULE_TIMELOCK = 7 days;
 
     /////////////
