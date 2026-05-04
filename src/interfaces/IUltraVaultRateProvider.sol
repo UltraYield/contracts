@@ -92,12 +92,26 @@ interface IUltraVaultRateProvider {
     /// @return result The rate in terms of base asset (18 decimals)
     function convertToUnderlying(address asset, uint256 assets, Adjustment adjustment) external view returns (uint256 result);
 
+    /// @notice V1-compatible convertToUnderlying with no adjustment
+    /// @dev Allows a V1 vault to use this V2 rate provider before the vault is upgraded
+    /// @param asset The asset to get rate for
+    /// @param assets Amount to convert
+    /// @return result The rate in terms of base asset (18 decimals)
+    function convertToUnderlying(address asset, uint256 assets) external view returns (uint256 result);
+
     /// @notice Convert from base asset to specific asset
     /// @param asset The asset to convert to
     /// @param baseAssets Amount in base asset units
     /// @param adjustment The adjustment to apply
     /// @return result The amount in asset units
     function convertFromUnderlying(address asset, uint256 baseAssets, Adjustment adjustment) external view returns (uint256 result);
+
+    /// @notice V1-compatible convertFromUnderlying with no adjustment
+    /// @dev Allows a V1 vault to use this V2 rate provider before the vault is upgraded
+    /// @param asset The asset to convert to
+    /// @param baseAssets Amount in base asset units
+    /// @return result The amount in asset units
+    function convertFromUnderlying(address asset, uint256 baseAssets) external view returns (uint256 result);
 
     /////////////////////
     // Write Functions //
