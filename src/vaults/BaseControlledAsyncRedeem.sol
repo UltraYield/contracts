@@ -61,7 +61,7 @@ abstract contract BaseControlledAsyncRedeem is
     uint256 internal constant REQUEST_ID = 0;
     bytes32 internal constant RATE_PROVIDER_KEY = keccak256("rateProvider");
     bytes32 internal constant UPGRADE_MODULE_KEY = keccak256("upgradeModule");
-    uint256 internal constant DEFAULT_ADDRESS_TIMELOCK = 3 days;
+    uint256 internal constant RATE_PROVIDER_TIMELOCK = 3 days;
     uint256 internal constant UPGRADE_MODULE_TIMELOCK = 7 days;
 
     /////////////
@@ -856,7 +856,7 @@ abstract contract BaseControlledAsyncRedeem is
     /// @dev Pauses vault to ensure provider setup and prevent deposits with faulty prices
     /// @dev Oracle must be switched before unpausing
     function acceptProposedRateProvider(address newRateProvider) external onlyOwner {
-        address oldRateProvider = _acceptAddressUpdate(RATE_PROVIDER_KEY, newRateProvider, DEFAULT_ADDRESS_TIMELOCK);
+        address oldRateProvider = _acceptAddressUpdate(RATE_PROVIDER_KEY, newRateProvider, RATE_PROVIDER_TIMELOCK);
         emit RateProviderUpdated(oldRateProvider, newRateProvider);
 
         // Pause to manually check the setup by operators

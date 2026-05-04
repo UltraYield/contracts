@@ -58,6 +58,11 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
     uint64 internal constant MAX_MANAGEMENT_FEE = 5 * ONE_PERCENT; // 5%
     uint64 internal constant MAX_WITHDRAWAL_FEE = ONE_PERCENT; // 1%
     uint64 internal constant MAX_INSTANT_REDEEM_PREMIUM = ONE_PERCENT / 2; // 0.5%
+
+    uint256 internal constant FUNDS_HOLDER_TIMELOCK = 3 days;
+    uint256 internal constant ORACLE_TIMELOCK = 3 days;
+    uint256 internal constant INSTANT_REDEEM_EXITPOINT_TIMELOCK = 3 days;
+
     bytes32 internal constant FUNDS_HOLDER_KEY = keccak256("fundsHolder");
     bytes32 internal constant ORACLE_KEY = keccak256("oracle");
     bytes32 internal constant INSTANT_REDEEM_EXITPOINT_KEY = keccak256("instantRedeemExitpoint");
@@ -462,7 +467,7 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
     /// @dev Pauses vault to ensure oracle setup and prevent deposits with faulty prices
     /// @dev Oracle must be switched before unpausing
     function acceptFundsHolder(address newFundsHolder) external onlyOwner {
-        address oldFundsHolder = _acceptAddressUpdate(FUNDS_HOLDER_KEY, newFundsHolder, DEFAULT_ADDRESS_TIMELOCK);
+        address oldFundsHolder = _acceptAddressUpdate(FUNDS_HOLDER_KEY, newFundsHolder, FUNDS_HOLDER_TIMELOCK);
         emit FundsHolderChanged(oldFundsHolder, newFundsHolder);
 
         // Pause to manually check the setup by operators
@@ -484,7 +489,7 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
     /// @dev Pauses vault to ensure oracle setup and prevent deposits with faulty prices
     /// @dev Oracle must be switched before unpausing
     function acceptProposedOracle(address newOracle) external onlyOwner {
-        address oldOracle = _acceptAddressUpdate(ORACLE_KEY, newOracle, DEFAULT_ADDRESS_TIMELOCK);
+        address oldOracle = _acceptAddressUpdate(ORACLE_KEY, newOracle, ORACLE_TIMELOCK);
         emit OracleUpdated(oldOracle, newOracle);
 
         // Pause to manually check the setup by operators
@@ -505,7 +510,11 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
     /// @notice Accept proposed instant redeem exitpoint
     /// @dev Pauses vault to manually check the setup by operators
     function acceptInstantRedeemExitpoint(address newExitpoint) external onlyOwner {
-        address oldExitpoint = _acceptAddressUpdate(INSTANT_REDEEM_EXITPOINT_KEY, newExitpoint, DEFAULT_ADDRESS_TIMELOCK);
+        address oldExitpoint = _acceptAddressUpdate(
+            INSTANT_REDEEM_EXITPOINT_KEY, 
+            newExitpoint, 
+            INSTANT_REDEEM_EXITPOINT_TIMELOCK
+        );
         emit InstantRedeemExitpointChanged(oldExitpoint, newExitpoint);
 
         // Pause to manually check the setup by operators
