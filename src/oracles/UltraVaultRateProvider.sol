@@ -144,53 +144,63 @@ contract UltraVaultRateProvider is Ownable2Step, IUltraVaultRateProvider {
 
     /// @inheritdoc IUltraVaultRateProvider
     function convertToUnderlying(address asset, uint256 assets, Adjustment adjustment) external view returns (uint256) {
-        return _convertToUnderlying(asset, assets, adjustment);
+        (bool isPegged, uint8 decimals, address rateProvider, uint56 adjustmentRate) = getAssetInfo(asset);
+        uint256 amount = _convertToUnderlying(asset, assets, isPegged, decimals, rateProvider);
+        return _applyAdjustment(amount, adjustmentRate, adjustment);
     }
 
     /// @inheritdoc IUltraVaultRateProvider
     function convertFromUnderlying(address asset, uint256 baseAssets, Adjustment adjustment) external view returns (uint256) {
-        return _convertFromUnderlying(asset, baseAssets, adjustment);
+        (bool isPegged, uint8 decimals, address rateProvider, uint56 adjustmentRate) = getAssetInfo(asset);
+        uint256 amount = _convertFromUnderlying(asset, baseAssets, isPegged, decimals, rateProvider);
+        return _applyAdjustment(amount, adjustmentRate, adjustment);
     }
 
-    /// @notice V1-compatible convertToUnderlying with no adjustment
-    /// @dev Allows a V1 vault to use this V2 rate provider before the vault is upgraded
+    /// @inheritdoc IUltraVaultRateProvider
     function convertToUnderlying(address asset, uint256 assets) external view returns (uint256) {
-        return _convertToUnderlying(asset, assets, Adjustment.NONE);
+        (bool isPegged, uint8 decimals, address rateProvider,) = getAssetInfo(asset);
+        return _convertToUnderlying(asset, assets, isPegged, decimals, rateProvider);
     }
 
-    /// @notice V1-compatible convertFromUnderlying with no adjustment
-    /// @dev Allows a V1 vault to use this V2 rate provider before the vault is upgraded
+    /// @inheritdoc IUltraVaultRateProvider
     function convertFromUnderlying(address asset, uint256 baseAssets) external view returns (uint256) {
-        return _convertFromUnderlying(asset, baseAssets, Adjustment.NONE);
+        (bool isPegged, uint8 decimals, address rateProvider,) = getAssetInfo(asset);
+        return _convertFromUnderlying(asset, baseAssets, isPegged, decimals, rateProvider);
     }
 
     //////////////////////
     // Internal Helpers //
     //////////////////////
 
-    function _convertToUnderlying(address asset, uint256 assets, Adjustment adjustment) internal view returns (uint256) {
-        (bool isPegged, uint8 decimals, address rateProvider, uint56 adjustmentRate) = getAssetInfo(asset);
+    function _convertToUnderlying(
+        address asset,
+        uint256 assets,
+        bool isPegged,
+        uint8 decimals,
+        address rateProvider
+    ) internal view returns (uint256) {
         if (isPegged) {
-            uint256 amount = _convertDecimals(assets, decimals, baseDecimals);
-            return _applyAdjustment(amount, adjustmentRate, adjustment);
+            return _convertDecimals(assets, decimals, baseDecimals);
         } else {
             require(rateProvider != address(0), AssetNotSupported());
             // Call external rate provider
-            uint256 amount = IRateProvider(rateProvider).convertToUnderlying(asset, assets);
-            return _applyAdjustment(amount, adjustmentRate, adjustment);
+            return IRateProvider(rateProvider).convertToUnderlying(asset, assets);
         }
     }
 
-    function _convertFromUnderlying(address asset, uint256 baseAssets, Adjustment adjustment) internal view returns (uint256) {
-        (bool isPegged, uint8 decimals, address rateProvider, uint56 adjustmentRate) = getAssetInfo(asset);
+    function _convertFromUnderlying(
+        address asset,
+        uint256 baseAssets,
+        bool isPegged,
+        uint8 decimals,
+        address rateProvider
+    ) internal view returns (uint256) {
         if (isPegged) {
-            uint256 amount = _convertDecimals(baseAssets, baseDecimals, decimals);
-            return _applyAdjustment(amount, adjustmentRate, adjustment);
+            return _convertDecimals(baseAssets, baseDecimals, decimals);
         } else {
             require(rateProvider != address(0), AssetNotSupported());
             // Call external rate provider
-            uint256 amount = IRateProvider(rateProvider).convertFromUnderlying(asset, baseAssets);
-            return _applyAdjustment(amount, adjustmentRate, adjustment);
+            return IRateProvider(rateProvider).convertFromUnderlying(asset, baseAssets);
         }
     }
 
@@ -223,7 +233,7 @@ contract UltraVaultRateProvider is Ownable2Step, IUltraVaultRateProvider {
     }
 
     function _applyAdjustment(uint256 amount, uint56 adjustmentRate, Adjustment adjustment) internal pure returns (uint256) {
-        if (adjustment == Adjustment.NONE || adjustmentRate == 0) {
+        if (adjustmentRate == 0) {
             return amount;
         }
         if (adjustment == Adjustment.DOWN) {

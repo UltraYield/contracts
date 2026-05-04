@@ -3,7 +3,6 @@ pragma solidity >=0.8.0;
 
 /// @notice Adjustment type for asset conversion
 enum Adjustment {
-    NONE,
     DOWN,
     UP
 }
