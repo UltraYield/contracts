@@ -20,6 +20,8 @@ struct UltraFeederInitParams {
     string name;
     // The symbol of the vault token
     string symbol;
+    // External timelocked upgrade module
+    address upgradeModule;
 }
 
 // keccak256(abi.encode(uint256(keccak256("ultrayield.storage.UltraFeeder")) - 1)) & ~bytes32(uint256(0xff));
@@ -74,7 +76,8 @@ contract UltraFeeder is BaseControlledAsyncRedeem, IUltraFeederErrors {
             asset: params.asset,
             name: params.name,
             symbol: params.symbol,
-            rateProvider: address(mainVault_.rateProvider())
+            rateProvider: address(mainVault_.rateProvider()),
+            upgradeModule: params.upgradeModule
         }));
 
         // Pause vault in order to be manually checked by the operator
