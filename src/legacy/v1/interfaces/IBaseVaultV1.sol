@@ -4,7 +4,7 @@ pragma solidity >=0.8.0;
 import { IPausable } from "src/interfaces/IPausable.sol";
 import { IERC7540Operator } from "ERC-7540/interfaces/IERC7540.sol";
 import { IRedeemAccountingV1 } from "src/legacy/v1/interfaces/IRedeemAccountingV1.sol";
-import { IUltraVaultRateProvider } from "src/interfaces/IUltraVaultRateProvider.sol";
+import { IUltraVaultRateProviderV1 } from "src/legacy/v1/interfaces/IUltraVaultRateProviderV1.sol";
 import { IAccessControlDefaultAdminRules } from "@openzeppelin/contracts/access/extensions/IAccessControlDefaultAdminRules.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { IERC4626 } from "@openzeppelin/contracts/interfaces/IERC4626.sol";
@@ -80,7 +80,7 @@ interface IBaseVaultV1 is
 
     /// @notice Returns the address of the rate provider
     /// @return rateProvider The address of the rate provider
-    function rateProvider() external view returns (IUltraVaultRateProvider);
+    function rateProvider() external view returns (IUltraVaultRateProviderV1);
 
     /// @notice Returns the proposed rate provider
     /// @return proposedRateProvider The proposed rate provider

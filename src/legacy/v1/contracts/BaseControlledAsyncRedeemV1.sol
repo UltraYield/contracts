@@ -8,9 +8,9 @@ import { ERC4626Upgradeable } from "@openzeppelin/contracts-upgradeable/token/ER
 import { TimelockedUUPSUpgradeableV1 } from "src/legacy/v1/contracts/TimelockedUUPSUpgradeableV1.sol";
 import { SafeERC20, IERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
-import { PendingRedeem, ClaimableRedeem } from "src/interfaces/IRedeemQueue.sol";
+import { PendingRedeem, ClaimableRedeem } from "src/interfaces/Types.sol";
 import { IRedeemAccountingV1 } from "src/legacy/v1/interfaces/IRedeemAccountingV1.sol";
-import { IUltraVaultRateProvider } from "src/interfaces/IUltraVaultRateProvider.sol";
+import { IUltraVaultRateProviderV1 } from "src/legacy/v1/interfaces/IUltraVaultRateProviderV1.sol";
 import { OPERATOR_ROLE, PAUSER_ROLE, UPGRADER_ROLE } from "src/utils/Roles.sol";
 import { AccessControlUpgradeable } from "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol";
 import { AddressUpdateProposal } from "src/utils/AddressUpdates.sol";
@@ -66,7 +66,7 @@ abstract contract BaseControlledAsyncRedeemV1 is
     /// @custom:storage-location erc7201:ultrayield.storage.BaseControlledAsyncRedeem
     struct BaseAsyncRedeemStorage {
         mapping(address => mapping(address => bool)) isOperator;
-        IUltraVaultRateProvider rateProvider;
+        IUltraVaultRateProviderV1 rateProvider;
         AddressUpdateProposal proposedRateProvider;
     }
 
@@ -96,7 +96,7 @@ abstract contract BaseControlledAsyncRedeemV1 is
         __ERC4626_init(IERC20(params.asset));
 
         // Init self
-        _getBaseAsyncRedeemStorage().rateProvider = IUltraVaultRateProvider(params.rateProvider);
+        _getBaseAsyncRedeemStorage().rateProvider = IUltraVaultRateProviderV1(params.rateProvider);
 
         // Grant roles to owner
         _grantRole(DEFAULT_ADMIN_ROLE, params.owner);
@@ -111,7 +111,7 @@ abstract contract BaseControlledAsyncRedeemV1 is
 
     /// @notice Returns the address of the rate provider
     /// @return rateProvider The address of the rate provider
-    function rateProvider() public view returns (IUltraVaultRateProvider) {
+    function rateProvider() public view returns (IUltraVaultRateProviderV1) {
         return _getBaseAsyncRedeemStorage().rateProvider;
     }
 
@@ -971,7 +971,7 @@ abstract contract BaseControlledAsyncRedeemV1 is
         require(block.timestamp <= proposal.timestamp + MAX_ADDRESS_UPDATE_WAIT, RateProviderUpdateExpired());
 
         address oldRateProvider = address($.rateProvider);
-        $.rateProvider = IUltraVaultRateProvider(newRateProvider);
+        $.rateProvider = IUltraVaultRateProviderV1(newRateProvider);
         delete $.proposedRateProvider;
         emit RateProviderUpdated(oldRateProvider, newRateProvider);
 

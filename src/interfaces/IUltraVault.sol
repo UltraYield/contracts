@@ -3,22 +3,7 @@ pragma solidity >=0.8.0;
 
 import { IBaseVault, IBaseVaultEvents, IBaseVaultErrors } from "src/interfaces/IBaseVault.sol";
 import { IPriceSource } from "src/interfaces/IPriceSource.sol";
-
-/// @dev Vault fee configuration
-struct Fees {
-    // Performance fee rate (100% = 1e18)
-    uint64 performanceFee;
-    // Management fee rate (100% = 1e18)
-    uint64 managementFee;
-    // Withdrawal fee rate (100% = 1e18)
-    uint64 withdrawalFee;
-    // Last fee update timestamp
-    uint64 lastUpdateTimestamp;
-    // High water mark for performance fees
-    uint256 highwaterMark;
-    // Instant redeem premium fee rate (on top of withdrawal fee) (100% = 1e18)
-    uint64 instantRedeemPremium;
-}
+import { Adjustment, Fees } from "src/interfaces/Types.sol";
 
 interface IUltraVaultEvents is IBaseVaultEvents {
     event FundsHolderProposed(address indexed proposedFundsHolder);

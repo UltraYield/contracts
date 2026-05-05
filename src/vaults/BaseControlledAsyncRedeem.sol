@@ -8,9 +8,9 @@ import { ERC4626Upgradeable } from "@openzeppelin/contracts-upgradeable/token/ER
 import { UUPSUpgradeable } from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import { SafeERC20, IERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
-import { PendingRedeem, ClaimableRedeem } from "src/interfaces/IRedeemQueue.sol";
+import { PendingRedeem, ClaimableRedeem } from "src/interfaces/Types.sol";
 import { IRedeemAccounting } from "src/interfaces/IRedeemAccounting.sol";
-import { IUltraVaultRateProvider } from "src/interfaces/IUltraVaultRateProvider.sol";
+import { IUltraVaultRateProvider, Adjustment } from "src/interfaces/IUltraVaultRateProvider.sol";
 import { OPERATOR_ROLE, PAUSER_ROLE, UPGRADER_ROLE } from "src/utils/Roles.sol";
 import { AccessControlUpgradeable } from "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol";
 import { AddressUpdateProposal, AddressUpdatable } from "src/utils/AddressUpdates.sol";
@@ -183,33 +183,37 @@ abstract contract BaseControlledAsyncRedeem is
     /// @notice Converts assets to underlying
     /// @param _asset The asset to convert
     /// @param assets The amount of assets to convert
+    /// @param adjustment The adjustment to apply
     /// @return baseAssets The amount of underlying received
     function convertToUnderlying(
         address _asset,
-        uint256 assets
+        uint256 assets,
+        Adjustment adjustment
     ) public view returns (uint256 baseAssets) {
         // If asset is the same as base asset, no conversion needed
         if (_asset == this.asset()) {
             return assets;
         }
         // Call reverts if asset not supported
-        return rateProvider().convertToUnderlying(_asset, assets);
+        return rateProvider().convertToUnderlying(_asset, assets, adjustment);
     }
 
     /// @notice Converts underlying to assets
     /// @param _asset The asset to convert
     /// @param baseAssets The amount of underlying to convert
+    /// @param adjustment The adjustment to apply
     /// @return assets The amount of assets received
     function convertFromUnderlying(
         address _asset,
-        uint256 baseAssets
+        uint256 baseAssets,
+        Adjustment adjustment
     ) public view returns (uint256 assets) {
         // If asset is the same as base asset, no conversion needed
         if (_asset == this.asset()) {
             return baseAssets;
         }
         // Call reverts if asset not supported
-        return rateProvider().convertFromUnderlying(_asset, baseAssets);
+        return rateProvider().convertFromUnderlying(_asset, baseAssets, adjustment);
     }
 
     ////////////////////
@@ -534,8 +538,8 @@ abstract contract BaseControlledAsyncRedeem is
     /////////////////////////////////
 
     /// @notice Preview shares for deposit
-    /// @param assets Amount to deposit
-    /// @return shares Amount of shares received
+    /// @param assets Amount of assets to deposit
+    /// @return shares Amount of shares to be received
     /// @dev Returns 0 if vault is paused
     function previewDeposit(
         uint256 assets
@@ -545,20 +549,20 @@ abstract contract BaseControlledAsyncRedeem is
 
     /// @notice Preview shares for deposit
     /// @param _asset Asset
-    /// @param assets Amount to deposit
-    /// @return shares Amount of shares received
+    /// @param assets Amount of assets to deposit
+    /// @return shares Amount of shares to be received
     /// @dev Returns 0 if vault is paused
     function previewDepositForAsset(
         address _asset,
         uint256 assets
     ) public view virtual returns (uint256) {
         // Convert to underlying for share calculation
-        uint256 baseAssets = convertToUnderlying(_asset, assets);
+        uint256 baseAssets = convertToUnderlying(_asset, assets, Adjustment.DOWN);
         return paused() ? 0 : super.previewDeposit(baseAssets);
     }
 
     /// @notice Preview assets for mint
-    /// @param shares Amount to mint
+    /// @param shares Amount of shares to mint
     /// @return assets Amount of assets required
     /// @dev Returns 0 if vault is paused
     function previewMint(
@@ -569,7 +573,7 @@ abstract contract BaseControlledAsyncRedeem is
 
     /// @notice Preview assets for mint
     /// @param _asset Asset to deposit in
-    /// @param shares Amount to mint
+    /// @param shares Amount of shares to mint
     /// @return assets Amount of assets required
     /// @dev Returns 0 if vault is paused
     function previewMintForAsset(
@@ -578,7 +582,7 @@ abstract contract BaseControlledAsyncRedeem is
     ) public view virtual returns (uint256) {
         // Calculate assets needed in underlying units, then convert to asset units
         uint256 baseAssets = super.previewMint(shares);
-        return paused() ? 0 : convertFromUnderlying(_asset, baseAssets);
+        return paused() ? 0 : convertFromUnderlying(_asset, baseAssets, Adjustment.UP);
     }
 
     /// @dev Preview withdraw not supported for async flows
@@ -790,10 +794,11 @@ abstract contract BaseControlledAsyncRedeem is
             uint256 _shares = shares[i];
             address _controller = controllers[i];
             uint256 underlyingAssets = convertToAssets(_shares);
+            uint256 convertedAssets = convertFromUnderlying(_asset, underlyingAssets, Adjustment.DOWN);
             uint256 assetsFulfilled = _fulfillRedeem(
-                _asset, 
-                convertFromUnderlying(_asset, underlyingAssets), 
-                _shares, 
+                _asset,
+                convertedAssets,
+                _shares,
                 _controller
             );
 

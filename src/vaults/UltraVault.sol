@@ -5,7 +5,8 @@ import { SafeERC20, IERC20 } from "@openzeppelin/contracts/token/ERC20/utils/Saf
 import { IERC20Metadata } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
 import { IPriceSource } from "src/interfaces/IPriceSource.sol";
-import { Fees, IUltraVaultEvents, IUltraVaultErrors } from "src/interfaces/IUltraVault.sol";
+import { IUltraVaultEvents, IUltraVaultErrors } from "src/interfaces/IUltraVault.sol";
+import { Adjustment, Fees } from "src/interfaces/Types.sol";
 import { AddressUpdateProposal } from "src/utils/AddressUpdates.sol";
 import { FixedPointMathLib } from "src/utils/FixedPointMathLib.sol";
 import { BaseControlledAsyncRedeem, BaseControlledAsyncRedeemInitParams } from "src/vaults/BaseControlledAsyncRedeem.sol";
@@ -320,7 +321,7 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
         if (liquidity == 0 || shareBalance == 0) {
             return 0;
         }
-        uint256 maxUnderlyingAssets = convertToUnderlying(_asset, liquidity);
+        uint256 maxUnderlyingAssets = convertToUnderlying(_asset, liquidity, Adjustment.UP);
         uint256 maxShares = convertToShares(maxUnderlyingAssets);
         return maxShares < shareBalance ? maxShares : shareBalance;
     }
@@ -431,7 +432,7 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
             uint256 _shares = shares[i];
             address _controller = controllers[i];
             uint256 underlyingAssets = _optimizedConvertToAssets(_shares, sharePrice);
-            uint256 convertedAssets = convertFromUnderlying(_asset, underlyingAssets);
+            uint256 convertedAssets = convertFromUnderlying(_asset, underlyingAssets, Adjustment.DOWN);
 
             // Calculate and transfer withdrawal fee (in asset units)
             uint256 withdrawalFee = convertedAssets.mulDivDown(withdrawalFeeRate, SCALE);
@@ -693,7 +694,7 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
         returns (uint256 grossAssets, uint256 fee, uint256 netAssets)
     {
         uint256 underlyingAssets = convertToAssets(shares);
-        grossAssets = convertFromUnderlying(_asset, underlyingAssets);
+        grossAssets = convertFromUnderlying(_asset, underlyingAssets, Adjustment.DOWN);
         fee = _calculateInstantRedeemFee(grossAssets);
         netAssets = grossAssets - fee;
     }

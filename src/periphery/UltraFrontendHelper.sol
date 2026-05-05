@@ -3,6 +3,7 @@ pragma solidity 0.8.28;
 
 import { IUltraVault } from "src/interfaces/IUltraVault.sol";
 import { IUltraFrontendHelper } from "src/interfaces/IUltraFrontendHelper.sol";
+import { Adjustment } from "src/interfaces/IUltraVaultRateProvider.sol";
 import { Ownable2StepUpgradeable } from "@openzeppelin/contracts-upgradeable/access/Ownable2StepUpgradeable.sol";
 import { UUPSUpgradeable } from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -71,7 +72,7 @@ contract UltraFrontendHelper is IUltraFrontendHelper, Ownable2StepUpgradeable, U
     /// @inheritdoc IUltraFrontendHelper
     function previewDeposit(address asset, uint256 amount) external view returns (uint256) {
         IUltraVault vault = _getVault();
-        uint256 baseAssets = vault.convertToUnderlying(asset, amount);
+        uint256 baseAssets = vault.convertToUnderlying(asset, amount, Adjustment.DOWN);
         uint256 shares = vault.convertToShares(baseAssets);
         return shares;
     }
@@ -80,7 +81,7 @@ contract UltraFrontendHelper is IUltraFrontendHelper, Ownable2StepUpgradeable, U
     function previewRedeem(address asset, uint256 shares) external view returns (uint256) {
         IUltraVault vault = _getVault();
         uint256 baseAssets = vault.convertToAssets(shares);
-        uint256 assets = vault.convertFromUnderlying(asset, baseAssets);
+        uint256 assets = vault.convertFromUnderlying(asset, baseAssets, Adjustment.DOWN);
         uint256 withdrawalFee = vault.calculateWithdrawalFee(assets);
         return assets - withdrawalFee;
     }

@@ -1,11 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity >=0.8.0;
 
+import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import { IERC4626 } from "@openzeppelin/contracts/interfaces/IERC4626.sol";
+import { IERC165 } from "@openzeppelin/contracts/interfaces/IERC165.sol";
+import { IAccessControlDefaultAdminRules } from "@openzeppelin/contracts/access/extensions/IAccessControlDefaultAdminRules.sol";
 import { IPausable } from "src/interfaces/IPausable.sol";
 import { IERC7540Operator } from "ERC-7540/interfaces/IERC7540.sol";
 import { IRedeemAccounting } from "src/interfaces/IRedeemAccounting.sol";
 import { IAddressUpdatableErrors } from "src/interfaces/IAddressUpdatableErrors.sol";
 import { IUltraVaultRateProvider } from "src/interfaces/IUltraVaultRateProvider.sol";
+import { Adjustment } from "src/interfaces/Types.sol";
 import { IAccessControl } from "@openzeppelin/contracts/access/IAccessControl.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { IERC4626 } from "@openzeppelin/contracts/interfaces/IERC4626.sol";
@@ -92,19 +97,23 @@ interface IBaseVault is
     /// @notice Converts assets to underlying
     /// @param asset The asset to convert
     /// @param assets The amount of assets to convert
+    /// @param adjustment The adjustment to apply
     /// @return baseAssets The amount of underlying received
     function convertToUnderlying(
         address asset,
-        uint256 assets
+        uint256 assets,
+        Adjustment adjustment
     ) external view returns (uint256 baseAssets);
 
     /// @notice Converts underlying to assets
     /// @param asset The asset to convert
     /// @param baseAssets The amount of underlying to convert
+    /// @param adjustment The adjustment to apply
     /// @return assets The amount of assets received
     function convertFromUnderlying(
         address asset,
-        uint256 baseAssets
+        uint256 baseAssets,
+        Adjustment adjustment
     ) external view returns (uint256 assets);
 
     /////////////
