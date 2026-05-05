@@ -34,6 +34,8 @@ interface IBaseVaultErrors is IAddressUpdatableErrors {
 interface IBaseVaultEvents {
     event RateProviderProposed(address indexed proposedProvider);
     event RateProviderUpdated(address indexed oldProvider, address indexed newProvider);
+    event UpgradeModuleProposed(address indexed proposedUpgradeModule);
+    event UpgradeModuleChanged(address indexed oldUpgradeModule, address indexed newUpgradeModule);
     event RedeemRequestFulfilled(
         address indexed controller,
         address indexed fulfiller,
@@ -83,6 +85,14 @@ interface IBaseVault is
     /// @notice Returns the proposed rate provider
     /// @return proposedRateProvider The proposed rate provider address and proposaltimestamp
     function proposedRateProvider() external view returns (address, uint256);
+
+    /// @notice Returns the address of the upgrade module
+    /// @return upgradeModule The address of the upgrade module
+    function upgradeModule() external view returns (address);
+
+    /// @notice Returns the proposed upgrade module
+    /// @return proposedUpgradeModule The proposed upgrade module address and proposal timestamp
+    function proposedUpgradeModule() external view returns (address, uint256);
 
     /// @notice Converts assets to underlying
     /// @param asset The asset to convert
@@ -366,4 +376,13 @@ interface IBaseVault is
     /// @notice Accept proposed rate provider
     /// @param newRateProvider Address of the new rate provider
     function acceptProposedRateProvider(address newRateProvider) external;
-} 
+
+    /// @notice Propose new upgrade module for owner acceptance after delay
+    /// @param newUpgradeModule Address of the new upgrade module
+    function proposeUpgradeModule(address newUpgradeModule) external;
+
+    /// @notice Accept proposed upgrade module
+    /// @param newUpgradeModule Address of the new upgrade module
+    /// @dev Pauses vault to manually check the setup by operators
+    function acceptUpgradeModule(address newUpgradeModule) external;
+}

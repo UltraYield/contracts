@@ -5,7 +5,7 @@ import { IERC165, IERC7575 } from "ERC-7540/interfaces/IERC7575.sol";
 import { IERC7540Redeem, IERC7540Operator } from "ERC-7540/interfaces/IERC7540.sol";
 import { PausableUpgradeable } from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import { ERC4626Upgradeable } from "@openzeppelin/contracts-upgradeable/token/ERC20/extensions/ERC4626Upgradeable.sol";
-import { TimelockedUUPSUpgradeable } from "src/utils/TimelockedUUPSUpgradeable.sol";
+import { UUPSUpgradeable } from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import { SafeERC20, IERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
 import { PendingRedeem, ClaimableRedeem } from "src/interfaces/Types.sol";
@@ -32,6 +32,8 @@ struct BaseControlledAsyncRedeemInitParams {
     string symbol;
     // Oracle for assets exchange rate
     address rateProvider;
+    // External timelocked upgrade module
+    address upgradeModule;
 }
 
 /// @title BaseControlledAsyncRedeem
@@ -42,7 +44,7 @@ abstract contract BaseControlledAsyncRedeem is
     ERC4626Upgradeable,
     PausableUpgradeable,
     AddressUpdatable,
-    TimelockedUUPSUpgradeable,
+    UUPSUpgradeable,
     RedeemQueue,
     IERC7540Operator,
     IRedeemAccounting,
@@ -58,6 +60,9 @@ abstract contract BaseControlledAsyncRedeem is
 
     uint256 internal constant REQUEST_ID = 0;
     bytes32 internal constant RATE_PROVIDER_KEY = keccak256("rateProvider");
+    bytes32 internal constant UPGRADE_MODULE_KEY = keccak256("upgradeModule");
+    uint256 internal constant RATE_PROVIDER_TIMELOCK = 3 days;
+    uint256 internal constant UPGRADE_MODULE_TIMELOCK = 7 days;
 
     /////////////
     // Storage //
@@ -94,7 +99,7 @@ abstract contract BaseControlledAsyncRedeem is
         require(params.asset != address(0), ZeroAssetAddress());
 
         // Init parents
-        __TimelockedUUPSUpgradeable_init();
+        __UUPSUpgradeable_init();
         __AccessControl_init();
         __Pausable_init();
         __ERC20_init(params.name, params.symbol);
@@ -102,6 +107,7 @@ abstract contract BaseControlledAsyncRedeem is
 
         // Init self
         _initAddress(RATE_PROVIDER_KEY, params.rateProvider);
+        _initAddress(UPGRADE_MODULE_KEY, params.upgradeModule);
 
         // Grant roles to owner
         _grantRole(DEFAULT_ADMIN_ROLE, params.owner);
@@ -124,6 +130,18 @@ abstract contract BaseControlledAsyncRedeem is
     /// @return proposedRateProvider The proposed rate provider
     function proposedRateProvider() public view returns (address, uint256) {
         return _getAddressUpdateProposal(RATE_PROVIDER_KEY);
+    }
+
+    /// @notice Returns the upgrade module address
+    /// @return upgradeModule The address of the upgrade module
+    function upgradeModule() public view returns (address) {
+        return _getCurrentAddress(UPGRADE_MODULE_KEY);
+    }
+
+    /// @notice Returns the proposed upgrade module
+    /// @return proposedUpgradeModule The proposed upgrade module address and proposal timestamp
+    function proposedUpgradeModule() public view returns (address, uint256) {
+        return _getAddressUpdateProposal(UPGRADE_MODULE_KEY);
     }
 
     //////////////
@@ -843,8 +861,25 @@ abstract contract BaseControlledAsyncRedeem is
     /// @dev Pauses vault to ensure provider setup and prevent deposits with faulty prices
     /// @dev Oracle must be switched before unpausing
     function acceptProposedRateProvider(address newRateProvider) external onlyOwner {
-        address oldRateProvider = _acceptAddressUpdate(RATE_PROVIDER_KEY, newRateProvider);
+        address oldRateProvider = _acceptAddressUpdate(RATE_PROVIDER_KEY, newRateProvider, RATE_PROVIDER_TIMELOCK);
         emit RateProviderUpdated(oldRateProvider, newRateProvider);
+
+        // Pause to manually check the setup by operators
+        _pause();
+    }
+
+    /// @notice Propose new upgrade module for owner acceptance after delay
+    /// @param newUpgradeModule Address of the new upgrade module
+    function proposeUpgradeModule(address newUpgradeModule) external onlyOwner {
+        _proposeAddressUpdate(UPGRADE_MODULE_KEY, newUpgradeModule);
+        emit UpgradeModuleProposed(newUpgradeModule);
+    }
+
+    /// @notice Accept proposed upgrade module
+    /// @dev Pauses vault to manually check the setup by operators
+    function acceptUpgradeModule(address newUpgradeModule) external onlyOwner {
+        address oldUpgradeModule = _acceptAddressUpdate(UPGRADE_MODULE_KEY, newUpgradeModule, UPGRADE_MODULE_TIMELOCK);
+        emit UpgradeModuleChanged(oldUpgradeModule, newUpgradeModule);
 
         // Pause to manually check the setup by operators
         _pause();
@@ -915,14 +950,11 @@ abstract contract BaseControlledAsyncRedeem is
         _;
     }
 
-    /// @dev Checks that caller has the UPGRADER_ROLE required to execute an upgrade
-    function _authorizeUpgrade(address newImplementation) internal override onlyRole(UPGRADER_ROLE) {}
-
-    /// @dev Checks that caller has the UPGRADER_ROLE required to propose an upgrade
-    function _authorizeUpgradeProposal() internal override onlyRole(UPGRADER_ROLE) {}
-
-    /// @dev Checks that caller has the UPGRADER_ROLE required to cancel a pending upgrade
-    function _authorizeUpgradeCancellation() internal override onlyRole(UPGRADER_ROLE) {}
+    /// @dev Restricts upgrades to the registered upgrade module
+    /// @dev Timelock and UPGRADER_ROLE checks are enforced by the module before it calls back here
+    function _authorizeUpgrade(address) internal view override {
+        require(msg.sender == upgradeModule(), AccessDenied());
+    }
 
     ////////////
     // ERC165 //
