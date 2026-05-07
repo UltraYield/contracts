@@ -347,9 +347,6 @@ abstract contract BaseControlledAsyncRedeem is
         require(assets != 0, EmptyDeposit());
         require(shares != 0, NothingToMint());
 
-        // Pre-deposit hook - use the actual asset amount being transferred
-        beforeDeposit(_asset, assets, shares);
-
         // Transfer assets from sender to the vault
         IERC20(_asset).safeTransferFrom(
             msg.sender,
@@ -364,7 +361,7 @@ abstract contract BaseControlledAsyncRedeem is
         emit Deposit(msg.sender, receiver, assets, shares);
 
         // After-deposit hook - use the actual asset amount that was transferred
-        afterDeposit(_asset, assets, shares);
+        _afterDeposit(_asset, assets, shares, receiver);
     }
 
     ///////////////////////
@@ -482,9 +479,9 @@ abstract contract BaseControlledAsyncRedeem is
         uint256 shares,
         address receiver,
         address controller
-    ) internal {
+    ) internal virtual {
         // Before-withdrawal hook - use asset units for the hook
-        beforeWithdraw(_asset, assets, shares);
+        _beforeWithdraw(_asset, assets, shares, receiver, controller);
 
         // Update claimable redeem
         _consumeClaimableRedeem(controller, _asset, assets, shares);
@@ -492,9 +489,6 @@ abstract contract BaseControlledAsyncRedeem is
         // Transfer assets to the receiver
         IERC20(_asset).safeTransfer(receiver, assets);
         emit Withdraw(msg.sender, receiver, controller, assets, shares);
-        
-        // After-withdrawal hook - use asset units for the hook
-        afterWithdraw(_asset, assets, shares);
     }
 
     ////////////////
@@ -690,7 +684,7 @@ abstract contract BaseControlledAsyncRedeem is
         require(balanceOf(owner) >= shares, InsufficientBalance());
 
         // Call beforeRequestRedeem hook
-        beforeRequestRedeem(_asset, shares, controller, owner);
+        _beforeRequestRedeem(_asset, shares, controller, owner);
 
         // Update pending redeem
         _increasePendingRedeem(controller, _asset, shares);
@@ -827,7 +821,7 @@ abstract contract BaseControlledAsyncRedeem is
         require(assets != 0, NothingToWithdraw());
 
         // Before fulfill redeem hook
-        beforeFulfillRedeem(_asset, assets, shares);
+        _beforeFulfillRedeem(_asset, assets, shares);
 
         // Update pending and claimable redeems
         _consumePendingRedeem(controller, _asset, shares);
@@ -837,7 +831,7 @@ abstract contract BaseControlledAsyncRedeem is
         emit RedeemRequestFulfilled(controller, msg.sender, shares, assets);
 
         // After fulfill redeem hook
-        afterFulfillRedeem(_asset, assets, shares, controller);
+        _afterFulfillRedeem(_asset, assets, shares, controller);
 
         return assets;
     }
@@ -889,26 +883,20 @@ abstract contract BaseControlledAsyncRedeem is
     // Hooks //
     ///////////
 
-    /// @dev Hook for executing custom logic right before deposit/mint
-    function beforeDeposit(address _asset, uint256 assets, uint256 shares) internal virtual {}
-
     /// @dev Hook for executing custom logic right after deposit/mint
-    function afterDeposit(address _asset, uint256 assets, uint256 shares) internal virtual {}
+    function _afterDeposit(address _asset, uint256 assets, uint256 shares, address receiver) internal virtual {}
 
     /// @dev Hook for executing custom logic right before withdraw/redeem
-    function beforeWithdraw(address _asset, uint256 assets, uint256 shares) internal virtual {}
-
-    /// @dev Hook for executing custom logic right after withdraw/redeem
-    function afterWithdraw(address _asset, uint256 assets, uint256 shares) internal virtual {}
+    function _beforeWithdraw(address _asset, uint256 assets, uint256 shares, address receiver, address controller) internal virtual {}
 
     /// @dev Hook for inheriting contracts after request redeem
-    function beforeRequestRedeem(address _asset, uint256 shares, address controller, address owner) internal virtual {}
+    function _beforeRequestRedeem(address _asset, uint256 shares, address controller, address owner) internal virtual {}
 
     /// @dev Hook for inheriting contracts before fulfill
-    function beforeFulfillRedeem(address _asset, uint256 assets, uint256 shares) internal virtual {}
+    function _beforeFulfillRedeem(address _asset, uint256 assets, uint256 shares) internal virtual {}
 
     /// @dev Hook for inheriting contracts after fulfill
-    function afterFulfillRedeem(address _asset, uint256 assets, uint256 shares, address controller) internal virtual {}
+    function _afterFulfillRedeem(address _asset, uint256 assets, uint256 shares, address controller) internal virtual {}
 
     //////////////
     // Pausable //
@@ -965,7 +953,7 @@ abstract contract BaseControlledAsyncRedeem is
     /// @return exists True if interface is supported
     function supportsInterface(
         bytes4 interfaceId
-    ) public view override returns (bool) {
+    ) public view virtual override returns (bool) {
         return
             interfaceId == type(IERC165).interfaceId ||
             interfaceId == type(IERC7540Redeem).interfaceId ||

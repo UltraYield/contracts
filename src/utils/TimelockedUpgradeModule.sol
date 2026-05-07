@@ -89,9 +89,9 @@ contract TimelockedUpgradeModule {
         vault = _vault;
     }
 
-    //////////////////
+    ///////////////////
     // Authorization //
-    //////////////////
+    ///////////////////
 
     modifier onlyUpgrader() {
         require(IAccessControl(vault).hasRole(UPGRADER_ROLE, msg.sender), Unauthorized());

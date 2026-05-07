@@ -170,7 +170,12 @@ contract UltraFeeder is BaseControlledAsyncRedeem, IUltraFeederErrors {
     ////////////////////////
 
     /// @dev After deposit hook - collect fees and send funds to fundsHolder
-    function afterDeposit(address _asset, uint256 assets, uint256 shares) internal override {
+    function _afterDeposit(
+        address _asset, 
+        uint256 assets, 
+        uint256 shares, 
+        address /* receiver */
+    ) internal override {
         // Approve main vault to spend assets
         IUltraVault _mainVault = mainVault();
         IERC20(_asset).safeIncreaseAllowance(address(_mainVault), assets);
@@ -180,7 +185,7 @@ contract UltraFeeder is BaseControlledAsyncRedeem, IUltraFeederErrors {
     }
 
     /// @dev Hook for inheriting contracts after request redeem
-    function beforeRequestRedeem(
+    function _beforeRequestRedeem(
         address _asset,
         uint256 shares,
         address, // controller
@@ -196,7 +201,7 @@ contract UltraFeeder is BaseControlledAsyncRedeem, IUltraFeederErrors {
 
     /// @dev Before fulfill redeem - transfer funds from fundsHolder to vault
     /// @dev "assets" will already be correct given the token user requested
-    function beforeFulfillRedeem(address _asset, uint256 assets, uint256 shares) internal override {
+    function _beforeFulfillRedeem(address _asset, uint256 assets, uint256 shares) internal override {
         IUltraVault mainVault_ = mainVault();
         // Fulfill redeem in main vault
         address[] memory _assets = new address[](1);
@@ -228,7 +233,7 @@ contract UltraFeeder is BaseControlledAsyncRedeem, IUltraFeederErrors {
 
     /// @dev Hook for inheriting contracts after fulfill redeem
     /// @dev Correct claimable redeem amounts to account for underlying vault fees
-    function afterFulfillRedeem(
+    function _afterFulfillRedeem(
         address _asset,
         uint256 assets,
         uint256, // shares
