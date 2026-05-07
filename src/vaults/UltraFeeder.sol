@@ -190,9 +190,7 @@ contract UltraFeeder is BaseControlledAsyncRedeem, IUltraFeederErrors {
         IUltraVault _mainVault = mainVault();
         IERC20(_mainVault).safeIncreaseAllowance(address(_mainVault), shares);
 
-        // autoClaim must be false: the feeder runs its own claim flow inside
-        // beforeFulfillRedeem (mainVault.redeemAsset). Auto-claiming would
-        // empty claimable before that manual claim, breaking the feeder.
+        // autoClaim must be false; auto-claiming would empty claimable before that manual claim, breaking the feeder
         _mainVault.requestRedeem(_asset, shares, address(this), address(this), false);
     }
 

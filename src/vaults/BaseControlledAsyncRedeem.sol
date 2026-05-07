@@ -347,7 +347,7 @@ abstract contract BaseControlledAsyncRedeem is
         require(assets != 0, EmptyDeposit());
         require(shares != 0, NothingToMint());
 
-        // Pre-deposit hook - use the actual asset amount being transferred
+        // Call pre-deposit hook - use the actual asset amount being transferred
         beforeDeposit(_asset, assets, shares);
 
         // Transfer assets from sender to the vault
@@ -363,7 +363,7 @@ abstract contract BaseControlledAsyncRedeem is
         // Emit event
         emit Deposit(msg.sender, receiver, assets, shares);
 
-        // After-deposit hook - use the actual asset amount that was transferred
+        // Call after-deposit hook - use the actual asset amount that was transferred
         afterDeposit(_asset, assets, shares);
     }
 
@@ -483,7 +483,7 @@ abstract contract BaseControlledAsyncRedeem is
         address receiver,
         address controller
     ) internal {
-        // Before-withdrawal hook - use asset units for the hook
+        // Call before-withdrawal hook - use asset units for the hook
         beforeWithdraw(_asset, assets, shares);
 
         // Update claimable redeem
@@ -493,7 +493,7 @@ abstract contract BaseControlledAsyncRedeem is
         IERC20(_asset).safeTransfer(receiver, assets);
         emit Withdraw(msg.sender, receiver, controller, assets, shares);
         
-        // After-withdrawal hook - use asset units for the hook
+        // Call after-withdrawal hook - use asset units for the hook
         afterWithdraw(_asset, assets, shares);
     }
 
@@ -700,7 +700,7 @@ abstract contract BaseControlledAsyncRedeem is
         require(shares != 0, NothingToRedeem());
         require(balanceOf(owner) >= shares, InsufficientBalance());
 
-        // Call beforeRequestRedeem hook
+        // Call before-request-redeem hook
         beforeRequestRedeem(_asset, shares, controller, owner);
 
         // Update pending redeem and persist autoClaim preference (last-writer-wins)
@@ -837,7 +837,7 @@ abstract contract BaseControlledAsyncRedeem is
         require(shares != 0, NothingToRedeem());
         require(assets != 0, NothingToWithdraw());
 
-        // Before fulfill redeem hook
+        // Call before-fulfill redeem hook
         beforeFulfillRedeem(_asset, assets, shares);
 
         // Snapshot autoClaim BEFORE consuming pending — the consume clears the flag when shares hit 0
@@ -850,7 +850,7 @@ abstract contract BaseControlledAsyncRedeem is
         // Emit event
         emit RedeemRequestFulfilled(controller, msg.sender, shares, assets);
 
-        // After fulfill redeem hook
+        // Call after-fulfill redeem hook
         afterFulfillRedeem(_asset, assets, shares, controller);
 
         // Auto-claim path: equivalent to the controller invoking `redeem` immediately after fulfillment.

@@ -39,9 +39,6 @@ library RedeemQueueLib {
     struct Storage {
         mapping(address => mapping(address => PendingRedeemSlot)) pendingRedeems;
         mapping(address => mapping(address => ClaimableRedeemSlot)) claimableRedeems;
-        /// @dev Per-(user, token) flag: when true, fulfilling a pending redeem
-        /// auto-transfers claimable assets to the user inside fulfillment.
-        /// Cleared automatically when pending shares reach zero.
         mapping(address => mapping(address => bool)) autoClaim;
     }
 
@@ -132,7 +129,7 @@ library RedeemQueueLib {
         require(newShares <= UINT128_MAX, IRedeemQueueErrors.TooManyShares(newShares));
         pending.shares = uint128(newShares);
         pending.requestTime = uint128(block.timestamp);
-        // Last-writer-wins: every request overwrites the per-(user, token) flag.
+        // Last-writer-wins: every request overwrites the per-(user, token) flag
         $.autoClaim[user][token] = autoClaim;
     }
 
@@ -147,8 +144,7 @@ library RedeemQueueLib {
         pending.shares -= uint128(amount);
         if (pending.shares == 0) {
             pending.requestTime = 0;
-            // Clear the autoClaim flag together with the slot so a future request
-            // by the same (user, token) starts from a clean state.
+            // Clears the flag so future redeem requests start from a clean state
             delete $.autoClaim[user][token];
         }
     }
