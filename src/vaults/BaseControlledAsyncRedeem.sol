@@ -711,9 +711,8 @@ abstract contract BaseControlledAsyncRedeem is
         // Transfer shares to vault for burning later
         _transfer(owner, address(this), shares);
 
-        // Emit events
+        // Emit event
         emit RedeemRequest(controller, owner, REQUEST_ID, msg.sender, shares);
-        emit AutoClaimSet(controller, _asset, autoClaim);
 
         return REQUEST_ID;
     }
@@ -838,11 +837,11 @@ abstract contract BaseControlledAsyncRedeem is
         require(shares != 0, NothingToRedeem());
         require(assets != 0, NothingToWithdraw());
 
-        // Snapshot autoClaim BEFORE consuming pending — the consume clears the flag when shares hit 0
-        bool autoClaim = _getAutoClaim(controller, _asset);
-
         // Before fulfill redeem hook
         beforeFulfillRedeem(_asset, assets, shares);
+
+        // Snapshot autoClaim BEFORE consuming pending — the consume clears the flag when shares hit 0
+        bool autoClaim = _getAutoClaim(controller, _asset);
 
         // Update pending and claimable redeems
         _consumePendingRedeem(controller, _asset, shares);
@@ -851,24 +850,20 @@ abstract contract BaseControlledAsyncRedeem is
         // Emit event
         emit RedeemRequestFulfilled(controller, msg.sender, shares, assets);
 
-        // After fulfill redeem hook — must run before auto-claim so subclass hooks
-        // (e.g. UltraFeeder.afterFulfillRedeem deducts withdrawal fee from claimable)
-        // operate on the pre-transfer state
+        // After fulfill redeem hook
         afterFulfillRedeem(_asset, assets, shares, controller);
 
-        // Auto-claim path: pulls the post-hook deliverable amount from claimable
-        // and transfers it to the controller via the existing _performWithdraw flow
+        // Auto-claim path: equivalent to the controller invoking `redeem` immediately after fulfillment.
         if (autoClaim) {
             uint256 deliverable = _calculateClaimableAssetsForShares(controller, _asset, shares);
-            if (deliverable != 0) {
-                _performWithdraw(_asset, deliverable, shares, controller, controller);
-                emit AutoClaimExecuted(controller, _asset, deliverable, shares);
-            }
+            require(deliverable != 0, NothingToWithdraw());
+            _performWithdraw(_asset, deliverable, shares, controller, controller);
         }
 
         return assets;
     }
 
+    /// @dev Internal helper to check that `_asset` is supported in rateProvider
     function _ensureIsSupported(address _asset) internal view {
         require(rateProvider().isSupported(_asset), AssetNotSupported());
     }

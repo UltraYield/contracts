@@ -55,8 +55,6 @@ interface IBaseVaultEvents {
         uint256 shares
     );
     event Referral(string indexed referralId, address indexed user, uint256 shares);
-    event AutoClaimSet(address indexed controller, address indexed asset, bool autoClaim);
-    event AutoClaimExecuted(address indexed controller, address indexed asset, uint256 assets, uint256 shares);
 }
 
 /// @title IBaseVault
