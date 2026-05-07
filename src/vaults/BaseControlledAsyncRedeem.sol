@@ -518,6 +518,14 @@ abstract contract BaseControlledAsyncRedeem is
     }
 
     /// @inheritdoc IRedeemAccounting
+    function getAutoClaim(
+        address _asset,
+        address _controller
+    ) external view returns (bool) {
+        return _getAutoClaim(_controller, _asset);
+    }
+
+    /// @inheritdoc IRedeemAccounting
     function pendingRedeemRequest(
         uint256, // requestId
         address _controller
@@ -667,15 +675,17 @@ abstract contract BaseControlledAsyncRedeem is
     /// @param shares Amount to redeem
     /// @param controller Share recipient
     /// @param owner Share owner
+    /// @param autoClaim If true, fulfilling this request auto-delivers assets to controller in the same tx
     /// @return requestId Request identifier
     function requestRedeem(
         address _asset,
         uint256 shares,
         address controller,
-        address owner
+        address owner,
+        bool autoClaim
     ) external returns (uint256 requestId) {
         _ensureIsSupported(_asset);
-        return _requestRedeemOfAsset(_asset, shares, controller, owner);
+        return _requestRedeemOfAsset(_asset, shares, controller, owner, autoClaim);
     }
 
     /// @dev Internal function for processing redeem requests
@@ -683,7 +693,8 @@ abstract contract BaseControlledAsyncRedeem is
         address _asset,
         uint256 shares,
         address controller,
-        address owner
+        address owner,
+        bool autoClaim
     ) internal checkAccess(owner) returns (uint256 requestId) {
         // Checks
         require(shares != 0, NothingToRedeem());
@@ -692,17 +703,18 @@ abstract contract BaseControlledAsyncRedeem is
         // Call beforeRequestRedeem hook
         beforeRequestRedeem(_asset, shares, controller, owner);
 
-        // Update pending redeem
-        _increasePendingRedeem(controller, _asset, shares);
+        // Update pending redeem and persist autoClaim preference (last-writer-wins)
+        _increasePendingRedeem(controller, _asset, shares, autoClaim);
 
         // Spend user's shares allowance
         _spendAllowance(owner, address(this), shares);
         // Transfer shares to vault for burning later
         _transfer(owner, address(this), shares);
 
-        // Emit event
+        // Emit events
         emit RedeemRequest(controller, owner, REQUEST_ID, msg.sender, shares);
-        
+        emit AutoClaimSet(controller, _asset, autoClaim);
+
         return REQUEST_ID;
     }
 
@@ -826,6 +838,9 @@ abstract contract BaseControlledAsyncRedeem is
         require(shares != 0, NothingToRedeem());
         require(assets != 0, NothingToWithdraw());
 
+        // Snapshot autoClaim BEFORE consuming pending — the consume clears the flag when shares hit 0
+        bool autoClaim = _getAutoClaim(controller, _asset);
+
         // Before fulfill redeem hook
         beforeFulfillRedeem(_asset, assets, shares);
 
@@ -836,8 +851,20 @@ abstract contract BaseControlledAsyncRedeem is
         // Emit event
         emit RedeemRequestFulfilled(controller, msg.sender, shares, assets);
 
-        // After fulfill redeem hook
+        // After fulfill redeem hook — must run before auto-claim so subclass hooks
+        // (e.g. UltraFeeder.afterFulfillRedeem deducts withdrawal fee from claimable)
+        // operate on the pre-transfer state
         afterFulfillRedeem(_asset, assets, shares, controller);
+
+        // Auto-claim path: pulls the post-hook deliverable amount from claimable
+        // and transfers it to the controller via the existing _performWithdraw flow
+        if (autoClaim) {
+            uint256 deliverable = _calculateClaimableAssetsForShares(controller, _asset, shares);
+            if (deliverable != 0) {
+                _performWithdraw(_asset, deliverable, shares, controller, controller);
+                emit AutoClaimExecuted(controller, _asset, deliverable, shares);
+            }
+        }
 
         return assets;
     }

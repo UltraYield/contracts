@@ -39,6 +39,10 @@ library RedeemQueueLib {
     struct Storage {
         mapping(address => mapping(address => PendingRedeemSlot)) pendingRedeems;
         mapping(address => mapping(address => ClaimableRedeemSlot)) claimableRedeems;
+        /// @dev Per-(user, token) flag: when true, fulfilling a pending redeem
+        /// auto-transfers claimable assets to the user inside fulfillment.
+        /// Cleared automatically when pending shares reach zero.
+        mapping(address => mapping(address => bool)) autoClaim;
     }
 
     function _getStorage() private pure returns (Storage storage $) {
@@ -71,6 +75,13 @@ library RedeemQueueLib {
             shares: redeem.shares,
             assets: redeem.assets
         });
+    }
+
+    function getAutoClaim(
+        address user,
+        address token
+    ) external view returns (bool) {
+        return _getStorage().autoClaim[user][token];
     }
 
     //////////////////
@@ -112,13 +123,17 @@ library RedeemQueueLib {
     function increasePendingRedeem(
         address user,
         address token,
-        uint256 amount
+        uint256 amount,
+        bool autoClaim
     ) external {
-        PendingRedeemSlot storage pending = _getStorage().pendingRedeems[user][token];
+        Storage storage $ = _getStorage();
+        PendingRedeemSlot storage pending = $.pendingRedeems[user][token];
         uint256 newShares = uint256(pending.shares) + amount;
         require(newShares <= UINT128_MAX, IRedeemQueueErrors.TooManyShares(newShares));
         pending.shares = uint128(newShares);
         pending.requestTime = uint128(block.timestamp);
+        // Last-writer-wins: every request overwrites the per-(user, token) flag.
+        $.autoClaim[user][token] = autoClaim;
     }
 
     function consumePendingRedeem(
@@ -126,11 +141,15 @@ library RedeemQueueLib {
         address token,
         uint256 amount
     ) external {
-        PendingRedeemSlot storage pending = _getStorage().pendingRedeems[user][token];
+        Storage storage $ = _getStorage();
+        PendingRedeemSlot storage pending = $.pendingRedeems[user][token];
         require(amount <= pending.shares, IRedeemQueueErrors.InsufficientPendingShares(pending.shares, amount));
         pending.shares -= uint128(amount);
         if (pending.shares == 0) {
             pending.requestTime = 0;
+            // Clear the autoClaim flag together with the slot so a future request
+            // by the same (user, token) starts from a clean state.
+            delete $.autoClaim[user][token];
         }
     }
 
