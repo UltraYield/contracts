@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity 0.8.28;
 
-import { AccessControlUpgradeable } from "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol";
 import { SafeERC20, IERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import { IERC20Metadata } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
@@ -9,7 +8,7 @@ import { IPriceSource } from "src/interfaces/IPriceSource.sol";
 import { IUltraVaultEvents, IUltraVaultErrors } from "src/interfaces/IUltraVault.sol";
 import { Adjustment, Fees } from "src/interfaces/Types.sol";
 import { AddressUpdateProposal } from "src/utils/AddressUpdates.sol";
-import { Compliance } from "src/utils/Compliance.sol";
+import { ComplianceLib, COMPLIANCE_STORAGE_LOCATION } from "src/utils/ComplianceLib.sol";
 import { FixedPointMathLib } from "src/utils/FixedPointMathLib.sol";
 import { BaseControlledAsyncRedeem, BaseControlledAsyncRedeemInitParams } from "src/vaults/BaseControlledAsyncRedeem.sol";
 import { COMPLIANCE_ROLE, OPERATOR_ROLE } from "src/utils/Roles.sol";
@@ -45,7 +44,7 @@ struct UltraVaultInitParams {
 
 /// @title UltraVault
 /// @notice ERC-7540 compliant async redeem vault with UltraVaultOracle pricing and multisig asset management
-contract UltraVault is BaseControlledAsyncRedeem, Compliance, IUltraVaultEvents, IUltraVaultErrors {
+contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVaultErrors {
     using FixedPointMathLib for uint256;
     using Math for uint256;
     using SafeERC20 for IERC20;
@@ -621,31 +620,59 @@ contract UltraVault is BaseControlledAsyncRedeem, Compliance, IUltraVaultEvents,
     // Compliance //
     ////////////////
 
-    /// @dev Gates share transfers and mints. `_ensureNotRestricted` returns early on
-    ///      `address(0)` so mints (`from == 0`) skip the from-side check naturally.
-    ///      Burns (`to == 0`) skip the from-side check so `forceBurn` can destroy a
-    ///      restricted address's shares.
+    /// @notice Get blocklist and freeze status for `account`
+    /// @return blocked True if `account` is blocklisted
+    /// @return frozen True if `account` is frozen
+    function restrictionStatus(address account) external view returns (bool blocked, bool frozen) {
+        ComplianceLib.Storage storage $ = ComplianceLib._getComplianceStorage();
+        blocked = $.blocklisted[account];
+        frozen = $.frozen[account];
+    }
+
+    /// @notice Add `account` to the blocklist
+    function blocklist(address account) external onlyRole(COMPLIANCE_ROLE) {
+        ComplianceLib.blocklist(account);
+    }
+
+    /// @notice Remove `account` from the blocklist
+    function unblocklist(address account) external onlyRole(COMPLIANCE_ROLE) {
+        ComplianceLib.unblocklist(account);
+    }
+
+    /// @notice Mark `account` as frozen
+    function freeze(address account) external onlyRole(COMPLIANCE_ROLE) {
+        ComplianceLib.freeze(account);
+    }
+
+    /// @notice Unmark `account` as frozen
+    function unfreeze(address account) external onlyRole(COMPLIANCE_ROLE) {
+        ComplianceLib.unfreeze(account);
+    }
+
+    /// @notice Burn `amount` shares from `target`'s wallet balance.
+    /// @dev Only affects `balanceOf(target)`; pending and claimable redeems are untouched.
+    function forceBurn(address target, uint256 amount) external onlyRole(COMPLIANCE_ROLE) {
+        _burn(target, amount);
+        emit ForceBurned(target, amount);
+    }
+
+    /// @dev Reverts if `account` is blocklisted or frozen.
+    /// @dev Returns early on `address(0)` so callers don't need to special-case mints/burns.
+    function _ensureNotRestricted(address account) internal view {
+        if (account == address(0)) return;
+        ComplianceLib.Storage storage $ = ComplianceLib._getComplianceStorage();
+        if ($.blocklisted[account]) revert AddressBlocklisted(account);
+        if ($.frozen[account]) revert AddressFrozen(account);
+    }
+
+    /// @dev Gates share transfers and mints. 
+    /// @dev Burns (`to == 0`) skip the from-side check so `forceBurn` can destroy a restricted address's shares.
     function _update(address from, address to, uint256 value) internal override {
         if (to != address(0)) {
             _ensureNotRestricted(from);
         }
         _ensureNotRestricted(to);
         super._update(from, to, value);
-    }
-
-    /// @dev Disambiguate supportsInterface across BaseControlledAsyncRedeem and AccessControlUpgradeable
-    function supportsInterface(
-        bytes4 interfaceId
-    ) public view override(BaseControlledAsyncRedeem, AccessControlUpgradeable) returns (bool) {
-        return super.supportsInterface(interfaceId);
-    }
-
-    /// @notice Burn `amount` shares from `target`'s wallet balance
-    /// @dev Only affects `balanceOf(target)`; pending and claimable redeems are untouched
-    /// @dev `_burn` reverts via OZ if `target == 0` or `amount > balanceOf(target)`
-    function forceBurn(address target, uint256 amount) external onlyRole(COMPLIANCE_ROLE) {
-        _burn(target, amount);
-        emit ForceBurned(target, amount);
     }
 
     ////////////////////////

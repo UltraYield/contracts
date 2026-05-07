@@ -17,7 +17,7 @@ library ComplianceLib {
         mapping(address => bool) frozen;
     }
 
-    function _getComplianceStorage() private pure returns (Storage storage $) {
+    function _getComplianceStorage() internal pure returns (Storage storage $) {
         assembly {
             $.slot := COMPLIANCE_STORAGE_LOCATION
         }
