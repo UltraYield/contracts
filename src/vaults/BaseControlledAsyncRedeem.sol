@@ -953,7 +953,7 @@ abstract contract BaseControlledAsyncRedeem is
     /// @return exists True if interface is supported
     function supportsInterface(
         bytes4 interfaceId
-    ) public view virtual override returns (bool) {
+    ) public view override returns (bool) {
         return
             interfaceId == type(IERC165).interfaceId ||
             interfaceId == type(IERC7540Redeem).interfaceId ||

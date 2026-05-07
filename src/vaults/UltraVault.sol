@@ -2,13 +2,12 @@
 pragma solidity 0.8.28;
 
 import { SafeERC20, IERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import { IERC20Metadata } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
 import { IPriceSource } from "src/interfaces/IPriceSource.sol";
 import { IUltraVaultEvents, IUltraVaultErrors } from "src/interfaces/IUltraVault.sol";
 import { Adjustment, Fees } from "src/interfaces/Types.sol";
 import { AddressUpdateProposal } from "src/utils/AddressUpdates.sol";
-import { ComplianceLib, COMPLIANCE_STORAGE_LOCATION } from "src/utils/ComplianceLib.sol";
+import { ComplianceLib } from "src/utils/ComplianceLib.sol";
 import { FixedPointMathLib } from "src/utils/FixedPointMathLib.sol";
 import { BaseControlledAsyncRedeem, BaseControlledAsyncRedeemInitParams } from "src/vaults/BaseControlledAsyncRedeem.sol";
 import { COMPLIANCE_ROLE, OPERATOR_ROLE } from "src/utils/Roles.sol";
@@ -55,6 +54,7 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
 
     uint256 internal constant ONE_YEAR = 365 * 24 * 60 * 60; // 31_536_000 seconds
     uint256 internal constant SCALE = 1e18; // Default scale
+    // forge-lint: disable-next-line(unsafe-typecast)
     uint64 internal constant ONE_PERCENT = uint64(SCALE) / 100;
     uint64 internal constant MAX_PERFORMANCE_FEE = 30 * ONE_PERCENT; // 30%
     uint64 internal constant MAX_MANAGEMENT_FEE = 5 * ONE_PERCENT; // 5%
@@ -75,10 +75,10 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
 
     /// @custom:storage-location erc7201:ultrayield.storage.UltraVault
     struct UltraVaultStorage {
-        address __fundsHolder; // Deprecated in V2
-        IPriceSource __oracle; // Deprecated in V2
-        AddressUpdateProposal __proposedFundsHolder; // Deprecated in V2
-        AddressUpdateProposal __proposedOracle; // Deprecated in V2
+        address _fundsHolder; // Deprecated in V2
+        IPriceSource _oracle; // Deprecated in V2
+        AddressUpdateProposal _proposedFundsHolder; // Deprecated in V2
+        AddressUpdateProposal _proposedOracle; // Deprecated in V2
         address feeRecipient;
         Fees fees;
     }
@@ -136,8 +136,8 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
         _migrateBaseControlledAsyncRedeemStateFromV1();
 
         UltraVaultStorage storage $ = _getUltraVaultStorage();
-        _migrateAddress(FUNDS_HOLDER_KEY, $.__fundsHolder);
-        _migrateAddress(ORACLE_KEY, address($.__oracle));
+        _migrateAddress(FUNDS_HOLDER_KEY, $._fundsHolder);
+        _migrateAddress(ORACLE_KEY, address($._oracle));
         _initAddress(INSTANT_REDEEM_EXITPOINT_KEY, _instantRedeemExitpoint);
         _initAddress(UPGRADE_MODULE_KEY, _upgradeModule);
 
