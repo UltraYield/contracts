@@ -315,12 +315,14 @@ interface IBaseVault is
     /// @param shares Amount to redeem
     /// @param controller Share recipient
     /// @param owner Share owner
+    /// @param autoClaim If true, fulfilling this request auto-delivers assets to controller
     /// @return requestId Request identifier
     function requestRedeem(
         address asset,
         uint256 shares,
         address controller,
-        address owner
+        address owner,
+        bool autoClaim
     ) external returns (uint256 requestId);
 
     ////////////////////////

@@ -347,7 +347,7 @@ abstract contract BaseControlledAsyncRedeem is
         require(assets != 0, EmptyDeposit());
         require(shares != 0, NothingToMint());
 
-        // Pre-deposit hook - use the actual asset amount being transferred
+        // Call pre-deposit hook - use the actual asset amount being transferred
         beforeDeposit(_asset, assets, shares);
 
         // Transfer assets from sender to the vault
@@ -363,7 +363,7 @@ abstract contract BaseControlledAsyncRedeem is
         // Emit event
         emit Deposit(msg.sender, receiver, assets, shares);
 
-        // After-deposit hook - use the actual asset amount that was transferred
+        // Call after-deposit hook - use the actual asset amount that was transferred
         afterDeposit(_asset, assets, shares);
     }
 
@@ -483,7 +483,7 @@ abstract contract BaseControlledAsyncRedeem is
         address receiver,
         address controller
     ) internal {
-        // Before-withdrawal hook - use asset units for the hook
+        // Call before-withdrawal hook - use asset units for the hook
         beforeWithdraw(_asset, assets, shares);
 
         // Update claimable redeem
@@ -493,7 +493,7 @@ abstract contract BaseControlledAsyncRedeem is
         IERC20(_asset).safeTransfer(receiver, assets);
         emit Withdraw(msg.sender, receiver, controller, assets, shares);
         
-        // After-withdrawal hook - use asset units for the hook
+        // Call after-withdrawal hook - use asset units for the hook
         afterWithdraw(_asset, assets, shares);
     }
 
@@ -515,6 +515,14 @@ abstract contract BaseControlledAsyncRedeem is
         address _controller
     ) external view returns (ClaimableRedeem memory) {
         return _getClaimableRedeem(_controller, _asset);
+    }
+
+    /// @inheritdoc IRedeemAccounting
+    function getAutoClaim(
+        address _asset,
+        address _controller
+    ) external view returns (bool) {
+        return _getAutoClaim(_controller, _asset);
     }
 
     /// @inheritdoc IRedeemAccounting
@@ -667,15 +675,17 @@ abstract contract BaseControlledAsyncRedeem is
     /// @param shares Amount to redeem
     /// @param controller Share recipient
     /// @param owner Share owner
+    /// @param autoClaim If true, fulfilling this request auto-delivers assets to controller in the same tx
     /// @return requestId Request identifier
     function requestRedeem(
         address _asset,
         uint256 shares,
         address controller,
-        address owner
+        address owner,
+        bool autoClaim
     ) external returns (uint256 requestId) {
         _ensureIsSupported(_asset);
-        return _requestRedeemOfAsset(_asset, shares, controller, owner);
+        return _requestRedeemOfAsset(_asset, shares, controller, owner, autoClaim);
     }
 
     /// @dev Internal function for processing redeem requests
@@ -683,17 +693,18 @@ abstract contract BaseControlledAsyncRedeem is
         address _asset,
         uint256 shares,
         address controller,
-        address owner
+        address owner,
+        bool autoClaim
     ) internal checkAccess(owner) returns (uint256 requestId) {
         // Checks
         require(shares != 0, NothingToRedeem());
         require(balanceOf(owner) >= shares, InsufficientBalance());
 
-        // Call beforeRequestRedeem hook
+        // Call before-request-redeem hook
         beforeRequestRedeem(_asset, shares, controller, owner);
 
-        // Update pending redeem
-        _increasePendingRedeem(controller, _asset, shares);
+        // Update pending redeem and persist autoClaim preference (last-writer-wins)
+        _increasePendingRedeem(controller, _asset, shares, autoClaim);
 
         // Spend user's shares allowance
         _spendAllowance(owner, address(this), shares);
@@ -702,7 +713,7 @@ abstract contract BaseControlledAsyncRedeem is
 
         // Emit event
         emit RedeemRequest(controller, owner, REQUEST_ID, msg.sender, shares);
-        
+
         return REQUEST_ID;
     }
 
@@ -826,8 +837,11 @@ abstract contract BaseControlledAsyncRedeem is
         require(shares != 0, NothingToRedeem());
         require(assets != 0, NothingToWithdraw());
 
-        // Before fulfill redeem hook
+        // Call before-fulfill redeem hook
         beforeFulfillRedeem(_asset, assets, shares);
+
+        // Snapshot autoClaim BEFORE consuming pending — the consume clears the flag when shares hit 0
+        bool autoClaim = _getAutoClaim(controller, _asset);
 
         // Update pending and claimable redeems
         _consumePendingRedeem(controller, _asset, shares);
@@ -836,12 +850,20 @@ abstract contract BaseControlledAsyncRedeem is
         // Emit event
         emit RedeemRequestFulfilled(controller, msg.sender, shares, assets);
 
-        // After fulfill redeem hook
+        // Call after-fulfill redeem hook
         afterFulfillRedeem(_asset, assets, shares, controller);
+
+        // Auto-claim path: equivalent to the controller invoking `redeem` immediately after fulfillment.
+        if (autoClaim) {
+            uint256 deliverable = _calculateClaimableAssetsForShares(controller, _asset, shares);
+            require(deliverable != 0, NothingToWithdraw());
+            _performWithdraw(_asset, deliverable, shares, controller, controller);
+        }
 
         return assets;
     }
 
+    /// @dev Internal helper to check that `_asset` is supported in rateProvider
     function _ensureIsSupported(address _asset) internal view {
         require(rateProvider().isSupported(_asset), AssetNotSupported());
     }
