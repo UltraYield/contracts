@@ -11,6 +11,12 @@ import { AddressUpdateProposal } from "src/utils/AddressUpdates.sol";
 import { FixedPointMathLib } from "src/utils/FixedPointMathLib.sol";
 import { BaseControlledAsyncRedeem, BaseControlledAsyncRedeemInitParams } from "src/vaults/BaseControlledAsyncRedeem.sol";
 import { OPERATOR_ROLE } from "src/utils/Roles.sol";
+import {
+    FUNDS_HOLDER_KEY,
+    ORACLE_KEY,
+    INSTANT_REDEEM_EXITPOINT_KEY,
+    UPGRADE_MODULE_KEY
+} from "src/utils/AddressKeys.sol";
 
 // keccak256(abi.encode(uint256(keccak256("ultrayield.storage.UltraVault")) - 1)) & ~bytes32(uint256(0xff));
 bytes32 constant ULTRA_VAULT_STORAGE_LOCATION = 0x4a2c313ed01a3f9b3ba2e7d99f5ac7985ad5a3c0482c127738b38df017064300;
@@ -63,10 +69,6 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
     uint256 internal constant FUNDS_HOLDER_TIMELOCK = 3 days;
     uint256 internal constant ORACLE_TIMELOCK = 3 days;
     uint256 internal constant INSTANT_REDEEM_EXITPOINT_TIMELOCK = 3 days;
-
-    bytes32 internal constant FUNDS_HOLDER_KEY = keccak256("fundsHolder");
-    bytes32 internal constant ORACLE_KEY = keccak256("oracle");
-    bytes32 internal constant INSTANT_REDEEM_EXITPOINT_KEY = keccak256("instantRedeemExitpoint");
 
     /////////////
     // Storage //
@@ -160,21 +162,6 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
     /// @notice Get the instant redeem exitpoint address
     function instantRedeemExitpoint() public view returns (address) {
         return _getCurrentAddress(INSTANT_REDEEM_EXITPOINT_KEY);
-    }
-
-    /// @notice Get the proposed funds holder
-    function proposedFundsHolder() external view returns (address, uint256) {
-        return _getAddressUpdateProposal(FUNDS_HOLDER_KEY);
-    }
-
-    /// @notice Get the proposed oracle
-    function proposedOracle() external view returns (address, uint256) {
-        return _getAddressUpdateProposal(ORACLE_KEY);
-    }
-
-    /// @notice Get the proposed instant redeem exitpoint
-    function proposedInstantRedeemExitpoint() external view returns (address, uint256) {
-        return _getAddressUpdateProposal(INSTANT_REDEEM_EXITPOINT_KEY);
     }
 
     ////////////////////////////
@@ -452,74 +439,16 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
         return result;
     }
 
-    //////////////////////////
-    // Funds Holder Updates //
-    //////////////////////////
+    /////////////////////
+    // Address Updates //
+    /////////////////////
 
-    /// @notice Propose fundsHolder change, can be accepted after delay
-    /// @param newFundsHolder New fundsHolder address
-    /// @dev changing the holder should be used only in case of multisig upgrade after funds transfer
-    function proposeFundsHolder(address newFundsHolder) external onlyOwner {
-        _proposeAddressUpdate(FUNDS_HOLDER_KEY, newFundsHolder);
-        emit FundsHolderProposed(newFundsHolder);
-    }
-
-    /// @notice Accept proposed fundsHolder
-    /// @dev Pauses vault to ensure oracle setup and prevent deposits with faulty prices
-    /// @dev Oracle must be switched before unpausing
-    function acceptFundsHolder(address newFundsHolder) external onlyOwner {
-        address oldFundsHolder = _acceptAddressUpdate(FUNDS_HOLDER_KEY, newFundsHolder, FUNDS_HOLDER_TIMELOCK);
-        emit FundsHolderChanged(oldFundsHolder, newFundsHolder);
-
-        // Pause to manually check the setup by operators
-        _pause();
-    }
-
-    ////////////////////
-    // Oracle Updates //
-    ////////////////////
-
-    /// @notice Propose new oracle for owner acceptance after delay
-    /// @param newOracle Address of the new oracle
-    function proposeOracle(address newOracle) external onlyOwner {
-        _proposeAddressUpdate(ORACLE_KEY, newOracle);
-        emit OracleProposed(newOracle);
-    }
-
-    /// @notice Accept proposed oracle
-    /// @dev Pauses vault to ensure oracle setup and prevent deposits with faulty prices
-    /// @dev Oracle must be switched before unpausing
-    function acceptProposedOracle(address newOracle) external onlyOwner {
-        address oldOracle = _acceptAddressUpdate(ORACLE_KEY, newOracle, ORACLE_TIMELOCK);
-        emit OracleUpdated(oldOracle, newOracle);
-
-        // Pause to manually check the setup by operators
-        _pause();
-    }
-
-    /////////////////////////////////////////
-    // Instant Redeem Exitpoint Updates //
-    /////////////////////////////////////////
-
-    /// @notice Propose instant redeem exitpoint change, can be accepted after delay
-    /// @param newExitpoint New exitpoint address
-    function proposeInstantRedeemExitpoint(address newExitpoint) external onlyOwner {
-        _proposeAddressUpdate(INSTANT_REDEEM_EXITPOINT_KEY, newExitpoint);
-        emit InstantRedeemExitpointProposed(newExitpoint);
-    }
-
-    /// @notice Accept proposed instant redeem exitpoint
-    /// @dev Pauses vault to manually check the setup by operators
-    function acceptInstantRedeemExitpoint(address newExitpoint) external onlyOwner {
-        address oldExitpoint = _acceptAddressUpdate(
-            INSTANT_REDEEM_EXITPOINT_KEY, 
-            newExitpoint, 
-            INSTANT_REDEEM_EXITPOINT_TIMELOCK
-        );
-        emit InstantRedeemExitpointChanged(oldExitpoint, newExitpoint);
-
-        // Pause to manually check the setup by operators
-        _pause();
+    /// @inheritdoc BaseControlledAsyncRedeem
+    function _timelockForKey(bytes32 key) internal pure override returns (uint256) {
+        if (key == FUNDS_HOLDER_KEY) return FUNDS_HOLDER_TIMELOCK;
+        if (key == ORACLE_KEY) return ORACLE_TIMELOCK;
+        if (key == INSTANT_REDEEM_EXITPOINT_KEY) return INSTANT_REDEEM_EXITPOINT_TIMELOCK;
+        return super._timelockForKey(key);
     }
 
     //////////

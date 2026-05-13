@@ -14,6 +14,7 @@ import { IUltraVaultRateProvider, Adjustment } from "src/interfaces/IUltraVaultR
 import { OPERATOR_ROLE, PAUSER_ROLE, UPGRADER_ROLE } from "src/utils/Roles.sol";
 import { AccessControlUpgradeable } from "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol";
 import { AddressUpdateProposal, AddressUpdatable } from "src/utils/AddressUpdates.sol";
+import { RATE_PROVIDER_KEY, UPGRADE_MODULE_KEY } from "src/utils/AddressKeys.sol";
 import { RedeemQueue } from "src/vaults/accounting/RedeemQueue.sol";
 import { IBaseVaultErrors, IBaseVaultEvents } from "src/interfaces/IBaseVault.sol";
 
@@ -59,8 +60,6 @@ abstract contract BaseControlledAsyncRedeem is
     ///////////////
 
     uint256 internal constant REQUEST_ID = 0;
-    bytes32 internal constant RATE_PROVIDER_KEY = keccak256("rateProvider");
-    bytes32 internal constant UPGRADE_MODULE_KEY = keccak256("upgradeModule");
     uint256 internal constant RATE_PROVIDER_TIMELOCK = 3 days;
     uint256 internal constant UPGRADE_MODULE_TIMELOCK = 7 days;
 
@@ -126,22 +125,17 @@ abstract contract BaseControlledAsyncRedeem is
         return IUltraVaultRateProvider(_getCurrentAddress(RATE_PROVIDER_KEY));
     }
 
-    /// @notice Returns the proposed rate provider
-    /// @return proposedRateProvider The proposed rate provider
-    function proposedRateProvider() public view returns (address, uint256) {
-        return _getAddressUpdateProposal(RATE_PROVIDER_KEY);
-    }
-
     /// @notice Returns the upgrade module address
     /// @return upgradeModule The address of the upgrade module
     function upgradeModule() public view returns (address) {
         return _getCurrentAddress(UPGRADE_MODULE_KEY);
     }
 
-    /// @notice Returns the proposed upgrade module
-    /// @return proposedUpgradeModule The proposed upgrade module address and proposal timestamp
-    function proposedUpgradeModule() public view returns (address, uint256) {
-        return _getAddressUpdateProposal(UPGRADE_MODULE_KEY);
+    /// @notice Returns the proposed address for a given key
+    /// @param key The address key (see contract constants)
+    /// @return proposedAddress The proposed address and proposal timestamp
+    function proposedAddress(bytes32 key) external view returns (address, uint256) {
+        return _getAddressUpdateProposal(key);
     }
 
     //////////////
@@ -872,39 +866,33 @@ abstract contract BaseControlledAsyncRedeem is
     // Address Updates //
     /////////////////////
 
-    /// @notice Propose new rate provider for owner acceptance after delay
-    /// @param newRateProvider Address of the new rate provider
-    function proposeRateProvider(address newRateProvider) external onlyOwner {
-        _proposeAddressUpdate(RATE_PROVIDER_KEY, newRateProvider);
-        emit RateProviderProposed(newRateProvider);
+    /// @notice Propose an address update for the given key
+    /// @param key The address key (see contract constants)
+    /// @param newAddress The new address being proposed
+    function proposeAddressUpdate(bytes32 key, address newAddress) external onlyOwner {
+        _timelockForKey(key);
+        _proposeAddressUpdate(key, newAddress);
+        emit AddressUpdateProposed(key, newAddress);
     }
 
-    /// @notice Accept proposed rate provider
-    /// @dev Pauses vault to ensure provider setup and prevent deposits with faulty prices
-    /// @dev Oracle must be switched before unpausing
-    function acceptProposedRateProvider(address newRateProvider) external onlyOwner {
-        address oldRateProvider = _acceptAddressUpdate(RATE_PROVIDER_KEY, newRateProvider, RATE_PROVIDER_TIMELOCK);
-        emit RateProviderUpdated(oldRateProvider, newRateProvider);
+    /// @notice Accept a previously proposed address update for the given key
+    /// @param key The address key (see contract constants)
+    /// @param newAddress The address being confirmed (must match the proposal)
+    /// @dev Pauses the vault so operators can verify the setup before resuming
+    function acceptAddressUpdate(bytes32 key, address newAddress) external onlyOwner {
+        uint256 timelock = _timelockForKey(key);
+        address oldAddress = _acceptAddressUpdate(key, newAddress, timelock);
+        emit AddressUpdated(key, oldAddress, newAddress);
 
-        // Pause to manually check the setup by operators
         _pause();
     }
 
-    /// @notice Propose new upgrade module for owner acceptance after delay
-    /// @param newUpgradeModule Address of the new upgrade module
-    function proposeUpgradeModule(address newUpgradeModule) external onlyOwner {
-        _proposeAddressUpdate(UPGRADE_MODULE_KEY, newUpgradeModule);
-        emit UpgradeModuleProposed(newUpgradeModule);
-    }
-
-    /// @notice Accept proposed upgrade module
-    /// @dev Pauses vault to manually check the setup by operators
-    function acceptUpgradeModule(address newUpgradeModule) external onlyOwner {
-        address oldUpgradeModule = _acceptAddressUpdate(UPGRADE_MODULE_KEY, newUpgradeModule, UPGRADE_MODULE_TIMELOCK);
-        emit UpgradeModuleChanged(oldUpgradeModule, newUpgradeModule);
-
-        // Pause to manually check the setup by operators
-        _pause();
+    /// @dev Resolve the per-key timelock duration. Reverts UnknownAddressKey for unsupported keys.
+    /// @dev Overrides extend this with additional supported keys and must fall back to `super`.
+    function _timelockForKey(bytes32 key) internal pure virtual returns (uint256) {
+        if (key == RATE_PROVIDER_KEY) return RATE_PROVIDER_TIMELOCK;
+        if (key == UPGRADE_MODULE_KEY) return UPGRADE_MODULE_TIMELOCK;
+        revert UnknownAddressKey(key);
     }
 
     ///////////
