@@ -3,15 +3,9 @@ pragma solidity >=0.8.0;
 
 import { IBaseVault, IBaseVaultEvents, IBaseVaultErrors } from "src/interfaces/IBaseVault.sol";
 import { IPriceSource } from "src/interfaces/IPriceSource.sol";
-import { Adjustment, Fees } from "src/interfaces/Types.sol";
+import { Fees } from "src/interfaces/Types.sol";
 
 interface IUltraVaultEvents is IBaseVaultEvents {
-    event FundsHolderProposed(address indexed proposedFundsHolder);
-    event FundsHolderChanged(address indexed oldFundsHolder, address indexed newFundsHolder);
-    event OracleProposed(address indexed proposedOracle);
-    event OracleUpdated(address indexed oldOracle, address indexed newOracle);
-    event InstantRedeemExitpointProposed(address indexed proposedExitpoint);
-    event InstantRedeemExitpointChanged(address indexed oldExitpoint, address indexed newExitpoint);
     event FeesRecipientUpdated(address oldRecipient, address newRecipient);
     event FeesUpdated(Fees oldFees, Fees newFees);
     event FeesCollected(
@@ -69,17 +63,8 @@ interface IUltraVault is IBaseVault {
     /// @notice Get the withdrawal fee
     function calculateWithdrawalFee(uint256 assets) external view returns (uint256);
 
-    /// @notice Get the proposed funds holder
-    function proposedFundsHolder() external view returns (address, uint256);
-    
-    /// @notice Get the proposed oracle
-    function proposedOracle() external view returns (address, uint256);
-
     /// @notice Returns the instant redeem exitpoint address
     function instantRedeemExitpoint() external view returns (address);
-
-    /// @notice Get the proposed instant redeem exitpoint
-    function proposedInstantRedeemExitpoint() external view returns (address, uint256);
 
     ////////////////////
     // Instant Redeem //
@@ -142,33 +127,6 @@ interface IUltraVault is IBaseVault {
 
     /// @notice Mint fees as shares to fee recipient
     function collectFees() external;
-
-    /// @notice Propose fundsHolder change, can be accepted after delay
-    /// @param newFundsHolder New fundsHolder address
-    /// @dev changing the holder should be used only in case of multisig upgrade after funds transfer
-    function proposeFundsHolder(address newFundsHolder) external;
-
-    /// @notice Accept proposed fundsHolder
-    /// @dev Pauses vault to ensure oracle setup and prevent deposits with faulty prices
-    /// @dev Oracle must be switched before unpausing
-    function acceptFundsHolder(address newFundsHolder) external;
-
-    /// @notice Propose new oracle for owner acceptance after delay
-    /// @param newOracle Address of the new oracle
-    function proposeOracle(address newOracle) external;
-
-    /// @notice Accept proposed oracle
-    /// @dev Pauses vault to ensure oracle setup and prevent deposits with faulty prices
-    /// @dev Oracle must be switched before unpausing
-    function acceptProposedOracle(address newOracle) external;
-
-    /// @notice Propose instant redeem exitpoint change, can be accepted after delay
-    /// @param newExitpoint New exitpoint address
-    function proposeInstantRedeemExitpoint(address newExitpoint) external;
-
-    /// @notice Accept proposed instant redeem exitpoint
-    /// @dev Pauses vault to manually check the setup by operators
-    function acceptInstantRedeemExitpoint(address newExitpoint) external;
 
     /// @notice Setup initial balances in the vault without depositing the funds
     /// @notice We expect the funds to be separately sent to funds holder

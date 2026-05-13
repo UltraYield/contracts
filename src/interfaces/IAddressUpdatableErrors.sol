@@ -8,4 +8,5 @@ interface IAddressUpdatableErrors {
     error UpdateProposalAddressMismatch();
     error CannotAcceptProposalYet();
     error UpdateProposalExpired();
+    error UnknownAddressKey(bytes32 key);
 }
