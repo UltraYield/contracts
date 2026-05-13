@@ -39,6 +39,7 @@ library RedeemQueueLib {
     struct Storage {
         mapping(address => mapping(address => PendingRedeemSlot)) pendingRedeems;
         mapping(address => mapping(address => ClaimableRedeemSlot)) claimableRedeems;
+        mapping(address => mapping(address => bool)) autoClaim;
     }
 
     function _getStorage() private pure returns (Storage storage $) {
@@ -71,6 +72,13 @@ library RedeemQueueLib {
             shares: redeem.shares,
             assets: redeem.assets
         });
+    }
+
+    function getAutoClaim(
+        address user,
+        address token
+    ) external view returns (bool) {
+        return _getStorage().autoClaim[user][token];
     }
 
     //////////////////
@@ -112,13 +120,17 @@ library RedeemQueueLib {
     function increasePendingRedeem(
         address user,
         address token,
-        uint256 amount
+        uint256 amount,
+        bool autoClaim
     ) external {
-        PendingRedeemSlot storage pending = _getStorage().pendingRedeems[user][token];
+        Storage storage $ = _getStorage();
+        PendingRedeemSlot storage pending = $.pendingRedeems[user][token];
         uint256 newShares = uint256(pending.shares) + amount;
         require(newShares <= UINT128_MAX, IRedeemQueueErrors.TooManyShares(newShares));
         pending.shares = uint128(newShares);
         pending.requestTime = uint128(block.timestamp);
+        // Last-writer-wins: every request overwrites the per-(user, token) flag
+        $.autoClaim[user][token] = autoClaim;
     }
 
     function consumePendingRedeem(
@@ -126,11 +138,14 @@ library RedeemQueueLib {
         address token,
         uint256 amount
     ) external {
-        PendingRedeemSlot storage pending = _getStorage().pendingRedeems[user][token];
+        Storage storage $ = _getStorage();
+        PendingRedeemSlot storage pending = $.pendingRedeems[user][token];
         require(amount <= pending.shares, IRedeemQueueErrors.InsufficientPendingShares(pending.shares, amount));
         pending.shares -= uint128(amount);
         if (pending.shares == 0) {
             pending.requestTime = 0;
+            // Clears the flag so future redeem requests start from a clean state
+            delete $.autoClaim[user][token];
         }
     }
 

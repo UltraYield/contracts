@@ -22,6 +22,10 @@ abstract contract RedeemQueue is IRedeemQueueErrors {
         return RedeemQueueLib.getClaimableRedeem(user, token);
     }
 
+    function _getAutoClaim(address user, address token) internal view returns (bool) {
+        return RedeemQueueLib.getAutoClaim(user, token);
+    }
+
     function _calculateClaimableSharesForAssets(address user, address token, uint256 assets) internal view returns (uint256) {
         return RedeemQueueLib.calculateClaimableSharesForAssets(user, token, assets);
     }
@@ -30,8 +34,8 @@ abstract contract RedeemQueue is IRedeemQueueErrors {
         return RedeemQueueLib.calculateClaimableAssetsForShares(user, token, shares);
     }
 
-    function _increasePendingRedeem(address user, address token, uint256 amount) internal {
-        RedeemQueueLib.increasePendingRedeem(user, token, amount);
+    function _increasePendingRedeem(address user, address token, uint256 amount, bool autoClaim) internal {
+        RedeemQueueLib.increasePendingRedeem(user, token, amount, autoClaim);
     }
 
     function _consumePendingRedeem(address user, address token, uint256 amount) internal {

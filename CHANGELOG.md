@@ -6,6 +6,7 @@
 
 - **Breaking:** `BaseControlledAsyncRedeem` breaking changes:
   - Add `adjustment` param to `convertToUnderlying` and `convertFromUnderlying` functions
+  - Add `autoClaim` param to `requestRedeem`
 - **Breaking:** `UltraVaultRateProvider` breaking changes:
   - Make the contract non-upgradeable
   - Change asset data storage layout
@@ -25,6 +26,8 @@
   - Add `adjustment` param to `convertToUnderlying` and `convertFromUnderlying` functions
   - Add `updateAdjustmentRate` function to update asset's adjustment rate
   - Add `getSupportedAssets` function to query the list of all supported assets
+- `BaseControlledAsyncRedeem` additions:
+  - Add `getAutoClaim(asset, controller)` view returning the per-(controller, asset) auto-claim preference
 
 ### Removed
   - Remove `AssetData` type from `IUltraVaultRateProvider.sol`
