@@ -32,10 +32,8 @@ interface IBaseVaultErrors is IAddressUpdatableErrors {
 }
 
 interface IBaseVaultEvents {
-    event RateProviderProposed(address indexed proposedProvider);
-    event RateProviderUpdated(address indexed oldProvider, address indexed newProvider);
-    event UpgradeModuleProposed(address indexed proposedUpgradeModule);
-    event UpgradeModuleChanged(address indexed oldUpgradeModule, address indexed newUpgradeModule);
+    event AddressUpdateProposed(bytes32 indexed key, address indexed newAddress);
+    event AddressUpdated(bytes32 indexed key, address indexed oldAddress, address indexed newAddress);
     event RedeemRequestFulfilled(
         address indexed controller,
         address indexed fulfiller,
@@ -82,17 +80,14 @@ interface IBaseVault is
     /// @return rateProvider The address of the rate provider
     function rateProvider() external view returns (IUltraVaultRateProvider);
 
-    /// @notice Returns the proposed rate provider
-    /// @return proposedRateProvider The proposed rate provider address and proposaltimestamp
-    function proposedRateProvider() external view returns (address, uint256);
-
     /// @notice Returns the address of the upgrade module
     /// @return upgradeModule The address of the upgrade module
     function upgradeModule() external view returns (address);
 
-    /// @notice Returns the proposed upgrade module
-    /// @return proposedUpgradeModule The proposed upgrade module address and proposal timestamp
-    function proposedUpgradeModule() external view returns (address, uint256);
+    /// @notice Returns the proposed address for a given key
+    /// @param key The address key (see contract NatSpec for precomputed hashes)
+    /// @return proposedAddress The proposed address and proposal timestamp
+    function proposedAddress(bytes32 key) external view returns (address, uint256);
 
     /// @notice Converts assets to underlying
     /// @param asset The asset to convert
@@ -371,20 +366,14 @@ interface IBaseVault is
     // Admin Functions //
     /////////////////////
 
-    /// @notice Propose new rate provider for owner acceptance after delay
-    /// @param newRateProvider Address of the new rate provider
-    function proposeRateProvider(address newRateProvider) external;
+    /// @notice Propose an address update for the given key
+    /// @param key The address key (see contract NatSpec for precomputed hashes)
+    /// @param newAddress The new address being proposed
+    function proposeAddressUpdate(bytes32 key, address newAddress) external;
 
-    /// @notice Accept proposed rate provider
-    /// @param newRateProvider Address of the new rate provider
-    function acceptProposedRateProvider(address newRateProvider) external;
-
-    /// @notice Propose new upgrade module for owner acceptance after delay
-    /// @param newUpgradeModule Address of the new upgrade module
-    function proposeUpgradeModule(address newUpgradeModule) external;
-
-    /// @notice Accept proposed upgrade module
-    /// @param newUpgradeModule Address of the new upgrade module
-    /// @dev Pauses vault to manually check the setup by operators
-    function acceptUpgradeModule(address newUpgradeModule) external;
+    /// @notice Accept a previously proposed address update for the given key
+    /// @param key The address key (see contract NatSpec for precomputed hashes)
+    /// @param newAddress The new address to confirm
+    /// @dev Pauses the vault on success
+    function acceptAddressUpdate(bytes32 key, address newAddress) external;
 }
