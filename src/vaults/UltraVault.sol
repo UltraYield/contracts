@@ -2,15 +2,15 @@
 pragma solidity 0.8.28;
 
 import { SafeERC20, IERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import { IERC20Metadata } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
 import { IPriceSource } from "src/interfaces/IPriceSource.sol";
 import { IUltraVaultEvents, IUltraVaultErrors } from "src/interfaces/IUltraVault.sol";
 import { Adjustment, Fees } from "src/interfaces/Types.sol";
 import { AddressUpdateProposal } from "src/utils/AddressUpdates.sol";
+import { ComplianceLib } from "src/utils/ComplianceLib.sol";
 import { FixedPointMathLib } from "src/utils/FixedPointMathLib.sol";
 import { BaseControlledAsyncRedeem, BaseControlledAsyncRedeemInitParams } from "src/vaults/BaseControlledAsyncRedeem.sol";
-import { OPERATOR_ROLE } from "src/utils/Roles.sol";
+import { COMPLIANCE_ROLE, OPERATOR_ROLE } from "src/utils/Roles.sol";
 import {
     FUNDS_HOLDER_KEY,
     ORACLE_KEY,
@@ -60,6 +60,7 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
 
     uint256 internal constant ONE_YEAR = 365 * 24 * 60 * 60; // 31_536_000 seconds
     uint256 internal constant SCALE = 1e18; // Default scale
+    // forge-lint: disable-next-line(unsafe-typecast)
     uint64 internal constant ONE_PERCENT = uint64(SCALE) / 100;
     uint64 internal constant MAX_PERFORMANCE_FEE = 30 * ONE_PERCENT; // 30%
     uint64 internal constant MAX_MANAGEMENT_FEE = 5 * ONE_PERCENT; // 5%
@@ -76,10 +77,10 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
 
     /// @custom:storage-location erc7201:ultrayield.storage.UltraVault
     struct UltraVaultStorage {
-        address __fundsHolder; // Deprecated in V2
-        IPriceSource __oracle; // Deprecated in V2
-        AddressUpdateProposal __proposedFundsHolder; // Deprecated in V2
-        AddressUpdateProposal __proposedOracle; // Deprecated in V2
+        address _fundsHolder; // Deprecated in V2
+        IPriceSource _oracle; // Deprecated in V2
+        AddressUpdateProposal _proposedFundsHolder; // Deprecated in V2
+        AddressUpdateProposal _proposedOracle; // Deprecated in V2
         address feeRecipient;
         Fees fees;
     }
@@ -137,8 +138,8 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
         _migrateBaseControlledAsyncRedeemStateFromV1();
 
         UltraVaultStorage storage $ = _getUltraVaultStorage();
-        _migrateAddress(FUNDS_HOLDER_KEY, $.__fundsHolder);
-        _migrateAddress(ORACLE_KEY, address($.__oracle));
+        _migrateAddress(FUNDS_HOLDER_KEY, $._fundsHolder);
+        _migrateAddress(ORACLE_KEY, address($._oracle));
         _initAddress(INSTANT_REDEEM_EXITPOINT_KEY, _instantRedeemExitpoint);
         _initAddress(UPGRADE_MODULE_KEY, _upgradeModule);
 
@@ -243,14 +244,34 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
     // Hook Overrides //
     ////////////////////
 
-    /// @dev After deposit hook - collect fees and send funds to fundsHolder
-    function afterDeposit(address _asset, uint256 assets, uint256) internal override {
+    /// @dev Hook for executing custom logic right after deposit/mint
+    /// @dev Sends deposited funds to fundsHolder
+    function _afterDeposit(
+        address _asset, 
+        uint256 assets, 
+        uint256 /* shares */,
+        address /* receiver */
+    ) internal override {
+        _ensureNotRestricted(msg.sender);
         IERC20(_asset).safeTransfer(fundsHolder(), assets);
+    }
+
+    /// @dev Hook for executing custom logic right before withdraw/redeem
+    /// @dev Enforces compliance restrictions on receiver and controller
+    function _beforeWithdraw(
+        address /* _asset */, 
+        uint256 /* assets */, 
+        uint256 /* shares */,
+        address receiver,
+        address controller
+    ) internal view override {
+        _ensureNotRestricted(receiver);
+        if (controller != receiver) _ensureNotRestricted(controller);
     }
 
     /// @dev Before fulfill redeem - transfer funds from fundsHolder to vault
     /// @dev "assets" will already be correct given the token user requested
-    function beforeFulfillRedeem(address _asset, uint256 assets, uint256) internal override {
+    function _beforeFulfillRedeem(address _asset, uint256 assets, uint256) internal override {
         IERC20(_asset).safeTransferFrom(fundsHolder(), address(this), assets);
     }
 
@@ -276,6 +297,18 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
     ) internal override returns (uint256 assets) {
         _collectFees();
         assets = super._mintWithAsset(_asset, shares, receiver);
+    }
+
+    /// @dev Block restricted addresses from cancelling pending redeems
+    /// @dev Receiver is gated by `_update` on the share transfer back from the vault.
+    function _handleRedeemRequestCancelation(
+        address _asset,
+        uint256 shares,
+        address controller,
+        address receiver
+    ) internal override {
+        _ensureNotRestricted(controller);
+        super._handleRedeemRequestCancelation(_asset, shares, controller, receiver);
     }
 
     ////////////////////
@@ -345,6 +378,10 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
         address controller
     ) external checkAccess(controller) whenNotPaused returns (uint256) {
         _ensureIsSupported(_asset);
+        _ensureNotRestricted(receiver);
+        if (controller != receiver) {
+            _ensureNotRestricted(controller);
+        }
         require(shares != 0, NothingToRedeem());
         require(balanceOf(controller) >= shares, InsufficientBalance());
 
@@ -508,6 +545,65 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
         _collectFees();
     }
 
+    ////////////////
+    // Compliance //
+    ////////////////
+
+    /// @notice Get blocklist and freeze status for `account`
+    /// @return blocked True if `account` is blocklisted
+    /// @return frozen True if `account` is frozen
+    function restrictionStatus(address account) external view returns (bool blocked, bool frozen) {
+        ComplianceLib.Storage storage $ = ComplianceLib._getComplianceStorage();
+        blocked = $.blocklisted[account];
+        frozen = $.frozen[account];
+    }
+
+    /// @notice Add `account` to the blocklist
+    function blocklist(address account) external onlyRole(COMPLIANCE_ROLE) {
+        ComplianceLib.blocklist(account);
+    }
+
+    /// @notice Remove `account` from the blocklist
+    function unblocklist(address account) external onlyRole(COMPLIANCE_ROLE) {
+        ComplianceLib.unblocklist(account);
+    }
+
+    /// @notice Mark `account` as frozen
+    function freeze(address account) external onlyRole(COMPLIANCE_ROLE) {
+        ComplianceLib.freeze(account);
+    }
+
+    /// @notice Unmark `account` as frozen
+    function unfreeze(address account) external onlyRole(COMPLIANCE_ROLE) {
+        ComplianceLib.unfreeze(account);
+    }
+
+    /// @notice Burn `amount` shares from `target`'s wallet balance.
+    /// @dev Only affects `balanceOf(target)`; pending and claimable redeems are untouched.
+    function forceBurn(address target, uint256 amount) external onlyRole(COMPLIANCE_ROLE) {
+        _burn(target, amount);
+        emit ForceBurned(target, amount);
+    }
+
+    /// @dev Reverts if `account` is blocklisted or frozen.
+    /// @dev Returns early on `address(0)` so callers don't need to special-case mints/burns.
+    function _ensureNotRestricted(address account) internal view {
+        if (account == address(0)) return;
+        ComplianceLib.Storage storage $ = ComplianceLib._getComplianceStorage();
+        if ($.blocklisted[account]) revert AddressBlocklisted(account);
+        if ($.frozen[account]) revert AddressFrozen(account);
+    }
+
+    /// @dev Gates share transfers and mints. 
+    /// @dev Burns (`to == 0`) skip the from-side check so `forceBurn` can destroy a restricted address's shares.
+    function _update(address from, address to, uint256 value) internal override {
+        if (to != address(0)) {
+            _ensureNotRestricted(from);
+        }
+        _ensureNotRestricted(to);
+        super._update(from, to, value);
+    }
+
     ////////////////////////
     // Internal functions //
     ////////////////////////
@@ -592,7 +688,7 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
     /// @return accruedPerformanceFee Fee amount in asset token
     /// @dev Based on high water mark value
     function _calculateAccruedPerformanceFee(
-        Fees memory fees, 
+        Fees memory fees,
         Totals memory totals
     ) internal view returns (uint256) {
         uint256 performanceFee = fees.performanceFee;
@@ -617,24 +713,16 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
         return managementFee.mulDivDown(totals.totalAssets * timePassed, ONE_YEAR) / SCALE;
     }
 
-    function _previewInstantRedeem(address _asset, uint256 shares) 
-        internal 
-        view 
+    function _previewInstantRedeem(address _asset, uint256 shares)
+        internal
+        view
         returns (uint256 grossAssets, uint256 fee, uint256 netAssets)
     {
         uint256 underlyingAssets = convertToAssets(shares);
         grossAssets = convertFromUnderlying(_asset, underlyingAssets, Adjustment.DOWN);
-        fee = _calculateInstantRedeemFee(grossAssets);
-        netAssets = grossAssets - fee;
-    }
-
-    /// @dev Calculate the instant redeem fee for a given gross asset amount
-    /// @param grossAssets The gross asset amount before fee deduction
-    /// @return fee The fee amount in assets
-    function _calculateInstantRedeemFee(uint256 grossAssets) internal view returns (uint256) {
         Fees memory fees = getFees();
-        uint256 instantRedeemFeeRate = fees.withdrawalFee + fees.instantRedeemPremium;
-        return grossAssets.mulDivDown(instantRedeemFeeRate, SCALE);
+        fee = grossAssets.mulDivDown(fees.withdrawalFee + fees.instantRedeemPremium, SCALE);
+        netAssets = grossAssets - fee;
     }
 
     /// @notice Transfer withdrawal fee to fee recipient

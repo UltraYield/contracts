@@ -7,7 +7,6 @@ import { PausableUpgradeable } from "@openzeppelin/contracts-upgradeable/utils/P
 import { ERC4626Upgradeable } from "@openzeppelin/contracts-upgradeable/token/ERC20/extensions/ERC4626Upgradeable.sol";
 import { UUPSUpgradeable } from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import { SafeERC20, IERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
 import { PendingRedeem, ClaimableRedeem } from "src/interfaces/Types.sol";
 import { IRedeemAccounting } from "src/interfaces/IRedeemAccounting.sol";
 import { IUltraVaultRateProvider, Adjustment } from "src/interfaces/IUltraVaultRateProvider.sol";
@@ -52,7 +51,6 @@ abstract contract BaseControlledAsyncRedeem is
     IBaseVaultErrors,
     IBaseVaultEvents
 {
-    using Math for uint256;
     using SafeERC20 for IERC20;
 
     ///////////////
@@ -341,9 +339,6 @@ abstract contract BaseControlledAsyncRedeem is
         require(assets != 0, EmptyDeposit());
         require(shares != 0, NothingToMint());
 
-        // Call pre-deposit hook - use the actual asset amount being transferred
-        beforeDeposit(_asset, assets, shares);
-
         // Transfer assets from sender to the vault
         IERC20(_asset).safeTransferFrom(
             msg.sender,
@@ -358,7 +353,7 @@ abstract contract BaseControlledAsyncRedeem is
         emit Deposit(msg.sender, receiver, assets, shares);
 
         // Call after-deposit hook - use the actual asset amount that was transferred
-        afterDeposit(_asset, assets, shares);
+        _afterDeposit(_asset, assets, shares, receiver);
     }
 
     ///////////////////////
@@ -476,9 +471,9 @@ abstract contract BaseControlledAsyncRedeem is
         uint256 shares,
         address receiver,
         address controller
-    ) internal {
+    ) internal virtual {
         // Call before-withdrawal hook - use asset units for the hook
-        beforeWithdraw(_asset, assets, shares);
+        _beforeWithdraw(_asset, assets, shares, receiver, controller);
 
         // Update claimable redeem
         _consumeClaimableRedeem(controller, _asset, assets, shares);
@@ -486,9 +481,6 @@ abstract contract BaseControlledAsyncRedeem is
         // Transfer assets to the receiver
         IERC20(_asset).safeTransfer(receiver, assets);
         emit Withdraw(msg.sender, receiver, controller, assets, shares);
-        
-        // Call after-withdrawal hook - use asset units for the hook
-        afterWithdraw(_asset, assets, shares);
     }
 
     ////////////////
@@ -695,7 +687,7 @@ abstract contract BaseControlledAsyncRedeem is
         require(balanceOf(owner) >= shares, InsufficientBalance());
 
         // Call before-request-redeem hook
-        beforeRequestRedeem(_asset, shares, controller, owner);
+        _beforeRequestRedeem(_asset, shares, controller, owner);
 
         // Update pending redeem and persist autoClaim preference (last-writer-wins)
         _increasePendingRedeem(controller, _asset, shares, autoClaim);
@@ -832,7 +824,7 @@ abstract contract BaseControlledAsyncRedeem is
         require(assets != 0, NothingToWithdraw());
 
         // Call before-fulfill redeem hook
-        beforeFulfillRedeem(_asset, assets, shares);
+        _beforeFulfillRedeem(_asset, assets, shares);
 
         // Snapshot autoClaim BEFORE consuming pending — the consume clears the flag when shares hit 0
         bool autoClaim = _getAutoClaim(controller, _asset);
@@ -845,7 +837,7 @@ abstract contract BaseControlledAsyncRedeem is
         emit RedeemRequestFulfilled(controller, msg.sender, shares, assets);
 
         // Call after-fulfill redeem hook
-        afterFulfillRedeem(_asset, assets, shares, controller);
+        _afterFulfillRedeem(_asset, assets, shares, controller);
 
         // Auto-claim path: equivalent to the controller invoking `redeem` immediately after fulfillment.
         if (autoClaim) {
@@ -899,26 +891,20 @@ abstract contract BaseControlledAsyncRedeem is
     // Hooks //
     ///////////
 
-    /// @dev Hook for executing custom logic right before deposit/mint
-    function beforeDeposit(address _asset, uint256 assets, uint256 shares) internal virtual {}
-
     /// @dev Hook for executing custom logic right after deposit/mint
-    function afterDeposit(address _asset, uint256 assets, uint256 shares) internal virtual {}
+    function _afterDeposit(address _asset, uint256 assets, uint256 shares, address receiver) internal virtual {}
 
     /// @dev Hook for executing custom logic right before withdraw/redeem
-    function beforeWithdraw(address _asset, uint256 assets, uint256 shares) internal virtual {}
-
-    /// @dev Hook for executing custom logic right after withdraw/redeem
-    function afterWithdraw(address _asset, uint256 assets, uint256 shares) internal virtual {}
+    function _beforeWithdraw(address _asset, uint256 assets, uint256 shares, address receiver, address controller) internal virtual {}
 
     /// @dev Hook for inheriting contracts after request redeem
-    function beforeRequestRedeem(address _asset, uint256 shares, address controller, address owner) internal virtual {}
+    function _beforeRequestRedeem(address _asset, uint256 shares, address controller, address owner) internal virtual {}
 
     /// @dev Hook for inheriting contracts before fulfill
-    function beforeFulfillRedeem(address _asset, uint256 assets, uint256 shares) internal virtual {}
+    function _beforeFulfillRedeem(address _asset, uint256 assets, uint256 shares) internal virtual {}
 
     /// @dev Hook for inheriting contracts after fulfill
-    function afterFulfillRedeem(address _asset, uint256 assets, uint256 shares, address controller) internal virtual {}
+    function _afterFulfillRedeem(address _asset, uint256 assets, uint256 shares, address controller) internal virtual {}
 
     //////////////
     // Pausable //

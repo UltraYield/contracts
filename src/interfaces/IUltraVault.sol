@@ -4,8 +4,9 @@ pragma solidity >=0.8.0;
 import { IBaseVault, IBaseVaultEvents, IBaseVaultErrors } from "src/interfaces/IBaseVault.sol";
 import { IPriceSource } from "src/interfaces/IPriceSource.sol";
 import { Fees } from "src/interfaces/Types.sol";
+import { ICompliance, IComplianceEvents, IComplianceErrors } from "src/interfaces/ICompliance.sol";
 
-interface IUltraVaultEvents is IBaseVaultEvents {
+interface IUltraVaultEvents is IBaseVaultEvents, IComplianceEvents {
     event FeesRecipientUpdated(address oldRecipient, address newRecipient);
     event FeesUpdated(Fees oldFees, Fees newFees);
     event FeesCollected(
@@ -27,7 +28,7 @@ interface IUltraVaultEvents is IBaseVaultEvents {
     );
 }
 
-interface IUltraVaultErrors is IBaseVaultErrors {
+interface IUltraVaultErrors is IBaseVaultErrors, IComplianceErrors {
     error ZeroFeeRecipientAddress();
     error CannotSetBalancesInNonEmptyVault();
     error InvalidFees();
@@ -37,7 +38,7 @@ interface IUltraVaultErrors is IBaseVaultErrors {
 
 /// @title IUltraVault
 /// @notice A simplified interface for use in other contracts
-interface IUltraVault is IBaseVault {
+interface IUltraVault is IBaseVault, ICompliance {
     ////////////////////
     // View Functions //
     ////////////////////
