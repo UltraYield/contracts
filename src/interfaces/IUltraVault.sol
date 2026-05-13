@@ -6,7 +6,7 @@ import { IPriceSource } from "src/interfaces/IPriceSource.sol";
 import { Fees } from "src/interfaces/Types.sol";
 import { ICompliance, IComplianceEvents, IComplianceErrors } from "src/interfaces/ICompliance.sol";
 
-interface IUltraVaultEvents is IBaseVaultEvents {
+interface IUltraVaultEvents is IBaseVaultEvents, IComplianceEvents {
     event FeesRecipientUpdated(address oldRecipient, address newRecipient);
     event FeesUpdated(Fees oldFees, Fees newFees);
     event FeesCollected(
