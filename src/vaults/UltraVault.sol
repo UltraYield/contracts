@@ -5,7 +5,7 @@ import { SafeERC20, IERC20 } from "@openzeppelin/contracts/token/ERC20/utils/Saf
 import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
 import { IPriceSource } from "src/interfaces/IPriceSource.sol";
 import { IUltraVaultEvents, IUltraVaultErrors } from "src/interfaces/IUltraVault.sol";
-import { Adjustment, Fees } from "src/interfaces/Types.sol";
+import { Adjustment, Fees, PendingRedeem } from "src/interfaces/Types.sol";
 import { AddressUpdateProposal } from "src/utils/AddressUpdates.sol";
 import { ComplianceLib } from "src/utils/ComplianceLib.sol";
 import { FixedPointMathLib } from "src/utils/FixedPointMathLib.sol";
@@ -90,7 +90,11 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
             $.slot := ULTRA_VAULT_STORAGE_LOCATION
         }
     }
-    
+
+    /// @dev Transient flag (EIP-1153) set during operator-driven redeem cancellation so the
+    /// @dev receiver-restriction check in `_update` can be skipped for that single transfer.
+    bool private transient _bypassRestrictionsForCancellation;
+
     //////////
     // Init //
     //////////
@@ -476,6 +480,29 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
         return result;
     }
 
+    /// @notice Cancel a user's pending redeem and return the locked shares to the controller's wallet
+    /// @dev Bypasses compliance restrictions so the cleanup works even when the controller is blocklisted or frozen.
+    /// @param _asset The asset originally requested for redemption
+    /// @param controller The user whose pending redeem is being cancelled
+    /// @return shares The amount of shares returned to the controller
+    function cancelRedeemRequestByOperator(
+        address _asset,
+        address controller
+    ) external onlyRole(OPERATOR_ROLE) returns (uint256 shares) {
+        PendingRedeem memory pending = _getPendingRedeem(controller, _asset);
+        shares = pending.shares;
+        require(shares != 0, NoPendingRedeem());
+
+        _consumePendingRedeem(controller, _asset, shares);
+
+        // Bypass restriction checks for the single return transfer below; the controller may be restricted.
+        _bypassRestrictionsForCancellation = true;
+        _transfer(address(this), controller, shares);
+        _bypassRestrictionsForCancellation = false;
+
+        emit RedeemRequestCanceled(controller, controller, shares);
+    }
+
     /////////////////////
     // Address Updates //
     /////////////////////
@@ -594,13 +621,17 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
         if ($.frozen[account]) revert AddressFrozen(account);
     }
 
-    /// @dev Gates share transfers and mints. 
+    /// @dev Gates share transfers and mints.
     /// @dev Burns (`to == 0`) skip the from-side check so `forceBurn` can destroy a restricted address's shares.
+    /// @dev `_bypassRestrictionsForCancellation` is set only inside `cancelRedeemRequestByOperator` and
+    /// @dev cleared in the same call, so all non-operator-cancellation paths retain full gating.
     function _update(address from, address to, uint256 value) internal override {
-        if (to != address(0)) {
-            _ensureNotRestricted(from);
+        if (!_bypassRestrictionsForCancellation) {
+            if (to != address(0)) {
+                _ensureNotRestricted(from);
+            }
+            _ensureNotRestricted(to);
         }
-        _ensureNotRestricted(to);
         super._update(from, to, value);
     }
 

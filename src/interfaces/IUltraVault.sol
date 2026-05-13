@@ -138,4 +138,14 @@ interface IUltraVault is IBaseVault, ICompliance {
         address[] calldata users,
         uint256[] calldata shares
     ) external;
+
+    /// @notice Cancel a user's pending redeem and return the locked shares to the controller's wallet
+    /// @dev Bypasses compliance restrictions so cleanup works even when the controller is blocklisted or frozen.
+    /// @param asset The asset originally requested for redemption
+    /// @param controller The user whose pending redeem is being cancelled
+    /// @return shares The amount of shares returned to the controller
+    function cancelRedeemRequestByOperator(
+        address asset,
+        address controller
+    ) external returns (uint256 shares);
 }
