@@ -91,10 +91,6 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
         }
     }
 
-    /// @dev Transient flag (EIP-1153) set during operator-driven redeem cancellation so the
-    /// @dev receiver-restriction check in `_update` can be skipped for that single transfer.
-    bool private transient _bypassRestrictionsForCancellation;
-
     //////////
     // Init //
     //////////
@@ -495,10 +491,8 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
 
         _consumePendingRedeem(controller, _asset, shares);
 
-        // Bypass restriction checks for the single return transfer below; the controller may be restricted.
-        _bypassRestrictionsForCancellation = true;
-        _transfer(address(this), controller, shares);
-        _bypassRestrictionsForCancellation = false;
+        // Call parent `_update` directly to bypass this contract's compliance gate; the controller may be restricted.
+        super._update(address(this), controller, shares);
 
         emit RedeemRequestCanceled(controller, controller, shares);
     }
@@ -623,15 +617,11 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
 
     /// @dev Gates share transfers and mints.
     /// @dev Burns (`to == 0`) skip the from-side check so `forceBurn` can destroy a restricted address's shares.
-    /// @dev `_bypassRestrictionsForCancellation` is set only inside `cancelRedeemRequestByOperator` and
-    /// @dev cleared in the same call, so all non-operator-cancellation paths retain full gating.
     function _update(address from, address to, uint256 value) internal override {
-        if (!_bypassRestrictionsForCancellation) {
-            if (to != address(0)) {
-                _ensureNotRestricted(from);
-            }
-            _ensureNotRestricted(to);
+        if (to != address(0)) {
+            _ensureNotRestricted(from);
         }
+        _ensureNotRestricted(to);
         super._update(from, to, value);
     }
 
