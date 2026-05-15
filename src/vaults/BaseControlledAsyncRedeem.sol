@@ -72,6 +72,7 @@ abstract contract BaseControlledAsyncRedeem is
         AddressUpdateProposal __proposedRateProvider; // Deprecated in V2
     }
 
+    /// @dev Returns the namespaced ERC-7201 storage struct for BaseControlledAsyncRedeem
     function _getBaseAsyncRedeemStorage() private pure returns (BaseAsyncRedeemStorage storage $) {
         assembly {
             $.slot := BASE_ASYNC_REDEEM_STORAGE_LOCATION
@@ -220,7 +221,7 @@ abstract contract BaseControlledAsyncRedeem is
     function depositWithReferral(
         uint256 assets,
         address receiver,
-        string calldata referralId
+        string memory referralId
     ) external returns (uint256) {
         return _depositAssetWithReferral(asset(), assets, receiver, referralId);
     }
@@ -235,7 +236,7 @@ abstract contract BaseControlledAsyncRedeem is
         address _asset,
         uint256 assets,
         address receiver,
-        string calldata referralId
+        string memory referralId
     ) external returns (uint256) {
         return _depositAssetWithReferral(_asset, assets, receiver, referralId);
     }
@@ -272,7 +273,7 @@ abstract contract BaseControlledAsyncRedeem is
         address _asset,
         uint256 assets,
         address receiver,
-        string calldata referralId
+        string memory referralId
     ) internal returns (uint256 shares) {
         shares = _depositAsset(_asset, assets, receiver);
         emit Referral(referralId, msg.sender, shares);
@@ -776,9 +777,9 @@ abstract contract BaseControlledAsyncRedeem is
     /// @dev Reverts if arrays length mismatch
     /// @dev Collects withdrawal fee to incentivize manager
     function fulfillMultipleRedeems(
-        address[] calldata assets,
-        uint256[] calldata shares,
-        address[] calldata controllers
+        address[] memory assets,
+        uint256[] memory shares,
+        address[] memory controllers
     ) external virtual onlyRole(OPERATOR_ROLE) returns (uint256[] memory) {
         uint256 length = assets.length;
         require(length == shares.length && length == controllers.length, InputLengthMismatch());
