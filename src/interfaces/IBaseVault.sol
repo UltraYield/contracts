@@ -137,19 +137,6 @@ interface IBaseVault is
         uint256 assets
     ) external view returns (uint256);
 
-    /// @notice Helper to deposit particular asset for msg.sender upon referral
-    /// @param asset Asset to deposit
-    /// @param assets Amount to deposit
-    /// @param receiver receiver of deposit
-    /// @param referralId id of referral
-    /// @return shares Amount of shares received
-    function depositAssetWithReferral(
-        address asset,
-        uint256 assets,
-        address receiver,
-        string calldata referralId
-    ) external returns (uint256);
-
     /// @notice Deposit exact number of assets in base asset and mint shares to receiver
     /// @param assets Amount of assets to deposit
     /// @param receiver Share receiver
@@ -169,6 +156,30 @@ interface IBaseVault is
         uint256 assets,
         address receiver
     ) external returns (uint256 shares);
+
+    /// @notice Helper to deposit assets for msg.sender upon referral specifying receiver
+    /// @param assets Amount to deposit
+    /// @param receiver receiver of deposit
+    /// @param referralId id of referral
+    /// @return shares Amount of shares received
+    function depositWithReferral(
+        uint256 assets,
+        address receiver,
+        string memory referralId
+    ) external returns (uint256);
+
+    /// @notice Helper to deposit particular asset for msg.sender upon referral
+    /// @param asset Asset to deposit
+    /// @param assets Amount to deposit
+    /// @param receiver receiver of deposit
+    /// @param referralId id of referral
+    /// @return shares Amount of shares received
+    function depositAssetWithReferral(
+        address asset,
+        uint256 assets,
+        address receiver,
+        string memory referralId
+    ) external returns (uint256);
 
     //////////
     // Mint //
@@ -330,9 +341,9 @@ interface IBaseVault is
     /// @param controllers Array of controllers
     /// @return Array of fulfilled amounts in requested asset
     function fulfillMultipleRedeems(
-        address[] calldata assets,
-        uint256[] calldata shares,
-        address[] calldata controllers
+        address[] memory assets,
+        uint256[] memory shares,
+        address[] memory controllers
     ) external returns (uint256[] memory);
 
     ////////////////////////

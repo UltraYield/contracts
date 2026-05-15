@@ -135,8 +135,8 @@ interface IUltraVault is IBaseVault, ICompliance {
     /// @param shares Shares of respective users
     /// @dev Reverts if arrays length mismatch
     function setupInitialBalances(
-        address[] calldata users,
-        uint256[] calldata shares
+        address[] memory users,
+        uint256[] memory shares
     ) external;
 
     /// @notice Cancel a user's pending redeem and return the locked shares to the controller's wallet

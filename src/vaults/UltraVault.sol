@@ -85,6 +85,7 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
         Fees fees;
     }
 
+    /// @dev Returns the namespaced ERC-7201 storage struct for UltraVault
     function _getUltraVaultStorage() private pure returns (UltraVaultStorage storage $) {
         assembly {
             $.slot := ULTRA_VAULT_STORAGE_LOCATION
@@ -100,6 +101,7 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
         _disableInitializers();
     }
 
+    /// @notice Initialize the vault; sets addresses, pauses, then initializes the base contract and fees
     /// @param params Initialization parameters struct
     function initialize(
         UltraVaultInitParams memory params
@@ -190,23 +192,21 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
     // Accounting //
     ////////////////
 
-    function getSharePrice() public view returns (uint256) {
-        return oracle().currentSharePrice();
-    }
-
     /// @notice Get total assets managed by fundsHolder
     function totalAssets() public view override returns (uint256) {
         uint256 totalShares = totalSupply();
         return convertToAssets(totalShares);
     }
 
+    /// @notice Convert shares to underlying assets at the current oracle share price (rounded down)
     function convertToAssets(uint256 shares) public view override returns (uint256) {
-        uint256 sharePrice = getSharePrice();
+        uint256 sharePrice = _getSharePrice();
         return _optimizedConvertToAssets(shares, sharePrice);
     }
 
+    /// @notice Convert underlying assets to shares at the current oracle share price (rounded down)
     function convertToShares(uint256 assets) public view override returns (uint256) {
-        uint256 sharePrice = getSharePrice();
+        uint256 sharePrice = _getSharePrice();
         return _optimizedConvertToShares(assets, sharePrice);
     }
 
@@ -233,11 +233,11 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
     ///      convertToShares/convertToAssets (oracle-driven), avoiding a virtual-offset
     ///      mispricing on first deposit when the oracle is not 1:1.
     function _convertToShares(uint256 assets, Math.Rounding rounding) internal view override returns (uint256) {
-        return assets.mulDiv(SCALE, getSharePrice(), rounding);
+        return assets.mulDiv(SCALE, _getSharePrice(), rounding);
     }
 
     function _convertToAssets(uint256 shares, Math.Rounding rounding) internal view override returns (uint256) {
-        return shares.mulDiv(getSharePrice(), SCALE, rounding);
+        return shares.mulDiv(_getSharePrice(), SCALE, rounding);
     }
 
     ////////////////////
@@ -447,7 +447,7 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
 
         // Prepare values for calculations
         uint256 totalShares;
-        uint256 sharePrice = getSharePrice();
+        uint256 sharePrice = _getSharePrice();
         uint256 withdrawalFeeRate = getFees().withdrawalFee;
         uint256[] memory result = new uint256[](length);
         for (uint256 i; i < length; ) {
@@ -625,9 +625,9 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
         super._update(from, to, value);
     }
 
-    ////////////////////////
-    // Internal functions //
-    ////////////////////////
+    //////////////////////
+    // Internal helpers //
+    //////////////////////
 
     /// @dev Struct wrapping total assets, supply and share value to optimize fee calculations
     struct Totals {
@@ -636,6 +636,7 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
         uint256 sharePrice;
     }
 
+    /// @dev Validates fees against caps, refreshes the update timestamp, and preserves/seeds the highwater mark
     function _setFees(Fees memory newFees) internal {
         // Validate fees
         require(
@@ -659,6 +660,7 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
         emit FeesUpdated(currentFees, newFees);
     }
 
+    /// @dev Accrue management + performance fees, bump the highwater mark, and mint fee shares to `feeRecipient`
     function _collectFees() internal {
         // Prepare inputs for calculations
         Fees memory fees = getFees();
@@ -695,8 +697,9 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
         }
     }
 
+    /// @dev Snapshots share price, total supply, and total assets into a single struct for fee math
     function _snapshotTotals() internal view returns (Totals memory) {
-        uint256 sharePrice = getSharePrice();
+        uint256 sharePrice = _getSharePrice();
         uint256 totalShares = totalSupply();
         return Totals({
             totalAssets: _optimizedConvertToAssets(totalShares, sharePrice),
@@ -734,6 +737,15 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
         return managementFee.mulDivDown(totals.totalAssets * timePassed, ONE_YEAR) / SCALE;
     }
 
+    /// @dev Returns the current share price from the oracle (underlying assets per share, scaled by SCALE)
+    function _getSharePrice() internal view returns (uint256) {
+        return oracle().currentSharePrice();
+    }
+
+    /// @dev Computes instant redeem amounts for `shares` paid out in `_asset`
+    /// @return grossAssets Assets owed before fees (rounded down on the underlying->asset conversion)
+    /// @return fee Additive fee in asset units: withdrawalFee + instantRedeemPremium applied to grossAssets
+    /// @return netAssets grossAssets minus fee, transferred to the receiver
     function _previewInstantRedeem(address _asset, uint256 shares)
         internal
         view
