@@ -4,6 +4,7 @@ pragma solidity 0.8.28;
 import { IERC20Metadata } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
 import { Ownable2Step } from "@openzeppelin/contracts/access/Ownable2Step.sol";
+import { Checkpoints } from "@openzeppelin/contracts/utils/structs/Checkpoints.sol";
 import { IUltraVaultOracle, PriceUpdate } from "src/interfaces/IUltraVaultOracle.sol";
 import { IPriceSourceV1 } from "src/legacy/v1/interfaces/IPriceSourceV1.sol";
 import { IERC4626 } from "@openzeppelin/contracts/interfaces/IERC4626.sol";
@@ -13,6 +14,8 @@ import { IERC4626 } from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 ///         live price as a pure function of time, so identical bytecode prices the same
 ///         on every chain.
 contract UltraVaultOracle is Ownable2Step, IUltraVaultOracle {
+    using Checkpoints for Checkpoints.Trace208;
+
     ///////////////
     // Constants //
     ///////////////
@@ -30,6 +33,10 @@ contract UltraVaultOracle is Ownable2Step, IUltraVaultOracle {
 
     /// @dev Append-only, sorted by `startTimestamp`. Seeded in the constructor, never empty.
     PriceUpdate[] internal _updates;
+
+    /// @dev `startTimestamp => 1-based index into _updates`, for binary-search lookups
+    ///      by `historicalSharePrice` / `sharePriceAt`. `currentSharePrice` doesn't use it.
+    Checkpoints.Trace208 internal _index;
 
     /////////////////
     // Constructor //
@@ -54,13 +61,18 @@ contract UltraVaultOracle is Ownable2Step, IUltraVaultOracle {
     //////////////
 
     /// @notice Current share price in terms of the base asset.
+    /// @dev Scans backward from the tail: one step normally, two when a future-dated
+    ///      update is queued. Cheap for the hot path called on every vault op.
     function currentSharePrice() public view returns (uint256) {
         return _interpolate(_updates[_findActive(block.timestamp)], block.timestamp);
     }
 
     /// @inheritdoc IUltraVaultOracle
+    /// @dev Binary search over the checkpoint index; for off-chain/occasional lookups.
     function sharePriceAt(uint256 timestamp) public view returns (uint256) {
-        return _interpolate(_updates[_findActive(timestamp)], timestamp);
+        uint208 indexPlusOne = _index.upperLookupRecent(uint48(timestamp));
+        require(indexPlusOne != 0, NoPriceData());
+        return _interpolate(_updates[uint256(indexPlusOne) - 1], timestamp);
     }
 
     /// @notice Share price at `timestamp`.
@@ -106,7 +118,7 @@ contract UltraVaultOracle is Ownable2Step, IUltraVaultOracle {
         require(targetPrice != 0 && targetPrice <= type(uint88).max, Overflow());
         require(startTimestamp <= type(uint40).max, Overflow());
 
-        // Monotonic: keeps the array sorted for the read-side backward scan.
+        // Monotonic: keeps the array sorted for the read-side searches.
         require(
             startTimestamp >= uint256(_updates[_updates.length - 1].startTimestamp),
             NonMonotonicTimestamp()
@@ -121,14 +133,7 @@ contract UltraVaultOracle is Ownable2Step, IUltraVaultOracle {
             require(targetPrice > startPrice, DrawdownVestingNotAllowed());
         }
 
-        _updates.push(PriceUpdate({
-            startPrice: uint88(startPrice),
-            targetPrice: uint88(targetPrice),
-            vestingDuration: uint40(vestingDuration),
-            startTimestamp: uint40(startTimestamp)
-        }));
-
-        emit PriceUpdated(startPrice, targetPrice, vestingDuration, startTimestamp);
+        _push(startPrice, targetPrice, vestingDuration, startTimestamp);
     }
 
     //////////////
@@ -138,13 +143,25 @@ contract UltraVaultOracle is Ownable2Step, IUltraVaultOracle {
     function _seedInitialPrice(uint256 initialPrice) internal {
         require(initialPrice != 0 && initialPrice <= type(uint88).max, Overflow());
         require(block.timestamp <= type(uint40).max, Overflow());
+        _push(initialPrice, initialPrice, 0, block.timestamp);
+    }
+
+    /// @dev Append to `_updates` and mirror the position into the checkpoint index
+    ///      (1-based so `0` stays the "no data" sentinel). Then emit.
+    function _push(
+        uint256 startPrice,
+        uint256 targetPrice,
+        uint256 vestingDuration,
+        uint256 startTimestamp
+    ) internal {
         _updates.push(PriceUpdate({
-            startPrice: uint88(initialPrice),
-            targetPrice: uint88(initialPrice),
-            vestingDuration: 0,
-            startTimestamp: uint40(block.timestamp)
+            startPrice: uint88(startPrice),
+            targetPrice: uint88(targetPrice),
+            vestingDuration: uint40(vestingDuration),
+            startTimestamp: uint40(startTimestamp)
         }));
-        emit PriceUpdated(initialPrice, initialPrice, 0, block.timestamp);
+        _index.push(uint48(startTimestamp), uint208(_updates.length));
+        emit PriceUpdated(startPrice, targetPrice, vestingDuration, startTimestamp);
     }
 
     /// @dev Index of the update governing `atTime` (latest `startTimestamp <= atTime`),

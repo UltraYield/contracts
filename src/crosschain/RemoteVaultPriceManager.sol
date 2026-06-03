@@ -46,12 +46,18 @@ contract RemoteVaultPriceManager is BaseVaultPriceManager, CCIPReceiver {
     // Constructor //
     /////////////////
 
+    /// @param _initialNonce Starting nonce floor; messages must carry a strictly greater
+    ///        nonce. On a redeploy, set this to the source's current `broadcastNonce` to
+    ///        reject stale re-deliveries (0 for a fresh deploy).
     constructor(
         address _oracle,
         address _vault,
         address _owner,
-        address _ccipRouter
-    ) BaseVaultPriceManager(_oracle, _vault, _owner) CCIPReceiver(_ccipRouter) {}
+        address _ccipRouter,
+        uint64 _initialNonce
+    ) BaseVaultPriceManager(_oracle, _vault, _owner) CCIPReceiver(_ccipRouter) {
+        lastNonce = _initialNonce;
+    }
 
     /////////////////////
     // Config (owner)  //

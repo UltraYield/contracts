@@ -67,23 +67,29 @@ contract VaultPriceManager is BaseVaultPriceManager {
     mapping(uint64 chainSelector => Destination) public destinations;
     uint64[] public destinationSelectors;
 
+    /// @notice Last broadcast nonce. Incremented per broadcast and stamped on each message.
     uint64 public broadcastNonce;
 
     /////////////////
     // Constructor //
     /////////////////
 
+    /// @param _initialNonce Starting broadcast nonce; the first broadcast uses
+    ///        `_initialNonce + 1`. On a redeploy, set this to the highest `lastNonce`
+    ///        across remotes so they keep accepting broadcasts (0 for a fresh deploy).
     constructor(
         address _oracle,
         address _vault,
         address _owner,
         address _ccipRouter,
-        address _linkToken
+        address _linkToken,
+        uint64 _initialNonce
     ) BaseVaultPriceManager(_oracle, _vault, _owner) {
         require(_ccipRouter != address(0) && _linkToken != address(0), ZeroAddress());
         ccipRouter = IRouterClient(_ccipRouter);
         linkToken = IERC20(_linkToken);
         delay = DEFAULT_DELAY;
+        broadcastNonce = _initialNonce;
 
         // Pre-approve max LINK so each ccipSend can pull its fee.
         IERC20(_linkToken).approve(_ccipRouter, type(uint256).max);
