@@ -4,15 +4,14 @@ pragma solidity 0.8.28;
 /// @title PriceSyncMessage
 /// @notice Wire format for a cross-chain price update broadcast.
 /// @dev    Sent by the main-chain `VaultPriceManager` to every active destination
-///         and consumed by `RemoteVaultPriceManager` (added in PR #2). Both sides
-///         import this single struct + lib so the encoding stays in lockstep.
+///         and consumed by `RemoteVaultPriceManager`. Both sides import this single
+///         struct + lib so the encoding stays in lockstep.
 struct PriceSyncMessage {
-    uint64 nonce; // 16
-    uint64 mainScheduleTimestamp; // +32=48
-    uint88 startPrice; // +88=136
-    uint88 targetPrice; // +88=224
-    uint40 vestingDuration; // +32=256
-    bool mainPaused;
+    uint64 nonce;           // +64
+    uint88 startPrice;      // +88=152
+    uint88 targetPrice;     // +88=240
+    uint40 vestingDuration; // +40=280
+    uint40 startTimestamp;  // +40=320 (absolute activation time)
 }
 
 library PriceSyncMessageLib {

@@ -9,10 +9,7 @@ import { IPausable } from "src/interfaces/IPausable.sol";
 
 /// @title BaseVaultPriceManager
 /// @notice Shared logic between the main-chain `VaultPriceManager` (CCIP sender)
-///         and the destination-chain `RemoteVaultPriceManager` (CCIP receiver,
-///         added in PR #2). Encapsulates the `Limits` struct + sudden-movement
-///         check, the admin/owner authorization scheme, the public
-///         `wouldTriggerPause` view, and the manual price-update pause flow.
+///         and the destination-chain `RemoteVaultPriceManager` (CCIP receiver).
 abstract contract BaseVaultPriceManager is Ownable2Step {
     using FixedPointMathLib for uint256;
 
@@ -131,10 +128,6 @@ abstract contract BaseVaultPriceManager is Ownable2Step {
 
     /// @notice Returns true if applying `newPrice` against the current oracle
     ///         share price would breach the configured jumpUp/jumpDown limits.
-    /// @dev    The manual price-update path uses this to decide whether to auto-pause
-    ///         the vault. The CCIP receive path on destinations (PR #2) does NOT
-    ///         call this — destinations honor the `mainPaused` flag in the message
-    ///         instead, to avoid false positives when behind main.
     function wouldTriggerPause(uint256 newPrice) public view returns (bool) {
         uint256 lastPrice = oracle.currentSharePrice();
         Limits memory l = limits;
@@ -148,16 +141,19 @@ abstract contract BaseVaultPriceManager is Ownable2Step {
     // Internal //
     //////////////
 
-    /// @dev If applying `newPrice` would breach limits and the vault isn't
-    ///      already paused, pause it. Returns whether a pause condition was
-    ///      triggered (regardless of prior pause state).
-    function _applyPauseIfNeeded(uint256 newPrice) internal returns (bool triggeredPause) {
-        if (wouldTriggerPause(newPrice)) {
-            if (!IPausable(vault).paused()) {
-                IPausable(vault).pause();
-            }
-            return true;
+    /// @dev Shared pause-then-write path. Pauses this chain's vault if `targetPrice`
+    ///      breaches local limits (and it isn't already paused), then records the
+    ///      update on the local oracle verbatim. Called by the sender after computing
+    ///      the curve, and by the receiver after validating an inbound message.
+    function _applyUpdate(
+        uint256 startPrice,
+        uint256 targetPrice,
+        uint256 vestingDuration,
+        uint256 startTimestamp
+    ) internal {
+        if (wouldTriggerPause(targetPrice) && !IPausable(vault).paused()) {
+            IPausable(vault).pause();
         }
-        return false;
+        oracle.applyPriceUpdate(startPrice, targetPrice, vestingDuration, startTimestamp);
     }
 }

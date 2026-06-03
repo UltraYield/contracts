@@ -6,19 +6,11 @@ import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.s
 import { IRouterClient } from "@chainlink/contracts-ccip/src/v0.8/ccip/interfaces/IRouterClient.sol";
 import { Client } from "@chainlink/contracts-ccip/src/v0.8/ccip/libraries/Client.sol";
 import { BaseVaultPriceManager } from "src/crosschain/BaseVaultPriceManager.sol";
-import { IUltraVaultOracle, RecordedUpdate } from "src/interfaces/IUltraVaultOracle.sol";
 import { PriceSyncMessage, PriceSyncMessageLib } from "src/crosschain/PriceSyncMessage.sol";
 
 /// @title VaultPriceManager
-/// @notice Main-chain manager of vault price updates with safety limits and
-///         cross-chain CCIP broadcast. Every successful update on main is
-///         atomically broadcast to every active destination chain so destinations
-///         remain in lockstep.
-/// @dev Auto-pauses the vault on sudden moves (limit breach), then forwards the
-///      update to the oracle with `scheduleTimestamp = block.timestamp`. After
-///      the call returns, broadcasts the recorded slot to every active destination.
-///      With zero destinations configured, behaves identically to a single-chain
-///      manager (plus the new 1-hour activation delay enforced by the oracle).
+/// @notice Main-chain price manager: applies updates locally and broadcasts them over
+///         CCIP to every active destination so all chains stay in lockstep.
 contract VaultPriceManager is BaseVaultPriceManager {
     using SafeERC20 for IERC20;
 
@@ -32,6 +24,7 @@ contract VaultPriceManager is BaseVaultPriceManager {
     event DestinationActiveSet(uint64 indexed selector, bool active);
     event Broadcast(uint64 indexed selector, uint64 indexed nonce, bytes32 messageId);
     event LinkWithdrawn(address indexed to, uint256 amount);
+    event DelayUpdated(uint256 oldDelay, uint256 newDelay);
 
     ////////////
     // Errors //
@@ -40,6 +33,15 @@ contract VaultPriceManager is BaseVaultPriceManager {
     error DestinationNotFound();
     error DestinationAlreadyExists();
     error InvalidGasLimit();
+    error InvalidDelay();
+
+    ///////////////
+    // Constants //
+    ///////////////
+
+    uint256 public constant MIN_DELAY = 15 minutes;
+    uint256 public constant MAX_DELAY = 3 hours;
+    uint256 public constant DEFAULT_DELAY = 1 hours;
 
     ///////////
     // Types //
@@ -58,6 +60,9 @@ contract VaultPriceManager is BaseVaultPriceManager {
 
     IRouterClient public immutable ccipRouter;
     IERC20 public immutable linkToken;
+
+    /// @notice Lead time before a scheduled update activates (main chain only).
+    uint256 public delay;
 
     mapping(uint64 chainSelector => Destination) public destinations;
     uint64[] public destinationSelectors;
@@ -78,9 +83,9 @@ contract VaultPriceManager is BaseVaultPriceManager {
         require(_ccipRouter != address(0) && _linkToken != address(0), ZeroAddress());
         ccipRouter = IRouterClient(_ccipRouter);
         linkToken = IERC20(_linkToken);
+        delay = DEFAULT_DELAY;
 
-        // Pre-approve max LINK to the router so every future ccipSend can pull
-        // its fee in a single tx. Convention used by Chainlink CCIP sender examples.
+        // Pre-approve max LINK so each ccipSend can pull its fee.
         IERC20(_linkToken).approve(_ccipRouter, type(uint256).max);
     }
 
@@ -88,30 +93,29 @@ contract VaultPriceManager is BaseVaultPriceManager {
     // Oracle Logic //
     //////////////////
 
-    /// @notice Schedule an instant price update on the local oracle and broadcast
-    ///         to every active destination.
-    /// @dev    Pauses the vault if the new price breaches the configured limits.
-    function instantPriceUpdate(address _vault, uint256 newPrice) external onlyAdminOrOwner {
-        require(_vault == vault, InvalidVault());
-        bool mainPaused = _applyPauseIfNeeded(newPrice);
-        RecordedUpdate memory recorded =
-            oracle.setPriceInstantly(_vault, newPrice, block.timestamp);
-        _broadcastUpdate(recorded, mainPaused);
+    /// @notice Schedule an instant update and broadcast it. Activates at `now + delay`.
+    function instantPriceUpdate(uint256 newPrice) external onlyAdminOrOwner {
+        uint256 startTimestamp = block.timestamp + delay;
+        // startPrice is unused for an instant update; reuse newPrice.
+        _applyUpdate(newPrice, newPrice, 0, startTimestamp);
+        _broadcastUpdate(newPrice, newPrice, 0, startTimestamp);
     }
 
-    /// @notice Schedule a linear-vested price update on the local oracle and
-    ///         broadcast to every active destination.
-    /// @dev    Pauses the vault if `newPrice` (the vesting target) breaches limits.
-    function linearPriceUpdate(
-        address _vault,
-        uint256 newPrice,
-        uint256 duration
-    ) external onlyAdminOrOwner {
-        require(_vault == vault, InvalidVault());
-        bool mainPaused = _applyPauseIfNeeded(newPrice);
-        RecordedUpdate memory recorded =
-            oracle.scheduleLinearPriceUpdate(_vault, newPrice, duration, block.timestamp);
-        _broadcastUpdate(recorded, mainPaused);
+    /// @notice Schedule a linear-vested update and broadcast it. Vesting begins at
+    ///         `now + delay`; the start price is projected to that instant for continuity.
+    function linearPriceUpdate(uint256 newPrice, uint256 duration) external onlyAdminOrOwner {
+        uint256 startTimestamp = block.timestamp + delay;
+        uint256 startPrice = oracle.sharePriceAt(startTimestamp);
+        _applyUpdate(startPrice, newPrice, duration, startTimestamp);
+        _broadcastUpdate(startPrice, newPrice, duration, startTimestamp);
+    }
+
+    /// @notice Update the activation lead time (bounded).
+    function setDelay(uint256 newDelay) external onlyOwner {
+        require(newDelay >= MIN_DELAY && newDelay <= MAX_DELAY, InvalidDelay());
+        uint256 oldDelay = delay;
+        delay = newDelay;
+        emit DelayUpdated(oldDelay, newDelay);
     }
 
     ///////////////////////////
@@ -158,8 +162,7 @@ contract VaultPriceManager is BaseVaultPriceManager {
         emit DestinationConfigUpdated(selector, receiver, gasLimit);
     }
 
-    /// @notice Flip a destination's active flag. Admins can disable quickly to
-    ///         unblock broadcasts in an emergency.
+    /// @notice Flip a destination's active flag (escape hatch for a stuck destination).
     function setDestinationActive(uint64 selector, bool active_) external onlyAdminOrOwner {
         require(destinations[selector].exists, DestinationNotFound());
         destinations[selector].active = active_;
@@ -180,16 +183,20 @@ contract VaultPriceManager is BaseVaultPriceManager {
     // Internal //
     //////////////
 
-    function _broadcastUpdate(RecordedUpdate memory recorded, bool mainPaused) internal {
+    function _broadcastUpdate(
+        uint256 startPrice,
+        uint256 targetPrice,
+        uint256 vestingDuration,
+        uint256 startTimestamp
+    ) internal {
         uint64 nonce = ++broadcastNonce;
 
         PriceSyncMessage memory psm = PriceSyncMessage({
             nonce: nonce,
-            mainScheduleTimestamp: uint64(block.timestamp),
-            startPrice: uint88(recorded.startPrice),
-            targetPrice: uint88(recorded.targetPrice),
-            vestingDuration: uint40(recorded.vestingDuration),
-            mainPaused: mainPaused
+            startPrice: uint88(startPrice),
+            targetPrice: uint88(targetPrice),
+            vestingDuration: uint40(vestingDuration),
+            startTimestamp: uint40(startTimestamp)
         });
         bytes memory payload = PriceSyncMessageLib.encode(psm);
 
@@ -207,8 +214,7 @@ contract VaultPriceManager is BaseVaultPriceManager {
                 feeToken: address(linkToken)
             });
 
-            // No try/catch: per design, any send failure must revert the whole tx
-            // so destinations stay in lockstep (all-or-nothing broadcast).
+            // No try/catch: any send failure reverts the whole tx (all-or-nothing).
             bytes32 messageId = ccipRouter.ccipSend(selector, ccipMsg);
             emit Broadcast(selector, nonce, messageId);
         }

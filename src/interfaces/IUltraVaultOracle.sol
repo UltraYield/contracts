@@ -4,32 +4,28 @@ pragma solidity >=0.8.0;
 import { IPriceSource } from "src/interfaces/IPriceSource.sol";
 import { IPriceSourceV1 } from "src/legacy/v1/interfaces/IPriceSourceV1.sol";
 
-/// @notice A snapshot of an oracle price update that has been recorded but may
-///         not yet be effective. Returned by writes and by `pendingUpdate` /
-///         `lastEffectiveUpdate` views.
-struct RecordedUpdate {
-    uint256 startPrice;
-    uint256 targetPrice;
-    uint256 vestingDuration;
-    uint256 effectiveAt;
+/// @notice A single price update recorded by the oracle. Packs into one slot.
+struct PriceUpdate {
+    uint88 startPrice;       // +88
+    uint88 targetPrice;      // +88=176
+    uint40 vestingDuration;  // +40=216; 0 = instant
+    uint40 startTimestamp;   // +40=256; absolute activation time
 }
 
 /// @title IUltraVaultOracle
-/// @notice Interface for push-based price oracle
-/// @dev Extends IPriceSource with price setting capabilities
-/// @dev Also implements IPriceSourceV1 for backwards compatibility with V1 vaults
+/// @notice Push-based share-price oracle. Stores curves supplied by the price manager
+///         and prices purely off `block.timestamp`; identical on every chain.
 interface IUltraVaultOracle is IPriceSource, IPriceSourceV1 {
     ////////////
     // Events //
     ////////////
 
-    /// @notice Emitted once per scheduled price update at scheduling time.
-    /// @dev    Indexers can derive activation by waiting for `effectiveAt`.
+    /// @notice Emitted once per recorded price update.
     event PriceUpdated(
         uint256 startPrice,
         uint256 targetPrice,
         uint256 vestingDuration,
-        uint256 effectiveAt
+        uint256 startTimestamp
     );
 
     ////////////
@@ -44,48 +40,35 @@ interface IUltraVaultOracle is IPriceSource, IPriceSourceV1 {
     error InvalidVestingDuration();
     error DrawdownVestingNotAllowed();
     error Overflow();
-    error FutureScheduleTimestamp();
+    error NonMonotonicTimestamp();
 
     //////////////
     // View Fns //
     //////////////
 
-    /// @notice Get vault address priced by this oracle
+    /// @notice Vault priced by this oracle.
     function vault() external view returns (address);
 
-    /// @notice Returns the current pending update, if any.
-    function pendingUpdate() external view returns (RecordedUpdate memory update, bool exists);
+    /// @notice Share price at an arbitrary timestamp (past history or future projection).
+    function sharePriceAt(uint256 timestamp) external view returns (uint256);
 
-    /// @notice Returns the most recently activated (promoted-to-history) update.
-    function lastEffectiveUpdate() external view returns (RecordedUpdate memory);
+    /// @notice The most recently recorded price update.
+    function lastUpdate() external view returns (PriceUpdate memory);
+
+    /// @notice Number of recorded price updates (including the initial seed).
+    function updatesCount() external view returns (uint256);
 
     ///////////////
     // Write Fns //
     ///////////////
 
-    /// @notice Schedule a new share price; takes effect at `scheduleTimestamp + DELAY`.
-    /// @param vault              The target vault (sanity-checked equal to `vault()`).
-    /// @param newPrice           The new share price.
-    /// @param scheduleTimestamp  The schedule origin. Main passes `block.timestamp`;
-    ///                           remote (PR #2) passes main's send-timestamp from the
-    ///                           CCIP message. Must satisfy `scheduleTimestamp <= block.timestamp`.
-    /// @return recorded          The pending slot's resolved state.
-    function setPriceInstantly(
-        address vault,
-        uint256 newPrice,
-        uint256 scheduleTimestamp
-    ) external returns (RecordedUpdate memory recorded);
-
-    /// @notice Schedule a linear-vested share price change. Vesting begins at
-    ///         `scheduleTimestamp + DELAY` and runs for `vestingDuration` seconds.
-    ///         `startPrice` is computed automatically as the value the oracle WILL
-    ///         report at the new `effectiveAt` based on effective-history only
-    ///         (so a vesting scheduled while an earlier curve is in progress
-    ///         continues smoothly from where that curve will be at activation).
-    function scheduleLinearPriceUpdate(
-        address vault,
+    /// @notice Record a price update verbatim with an absolute `startTimestamp` (no delay).
+    /// @dev `startTimestamp` must be monotonic; `vestingDuration == 0` is instant, otherwise
+    ///      a linear vest requiring `targetPrice > startPrice` and a duration within bounds.
+    function applyPriceUpdate(
+        uint256 startPrice,
         uint256 targetPrice,
         uint256 vestingDuration,
-        uint256 scheduleTimestamp
-    ) external returns (RecordedUpdate memory recorded);
+        uint256 startTimestamp
+    ) external;
 }
