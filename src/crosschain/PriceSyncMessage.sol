@@ -7,11 +7,11 @@ pragma solidity 0.8.28;
 ///         and consumed by `RemoteVaultPriceManager`. Both sides import this single
 ///         struct + lib so the encoding stays in lockstep.
 struct PriceSyncMessage {
-    uint64 nonce;           // +64
-    uint88 startPrice;      // +88=152
-    uint88 targetPrice;     // +88=240
-    uint40 vestingDuration; // +40=280
-    uint40 startTimestamp;  // +40=320 (absolute activation time)
+    uint64 nonce;
+    uint88 startPrice;
+    uint88 targetPrice;
+    uint40 vestingDuration;
+    uint40 startTimestamp;
 }
 
 library PriceSyncMessageLib {
