@@ -19,7 +19,7 @@ remappings = [
   '@openzeppelin/contracts-upgradeable/=lib/openzeppelin-contracts-upgradeable/contracts/',
   'openzeppelin-foundry-upgrades/=lib/openzeppelin-foundry-upgrades/src/',
   'ERC-7540/=lib/ERC-7540-Reference/src/',
-  '@chainlink/contracts-ccip/=lib/ccip/contracts/'
+  '@chainlink/contracts-ccip/=lib/ccip-contracts/'
 ]
 
 [profile.release]
