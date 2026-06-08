@@ -1,195 +1,234 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity 0.8.28;
 
-import { FixedPointMathLib } from "src/utils/FixedPointMathLib.sol";
-import { IUltraVaultOracle } from "src/interfaces/IUltraVaultOracle.sol";
-import { IOwnable } from "src/interfaces/IOwnable.sol";
-import { IPausable } from "src/interfaces/IPausable.sol";
-import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
-import { Ownable2Step } from "@openzeppelin/contracts/access/Ownable2Step.sol";
+import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import { IRouterClient } from "@chainlink/contracts-ccip/src/v0.8/ccip/interfaces/IRouterClient.sol";
+import { Client } from "@chainlink/contracts-ccip/src/v0.8/ccip/libraries/Client.sol";
+import { BaseVaultPriceManager } from "src/crosschain/BaseVaultPriceManager.sol";
+import { PriceSyncMessage, PriceSyncMessageLib } from "src/crosschain/PriceSyncMessage.sol";
 
 /// @title VaultPriceManager
-/// @notice Contract managing vault price updates with limits
-/// @dev Has built in safety mechanisms to pause vault upon sudden moves
-contract VaultPriceManager is Ownable2Step {
-    using FixedPointMathLib for uint256;
+/// @notice Main-chain price manager: applies updates locally and broadcasts them over
+///         CCIP to every active destination so all chains stay in lockstep.
+contract VaultPriceManager is BaseVaultPriceManager {
+    using SafeERC20 for IERC20;
 
     ////////////
     // Events //
     ////////////
 
-    event LimitsUpdated(Limits oldLimits, Limits newLimits);
-    event AdminAdded(address indexed admin);
-    event AdminRemoved(address indexed admin);
+    event DestinationAdded(uint64 indexed selector, address receiver, uint256 gasLimit);
+    event DestinationRemoved(uint64 indexed selector);
+    event DestinationConfigUpdated(uint64 indexed selector, address receiver, uint256 gasLimit);
+    event DestinationActiveSet(uint64 indexed selector, bool active);
+    event Broadcast(uint64 indexed selector, uint64 indexed nonce, bytes32 messageId);
+    event LinkWithdrawn(address indexed to, uint256 amount);
+    event DelayUpdated(uint256 oldDelay, uint256 newDelay);
 
     ////////////
     // Errors //
     ////////////
 
-    error ZeroAddress();
-    error InvalidVault();
-    error NotAdminOrOwner();
-    error InvalidLimit();
-    error AlreadyAdmin();
-    error NotAdmin();
+    error DestinationNotFound();
+    error DestinationAlreadyExists();
+    error InvalidGasLimit();
+    error InvalidDelay();
+    error Overflow();
 
     ///////////////
     // Constants //
     ///////////////
 
-    uint256 internal constant SCALE = 1e18;
-    uint256 public constant MAX_JUMP_LIMIT = SCALE;
+    uint256 public constant MIN_DELAY = 15 minutes;
+    uint256 public constant MAX_DELAY = 3 hours;
+    uint256 public constant DEFAULT_DELAY = 1 hours;
 
     ///////////
     // Types //
     ///////////
 
-    /// @notice Safety limits for price updates
-    struct Limits {
-        // Maximum allowed upward price jump from one update to the next (1e18 = 100%)
-        uint128 jumpUp;
-        // Maximum allowed downward price jump from one update to the next (1e18 = 100%)
-        uint128 jumpDown;
+    struct Destination {
+        address receiver;
+        uint256 gasLimit;
+        bool active;
+        bool exists;
     }
 
     /////////////
     // Storage //
     /////////////
 
-    IUltraVaultOracle public immutable oracle;
-    address public immutable vault;
-    Limits public limits;
-    mapping(address => bool) public isAdmin;
+    IRouterClient public immutable ccipRouter;
+    IERC20 public immutable linkToken;
+
+    /// @notice Lead time before a scheduled update activates (main chain only).
+    uint256 public delay;
+
+    mapping(uint64 chainSelector => Destination) public destinations;
+    uint64[] public destinationSelectors;
+
+    /// @notice Last broadcast nonce. Incremented per broadcast and stamped on each message.
+    uint64 public broadcastNonce;
 
     /////////////////
     // Constructor //
     /////////////////
 
-    /// @notice Initialize controller with oracle and owner
-    /// @param _oracle Oracle contract address
-    /// @param _vault Vault address
-    /// @param _owner Owner address
-    constructor(address _oracle, address _vault, address _owner) Ownable(_owner) {
-        require(_oracle != address(0), ZeroAddress());
-        oracle = IUltraVaultOracle(_oracle);
+    /// @param _initialNonce Starting broadcast nonce; the first broadcast uses
+    ///        `_initialNonce + 1`. On a redeploy, set this to the highest `lastNonce`
+    ///        across remotes so they keep accepting broadcasts (0 for a fresh deploy).
+    constructor(
+        address _oracle,
+        address _vault,
+        address _owner,
+        address _ccipRouter,
+        address _linkToken,
+        uint64 _initialNonce
+    ) BaseVaultPriceManager(_oracle, _vault, _owner) {
+        require(_ccipRouter != address(0) && _linkToken != address(0), ZeroAddress());
+        ccipRouter = IRouterClient(_ccipRouter);
+        linkToken = IERC20(_linkToken);
+        delay = DEFAULT_DELAY;
+        broadcastNonce = _initialNonce;
 
-        require(_vault != address(0), ZeroAddress());
-        require(_vault == oracle.vault(), InvalidVault());
-        vault = _vault;
+        // Pre-approve max LINK so each ccipSend can pull its fee.
+        IERC20(_linkToken).approve(_ccipRouter, type(uint256).max);
     }
 
     //////////////////
     // Oracle Logic //
     //////////////////
 
-    /// @notice Update vault price instantly
-    /// @param _vault Target vault address
-    /// @param newPrice New price
-    /// @dev Pauses vault on large price jumps
-    function instantPriceUpdate(address _vault, uint256 newPrice) external onlyAdminOrOwner {
-        require(_vault == vault, InvalidVault());
-        _checkSuddenMovements(newPrice);
-        oracle.setPriceInstantly(
-            _vault,
-            newPrice
-        );
+    /// @notice Schedule an instant update and broadcast it. Activates at `now + delay`.
+    function instantPriceUpdate(uint256 newPrice) external onlyAdminOrOwner {
+        uint256 startTimestamp = block.timestamp + delay;
+        // startPrice is unused for an instant update; reuse newPrice.
+        _applyUpdate(newPrice, newPrice, 0, startTimestamp);
+        _broadcastUpdate(newPrice, newPrice, 0, startTimestamp);
     }
 
-    /// @notice Update vault price linearly over a duration
-    /// @param _vault Target vault address
-    /// @param newPrice New price
-    /// @param duration Vesting duration
-    /// @dev Pauses vault on large price jumps
-    function linearPriceUpdate(
-        address _vault,
-        uint256 newPrice,
-        uint256 duration
-    ) external onlyAdminOrOwner {
-        require(_vault == vault, InvalidVault());
-        _checkSuddenMovements(newPrice);
-        oracle.scheduleLinearPriceUpdate(
-            _vault,
-            newPrice,
-            duration
-        );
+    /// @notice Schedule a linear-vested update and broadcast it. Vesting begins at
+    ///         `now + delay`; the start price is projected to that instant for continuity.
+    function linearPriceUpdate(uint256 newPrice, uint256 duration) external onlyAdminOrOwner {
+        uint256 startTimestamp = block.timestamp + delay;
+        uint256 startPrice = oracle.sharePriceAt(startTimestamp);
+        _applyUpdate(startPrice, newPrice, duration, startTimestamp);
+        _broadcastUpdate(startPrice, newPrice, duration, startTimestamp);
     }
 
-    //////////////////////
-    // Admin Role Logic //
-    //////////////////////
-
-    /// @notice Set vault admin
-    /// @param admin Admin address
-    function addAdmin(address admin) external onlyOwner {
-        require(admin != address(0), ZeroAddress());
-        require(!isAdmin[admin], AlreadyAdmin());
-        isAdmin[admin] = true;
-        emit AdminAdded(admin);
+    /// @notice Update the activation lead time (bounded).
+    function setDelay(uint256 newDelay) external onlyOwner {
+        require(newDelay >= MIN_DELAY && newDelay <= MAX_DELAY, InvalidDelay());
+        uint256 oldDelay = delay;
+        delay = newDelay;
+        emit DelayUpdated(oldDelay, newDelay);
     }
 
-    function removeAdmin(address admin) external onlyOwner {
-        require(admin != address(0), ZeroAddress());
-        require(isAdmin[admin], NotAdmin());
-        isAdmin[admin] = false;
-        emit AdminRemoved(admin);
-    }
+    ///////////////////////////
+    // Destination Registry  //
+    ///////////////////////////
 
-    /// @notice Modifier for admin/owner access
-    modifier onlyAdminOrOwner() {
-        require(msg.sender == owner() || isAdmin[msg.sender], NotAdminOrOwner());
-        _;
-    }
-
-    ///////////////////
-    // Limits Update //
-    ///////////////////
-
-    /// @notice Set vault price limits
-    /// @param jumpUp Maximum allowed upward price jump from one update to the next (1e18 = 100%)
-    /// @param jumpDown Maximum allowed downward price jump from one update to the next (1e18 = 100%)
-    function updateLimits(uint128 jumpUp, uint128 jumpDown) external onlyOwner {
-        require(jumpUp <= MAX_JUMP_LIMIT && jumpDown <= MAX_JUMP_LIMIT, InvalidLimit());
-        Limits memory oldLimits = limits;
-        Limits memory newLimits = Limits({
-            jumpUp: jumpUp,
-            jumpDown: jumpDown
+    function addDestination(uint64 selector, address receiver, uint256 gasLimit) external onlyOwner {
+        require(receiver != address(0), ZeroAddress());
+        require(gasLimit != 0, InvalidGasLimit());
+        require(!destinations[selector].exists, DestinationAlreadyExists());
+        destinations[selector] = Destination({
+            receiver: receiver,
+            gasLimit: gasLimit,
+            active: true,
+            exists: true
         });
-        if (
-            newLimits.jumpUp != oldLimits.jumpUp ||
-            newLimits.jumpDown != oldLimits.jumpDown
-        ) {
-            limits = newLimits;
-            emit LimitsUpdated(oldLimits, newLimits);
-        }
+        destinationSelectors.push(selector);
+        emit DestinationAdded(selector, receiver, gasLimit);
     }
 
-    ///////////
-    // Utils //
-    ///////////
+    function removeDestination(uint64 selector) external onlyOwner {
+        require(destinations[selector].exists, DestinationNotFound());
+        delete destinations[selector];
+        uint256 len = destinationSelectors.length;
+        for (uint256 i; i < len; ++i) {
+            if (destinationSelectors[i] == selector) {
+                destinationSelectors[i] = destinationSelectors[len - 1];
+                destinationSelectors.pop();
+                break;
+            }
+        }
+        emit DestinationRemoved(selector);
+    }
 
-    /// @notice Claim oracle ownership
-    function claimOracleOwnership() external onlyOwner {
-        IOwnable(address(oracle)).acceptOwnership();
+    function updateDestinationConfig(uint64 selector, address receiver, uint256 gasLimit)
+        external
+        onlyOwner
+    {
+        require(destinations[selector].exists, DestinationNotFound());
+        require(receiver != address(0), ZeroAddress());
+        require(gasLimit != 0, InvalidGasLimit());
+        destinations[selector].receiver = receiver;
+        destinations[selector].gasLimit = gasLimit;
+        emit DestinationConfigUpdated(selector, receiver, gasLimit);
+    }
+
+    /// @notice Flip a destination's active flag (escape hatch for a stuck destination).
+    function setDestinationActive(uint64 selector, bool active_) external onlyAdminOrOwner {
+        require(destinations[selector].exists, DestinationNotFound());
+        destinations[selector].active = active_;
+        emit DestinationActiveSet(selector, active_);
+    }
+
+    function destinationsCount() external view returns (uint256) {
+        return destinationSelectors.length;
+    }
+
+    function withdrawLink(address to, uint256 amount) external onlyOwner {
+        require(to != address(0), ZeroAddress());
+        linkToken.safeTransfer(to, amount);
+        emit LinkWithdrawn(to, amount);
     }
 
     //////////////
     // Internal //
     //////////////
 
-    /// @notice Check price update for sudden price swings
-    function _checkSuddenMovements(uint256 newPrice) internal {
-        uint256 lastPrice = oracle.currentSharePrice();
-        Limits memory _limits = limits;
-        // pause if update is out of the limits
-        if (
-            // Sudden drop
-            newPrice < lastPrice.mulDivDown(SCALE - _limits.jumpDown, SCALE) ||
-            // Sudden increase
-            newPrice > lastPrice.mulDivDown(SCALE + _limits.jumpUp, SCALE)
-        ) {
-            if (!IPausable(vault).paused()) {
-                IPausable(vault).pause();
-            }
+    function _broadcastUpdate(
+        uint256 startPrice,
+        uint256 targetPrice,
+        uint256 vestingDuration,
+        uint256 startTimestamp
+    ) internal {
+        require(startPrice <= type(uint88).max, Overflow());
+        require(targetPrice <= type(uint88).max, Overflow());
+        require(vestingDuration <= type(uint40).max, Overflow());
+        require(startTimestamp <= type(uint40).max, Overflow());
+
+        uint64 nonce = ++broadcastNonce;
+
+        PriceSyncMessage memory psm = PriceSyncMessage({
+            nonce: nonce,
+            startPrice: uint88(startPrice),
+            targetPrice: uint88(targetPrice),
+            vestingDuration: uint40(vestingDuration),
+            startTimestamp: uint40(startTimestamp)
+        });
+        bytes memory payload = PriceSyncMessageLib.encode(psm);
+
+        uint256 len = destinationSelectors.length;
+        for (uint256 i; i < len; ++i) {
+            uint64 selector = destinationSelectors[i];
+            Destination memory dest = destinations[selector];
+            if (!dest.active) continue;
+
+            Client.EVM2AnyMessage memory ccipMsg = Client.EVM2AnyMessage({
+                receiver: abi.encode(dest.receiver),
+                data: payload,
+                tokenAmounts: new Client.EVMTokenAmount[](0),
+                extraArgs: Client._argsToBytes(Client.EVMExtraArgsV1({ gasLimit: dest.gasLimit })),
+                feeToken: address(linkToken)
+            });
+
+            // No try/catch: any send failure reverts the whole tx (all-or-nothing).
+            bytes32 messageId = ccipRouter.ccipSend(selector, ccipMsg);
+            emit Broadcast(selector, nonce, messageId);
         }
     }
 }

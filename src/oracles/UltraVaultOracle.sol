@@ -5,33 +5,16 @@ import { IERC20Metadata } from "@openzeppelin/contracts/token/ERC20/extensions/I
 import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
 import { Ownable2Step } from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import { Checkpoints } from "@openzeppelin/contracts/utils/structs/Checkpoints.sol";
-import { IUltraVaultOracle } from "src/interfaces/IUltraVaultOracle.sol";
+import { IUltraVaultOracle, PriceUpdate } from "src/interfaces/IUltraVaultOracle.sol";
 import { IPriceSourceV1 } from "src/legacy/v1/interfaces/IPriceSourceV1.sol";
 import { IERC4626 } from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 
 /// @title UltraVaultOracle
-/// @notice Oracle for setting base/quote pair prices by permissioned entities
-/// @dev Price safety and reliability handled by other contracts/infrastructure
+/// @notice Append-only share-price oracle. Stores each update verbatim and reports the
+///         live price as a pure function of time, so identical bytecode prices the same
+///         on every chain.
 contract UltraVaultOracle is Ownable2Step, IUltraVaultOracle {
     using Checkpoints for Checkpoints.Trace208;
-
-    ///////////
-    // Types //
-    ///////////
-
-    struct PriceUpdate {
-        uint256 startPrice;
-        uint256 targetPrice;
-        uint256 vestingDuration;
-        uint256 timestamp;
-    }
-
-    struct PriceUpdateSlot {
-        uint88 startPrice;
-        uint88 targetPrice;
-        uint40 vestingDuration;
-        uint40 timestamp;
-    }
 
     ///////////////
     // Constants //
@@ -48,16 +31,18 @@ contract UltraVaultOracle is Ownable2Step, IUltraVaultOracle {
     // Storage //
     /////////////
 
-    PriceUpdateSlot internal _lastUpdate;
-    Checkpoints.Trace208 internal _priceUpdatesHistoryIndex;
-    PriceUpdateSlot[] internal _priceUpdatesHistory;
+    /// @dev Append-only, sorted by `startTimestamp`. Seeded in the constructor, never empty.
+    PriceUpdate[] internal _updates;
+
+    /// @dev `startTimestamp => 1-based index into _updates`, for binary-search lookups
+    ///      by `historicalSharePrice` / `sharePriceAt`. `currentSharePrice` doesn't use it.
+    Checkpoints.Trace208 internal _index;
 
     /////////////////
     // Constructor //
     /////////////////
 
     constructor(address _owner, address _vault, uint256 _initialPrice) Ownable(_owner) {
-        // Checks
         require(_vault != address(0), ZeroAddress());
         vault = _vault;
 
@@ -68,33 +53,36 @@ contract UltraVaultOracle is Ownable2Step, IUltraVaultOracle {
         uint8 vaultDecimals = IERC20Metadata(vault).decimals();
         require(assetDecimals == vaultDecimals, DecimalsMismatch());
 
-        _setPrice(_initialPrice);
+        _seedInitialPrice(_initialPrice);
     }
 
     //////////////
     // View Fns //
     //////////////
 
-    /// @notice Get current vault's share price
-    /// @return Vault's share price in terms of the base asset
+    /// @notice Current share price in terms of the base asset.
+    /// @dev Scans backward from the tail: one step normally, two when a future-dated
+    ///      update is queued. Cheap for the hot path called on every vault op.
     function currentSharePrice() public view returns (uint256) {
-        return _getCurrentSharePrice();
+        return _interpolate(_updates[_findActive(block.timestamp)], block.timestamp);
     }
 
-    /// @notice Get vault's share price at a specific timestamp
-    /// @param timestamp Target timestamp for historical lookup
-    /// @return Vault's share price in terms of the base asset
+    /// @inheritdoc IUltraVaultOracle
+    /// @dev Binary search over the checkpoint index; for off-chain/occasional lookups.
+    function sharePriceAt(uint256 timestamp) public view returns (uint256) {
+        uint208 indexPlusOne = _index.upperLookupRecent(uint48(timestamp));
+        require(indexPlusOne != 0, NoPriceData());
+        return _interpolate(_updates[uint256(indexPlusOne) - 1], timestamp);
+    }
+
+    /// @notice Share price at `timestamp`.
     function historicalSharePrice(uint256 timestamp) external view returns (uint256) {
-        PriceUpdate memory update = _getPriceUpdateAtTimestamp(timestamp);
-        return _priceAtTimestamp(update, timestamp);
+        return sharePriceAt(timestamp);
     }
 
     /// @inheritdoc IPriceSourceV1
-    /// @dev Backwards-compatibility shim for V1 vaults, which call
-    /// `oracle().getQuote(totalSupply(), share(), asset())`. Only the
-    /// (vault, asset) pair is supported; any other combination reverts.
-    /// @dev Vault and asset decimals are required to match in the constructor,
-    /// so the V1 decimal-scaling formula collapses to `inAmount * price / 1e18`.
+    /// @dev V1 compat shim: only the (vault, asset) pair is supported. Equal decimals
+    ///      (enforced in the ctor) collapse the V1 formula to `inAmount * price / 1e18`.
     function getQuote(
         uint256 inAmount,
         address base,
@@ -102,128 +90,106 @@ contract UltraVaultOracle is Ownable2Step, IUltraVaultOracle {
     ) external view returns (uint256) {
         require(base == vault, VaultMismatch());
         require(quote == asset, AssetMismatch());
-        return inAmount * _getCurrentSharePrice() / 1e18;
+        return inAmount * currentSharePrice() / 1e18;
+    }
+
+    /// @inheritdoc IUltraVaultOracle
+    function lastUpdate() external view returns (PriceUpdate memory) {
+        return _updates[_updates.length - 1];
+    }
+
+    /// @inheritdoc IUltraVaultOracle
+    function updatesCount() external view returns (uint256) {
+        return _updates.length;
     }
 
     /////////////////////
     // Write Functions //
     /////////////////////
 
-    /// @notice Set new share price instantly
-    /// @param _vault The target vault
-    /// @param newPrice The new price of the vault's share in terms of the base asset
-    function setPriceInstantly(
-        address _vault,
-        uint256 newPrice
-    ) external onlyOwner {
-        require(_vault == vault, VaultMismatch());
-        _setPrice(newPrice);
-    }
-
-    //////////////////////////
-    // Vesting Price Update //
-    //////////////////////////
-
-    /// @notice Set new share price with vesting
-    /// @param _vault The target vault
-    /// @param targetPrice The target price of the vault's share in terms of the base asset
-    /// @param vestingDuration The duration over which vesting would occur
-    function scheduleLinearPriceUpdate(
-        address _vault,
+    /// @inheritdoc IUltraVaultOracle
+    function applyPriceUpdate(
+        uint256 startPrice,
         uint256 targetPrice,
-        uint256 vestingDuration
+        uint256 vestingDuration,
+        uint256 startTimestamp
     ) external onlyOwner {
-        require(_vault == vault, VaultMismatch());
-        _scheduleLinearPriceUpdate(
-            targetPrice,
-            vestingDuration
+        require(startPrice != 0 && startPrice <= type(uint88).max, Overflow());
+        require(targetPrice != 0 && targetPrice <= type(uint88).max, Overflow());
+        require(startTimestamp <= type(uint40).max, Overflow());
+
+        // Monotonic: keeps the array sorted for the read-side searches.
+        require(
+            startTimestamp >= uint256(_updates[_updates.length - 1].startTimestamp),
+            NonMonotonicTimestamp()
         );
+
+        if (vestingDuration != 0) {
+            require(
+                vestingDuration >= MIN_VESTING_DURATION && vestingDuration <= MAX_VESTING_DURATION,
+                InvalidVestingDuration()
+            );
+            // Up-only; drawdowns must be instant.
+            require(targetPrice > startPrice, DrawdownVestingNotAllowed());
+        }
+
+        _push(startPrice, targetPrice, vestingDuration, startTimestamp);
     }
 
     //////////////
     // Internal //
     //////////////
 
-    function _setPrice(uint256 newPrice) internal {
-        _recordPriceUpdate(newPrice, 0, 0);
-        emit PriceUpdated(newPrice, 0, 0);
+    function _seedInitialPrice(uint256 initialPrice) internal {
+        require(initialPrice != 0 && initialPrice <= type(uint88).max, Overflow());
+        require(block.timestamp <= type(uint40).max, Overflow());
+        _push(initialPrice, initialPrice, 0, block.timestamp);
     }
 
-    function _scheduleLinearPriceUpdate(
+    /// @dev Append to `_updates` and mirror the position into the checkpoint index
+    ///      (1-based so `0` stays the "no data" sentinel). Then emit.
+    function _push(
+        uint256 startPrice,
         uint256 targetPrice,
-        uint256 vestingDuration
+        uint256 vestingDuration,
+        uint256 startTimestamp
     ) internal {
-        // Enforce minimum and maximum linear update durations for operator safety.
-        require(vestingDuration >= MIN_VESTING_DURATION && vestingDuration <= MAX_VESTING_DURATION, InvalidVestingDuration());
-
-        uint256 currentPrice = _getCurrentSharePrice();
-        _recordPriceUpdate(currentPrice, targetPrice, vestingDuration);
-
-        emit PriceUpdated(currentPrice, targetPrice, vestingDuration);
-    }
-
-    function _recordPriceUpdate(uint256 startPrice, uint256 targetPrice, uint256 vestingDuration) internal {
-        require(startPrice != 0, ZeroVestingStartPrice());
-        if (vestingDuration > 0) {
-            require(targetPrice > startPrice, DrawdownVestingNotAllowed());
-        }
-        uint88 maxPrice = type(uint88).max;
-        require(startPrice <= maxPrice, Overflow());
-        require(targetPrice <= maxPrice, Overflow());
-        uint40 maxTimestamp = type(uint40).max;
-        require(vestingDuration <= maxTimestamp, Overflow());
-        require(block.timestamp <= maxTimestamp, Overflow());
-        PriceUpdateSlot memory newPriceUpdate = PriceUpdateSlot({
+        _updates.push(PriceUpdate({
             startPrice: uint88(startPrice),
             targetPrice: uint88(targetPrice),
             vestingDuration: uint40(vestingDuration),
-            timestamp: uint40(block.timestamp)
-        });
-
-        _lastUpdate = newPriceUpdate;
-        _priceUpdatesHistory.push(newPriceUpdate);
-        // Store a 1-based position so `0` is reserved as the "no checkpoint"
-        // sentinel returned by `upperLookupRecent`. Retrieval subtracts 1.
-        _priceUpdatesHistoryIndex.push(uint48(block.timestamp), uint208(_priceUpdatesHistory.length));
+            startTimestamp: uint40(startTimestamp)
+        }));
+        _index.push(uint48(startTimestamp), uint208(_updates.length));
+        emit PriceUpdated(startPrice, targetPrice, vestingDuration, startTimestamp);
     }
 
-    function _getCurrentSharePrice() internal view returns (uint256) {
-        PriceUpdate memory update = _getLastPriceUpdate();
-        return _priceAtTimestamp(update, block.timestamp);
-    }
-
-    function _getLastPriceUpdate() internal view returns (PriceUpdate memory) {
-        PriceUpdateSlot memory slot = _lastUpdate;
-        return PriceUpdate({
-            startPrice: uint256(slot.startPrice),
-            targetPrice: uint256(slot.targetPrice),
-            vestingDuration: uint256(slot.vestingDuration),
-            timestamp: uint256(slot.timestamp)
-        });
-    }
-
-    function _getPriceUpdateAtTimestamp(uint256 timestamp) internal view returns (PriceUpdate memory) {
-        uint208 indexPlusOne = _priceUpdatesHistoryIndex.upperLookupRecent(uint48(timestamp));
-        require(indexPlusOne != 0, NoPriceData());
-        PriceUpdateSlot memory slot = _priceUpdatesHistory[uint256(indexPlusOne) - 1];
-        return PriceUpdate({
-            startPrice: uint256(slot.startPrice),
-            targetPrice: uint256(slot.targetPrice),
-            vestingDuration: uint256(slot.vestingDuration),
-            timestamp: uint256(slot.timestamp)
-        });
-    }
-
-    function _priceAtTimestamp(PriceUpdate memory update, uint256 timestamp) internal pure returns (uint256) {
-        if (update.vestingDuration == 0 || timestamp <= update.timestamp) {
-            return update.startPrice;
+    /// @dev Index of the update governing `atTime` (latest `startTimestamp <= atTime`),
+    ///      scanning from the tail. Reverts `NoPriceData` before the seed.
+    function _findActive(uint256 atTime) internal view returns (uint256) {
+        uint256 i = _updates.length;
+        while (i != 0) {
+            unchecked { --i; }
+            if (uint256(_updates[i].startTimestamp) <= atTime) {
+                return i;
+            }
         }
-        if (timestamp >= update.timestamp + update.vestingDuration) {
-            return update.targetPrice;
+        revert NoPriceData();
+    }
+
+    function _interpolate(PriceUpdate memory u, uint256 atTime) internal pure returns (uint256) {
+        if (u.vestingDuration == 0) {
+            return uint256(u.targetPrice);
         }
-        // target price is guaranteed to be greater than start price if vesting duration is non-zero
-        uint256 diff = update.targetPrice - update.startPrice;
-        uint256 timeElapsed = timestamp - update.timestamp;
-        return update.startPrice + (diff * timeElapsed / update.vestingDuration);
+        if (atTime <= uint256(u.startTimestamp)) {
+            return uint256(u.startPrice);
+        }
+        uint256 endsAt = uint256(u.startTimestamp) + uint256(u.vestingDuration);
+        if (atTime >= endsAt) {
+            return uint256(u.targetPrice);
+        }
+        uint256 diff = uint256(u.targetPrice) - uint256(u.startPrice);
+        uint256 elapsed = atTime - uint256(u.startTimestamp);
+        return uint256(u.startPrice) + (diff * elapsed) / uint256(u.vestingDuration);
     }
 }
