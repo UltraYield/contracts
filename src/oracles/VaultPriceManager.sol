@@ -34,6 +34,7 @@ contract VaultPriceManager is BaseVaultPriceManager {
     error DestinationAlreadyExists();
     error InvalidGasLimit();
     error InvalidDelay();
+    error Overflow();
 
     ///////////////
     // Constants //
@@ -195,6 +196,11 @@ contract VaultPriceManager is BaseVaultPriceManager {
         uint256 vestingDuration,
         uint256 startTimestamp
     ) internal {
+        require(startPrice <= type(uint88).max, Overflow());
+        require(targetPrice <= type(uint88).max, Overflow());
+        require(vestingDuration <= type(uint40).max, Overflow());
+        require(startTimestamp <= type(uint40).max, Overflow());
+
         uint64 nonce = ++broadcastNonce;
 
         PriceSyncMessage memory psm = PriceSyncMessage({
