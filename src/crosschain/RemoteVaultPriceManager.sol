@@ -89,11 +89,13 @@ contract RemoteVaultPriceManager is BaseVaultPriceManager, CCIPReceiver {
         lastNonce = psm.nonce;
 
         // Applied verbatim; a late update converges via the oracle's read-time interpolation.
+        // failOnPause is false: an inbound broadcast must always succeed.
         _applyUpdate(
             uint256(psm.startPrice),
             uint256(psm.targetPrice),
             uint256(psm.vestingDuration),
-            uint256(psm.startTimestamp)
+            uint256(psm.startTimestamp),
+            false
         );
 
         emit PriceSynced(
