@@ -101,19 +101,21 @@ contract VaultPriceManager is BaseVaultPriceManager {
     //////////////////
 
     /// @notice Schedule an instant update and broadcast it. Activates at `now + delay`.
-    function instantPriceUpdate(uint256 newPrice) external onlyAdminOrOwner {
+    /// @param failOnPause If true, revert instead of pausing when `newPrice` breaches the limits.
+    function instantPriceUpdate(uint256 newPrice, bool failOnPause) external onlyAdminOrOwner {
         uint256 startTimestamp = block.timestamp + delay;
         // startPrice is unused for an instant update; reuse newPrice.
-        _applyUpdate(newPrice, newPrice, 0, startTimestamp);
+        _applyUpdate(newPrice, newPrice, 0, startTimestamp, failOnPause);
         _broadcastUpdate(newPrice, newPrice, 0, startTimestamp);
     }
 
     /// @notice Schedule a linear-vested update and broadcast it. Vesting begins at
     ///         `now + delay`; the start price is projected to that instant for continuity.
-    function linearPriceUpdate(uint256 newPrice, uint256 duration) external onlyAdminOrOwner {
+    /// @param failOnPause If true, revert instead of pausing when `newPrice` breaches the limits.
+    function linearPriceUpdate(uint256 newPrice, uint256 duration, bool failOnPause) external onlyAdminOrOwner {
         uint256 startTimestamp = block.timestamp + delay;
         uint256 startPrice = oracle.sharePriceAt(startTimestamp);
-        _applyUpdate(startPrice, newPrice, duration, startTimestamp);
+        _applyUpdate(startPrice, newPrice, duration, startTimestamp, failOnPause);
         _broadcastUpdate(startPrice, newPrice, duration, startTimestamp);
     }
 

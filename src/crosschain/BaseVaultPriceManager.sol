@@ -31,6 +31,7 @@ abstract contract BaseVaultPriceManager is Ownable2Step {
     error InvalidLimit();
     error AlreadyAdmin();
     error NotAdmin();
+    error UpdateWouldPause();
 
     ///////////////
     // Constants //
@@ -141,18 +142,20 @@ abstract contract BaseVaultPriceManager is Ownable2Step {
     // Internal //
     //////////////
 
-    /// @dev Shared pause-then-write path. Pauses this chain's vault if `targetPrice`
-    ///      breaches local limits (and it isn't already paused), then records the
-    ///      update on the local oracle verbatim. Called by the sender after computing
-    ///      the curve, and by the receiver after validating an inbound message.
+    /// @dev Shared pause-then-write path. On a limit breach: reverts with `UpdateWouldPause`
+    ///      if `failOnPause`, else pauses (unless already paused). Then writes the update verbatim.
     function _applyUpdate(
         uint256 startPrice,
         uint256 targetPrice,
         uint256 vestingDuration,
-        uint256 startTimestamp
+        uint256 startTimestamp,
+        bool failOnPause
     ) internal {
-        if (wouldTriggerPause(targetPrice) && !IPausable(vault).paused()) {
-            IPausable(vault).pause();
+        if (wouldTriggerPause(targetPrice)) {
+            require(!failOnPause, UpdateWouldPause());
+            if (!IPausable(vault).paused()) {
+                IPausable(vault).pause();
+            }
         }
         oracle.applyPriceUpdate(startPrice, targetPrice, vestingDuration, startTimestamp);
     }
