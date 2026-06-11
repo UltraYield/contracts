@@ -7,3 +7,4 @@ bytes32 constant PAUSER_ROLE = keccak256("PAUSER_ROLE");
 bytes32 constant ORACLE_ADMIN_ROLE = keccak256("ORACLE_ADMIN_ROLE");
 bytes32 constant UPGRADER_ROLE = keccak256("UPGRADER_ROLE");
 bytes32 constant COMPLIANCE_ROLE = keccak256("COMPLIANCE_ROLE");
+bytes32 constant DEPLOYER_ROLE = keccak256("DEPLOYER_ROLE");
