@@ -14,12 +14,6 @@ struct Version {
     string tag;
 }
 
-/// @notice Minimal getter exposed by factory-deployed vaults (see BaseControlledAsyncRedeem)
-interface IVaultImplementationGetter {
-    /// @notice Implementation address from the proxy's ERC-1967 slot
-    function implementation() external view returns (address);
-}
-
 /// @title IUltraVaultFactory
 /// @notice Version registry and CREATE2 deployer for UltraVault proxies
 interface IUltraVaultFactory {
@@ -51,7 +45,7 @@ interface IUltraVaultFactory {
     /// @param vault The deployed proxy address
     /// @param versionKey Registry key of the deployed version
     /// @param implementation Implementation the proxy points to
-    /// @param salt CREATE2 salt used for the deployment
+    /// @param salt Caller-supplied salt; the effective CREATE2 salt is keccak256(abi.encode(deployer, salt))
     /// @param deployer Account that performed the deployment
     event VaultDeployed(
         address indexed vault,
@@ -122,10 +116,9 @@ interface IUltraVaultFactory {
         bytes32 salt
     ) external view returns (address vault);
 
-    /// @notice Registered version of a vault's current implementation
-    /// @dev Reads the vault's implementation() getter; reverts with UnregisteredImplementation
-    ///      if the implementation is not in the registry
-    function getVaultVersion(address vault) external view returns (Version memory version);
+    /// @notice Registered version of an implementation
+    /// @dev Reverts with UnregisteredImplementation if the implementation is not in the registry
+    function getImplementationVersion(address implementation) external view returns (Version memory version);
 
     ///////////////
     // Write Fns //

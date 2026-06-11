@@ -7,11 +7,7 @@ import { ERC1967Proxy } from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy
 import { Create2 } from "@openzeppelin/contracts/utils/Create2.sol";
 import { Address } from "@openzeppelin/contracts/utils/Address.sol";
 import { IERC4626 } from "@openzeppelin/contracts/interfaces/IERC4626.sol";
-import {
-    IUltraVaultFactory,
-    IVaultImplementationGetter,
-    Version
-} from "src/interfaces/IUltraVaultFactory.sol";
+import { IUltraVaultFactory, Version } from "src/interfaces/IUltraVaultFactory.sol";
 
 /// @dev Role allowed to deploy vaults through the factory
 bytes32 constant DEPLOYER_ROLE = keccak256("DEPLOYER_ROLE"); // 0xfc425f2263d0df187444b70e47283d622c70181c5baebb1306a01edba1ce184c
@@ -232,10 +228,9 @@ contract UltraVaultFactory is AccessControlUpgradeable, UUPSUpgradeable, IUltraV
     }
 
     /// @inheritdoc IUltraVaultFactory
-    function getVaultVersion(address vault) external view returns (Version memory) {
-        address impl = IVaultImplementationGetter(vault).implementation();
+    function getImplementationVersion(address implementation) external view returns (Version memory) {
         UltraVaultFactoryStorage storage $ = _getUltraVaultFactoryStorage();
-        bytes32 key = $.versionKeyByImpl[impl];
+        bytes32 key = $.versionKeyByImpl[implementation];
         require(key != bytes32(0), UnregisteredImplementation());
         return $.versions[key].version;
     }

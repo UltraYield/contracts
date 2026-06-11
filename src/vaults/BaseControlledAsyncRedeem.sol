@@ -7,7 +7,6 @@ import { PausableUpgradeable } from "@openzeppelin/contracts-upgradeable/utils/P
 import { ERC4626Upgradeable } from "@openzeppelin/contracts-upgradeable/token/ERC20/extensions/ERC4626Upgradeable.sol";
 import { UUPSUpgradeable } from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import { SafeERC20, IERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import { ERC1967Utils } from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Utils.sol";
 import { PendingRedeem, ClaimableRedeem } from "src/interfaces/Types.sol";
 import { IRedeemAccounting } from "src/interfaces/IRedeemAccounting.sol";
 import { IUltraVaultRateProvider, Adjustment } from "src/interfaces/IUltraVaultRateProvider.sol";
@@ -129,12 +128,6 @@ abstract contract BaseControlledAsyncRedeem is
     /// @return upgradeModule The address of the upgrade module
     function upgradeModule() public view returns (address) {
         return _getCurrentAddress(UPGRADE_MODULE_KEY);
-    }
-
-    /// @notice Returns the active implementation address from the proxy's ERC-1967 slot
-    /// @return implementation The current implementation address
-    function implementation() public view returns (address) {
-        return ERC1967Utils.getImplementation();
     }
 
     /// @notice Returns the proposed address for a given key
