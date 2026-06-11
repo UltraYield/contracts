@@ -89,6 +89,15 @@ interface IUltraVaultFactory {
     /// @dev Reverts with UnknownVersion; resolves disabled versions
     function getImplementation(Version calldata version) external view returns (address implementation);
 
+    /// @notice Full registry record of a version
+    /// @dev Reverts with UnknownVersion; resolves disabled versions
+    /// @return implementation Implementation contract for the version
+    /// @return initSelector Selector of the implementation's initializer
+    /// @return disabled Whether deployment of the version is disabled
+    function getVersionInfo(
+        Version calldata version
+    ) external view returns (address implementation, bytes4 initSelector, bool disabled);
+
     /// @notice Whether a version is registered
     function versionExists(Version calldata version) external view returns (bool exists);
 
@@ -105,9 +114,13 @@ interface IUltraVaultFactory {
     /// @notice All registered versions in registration order, including disabled ones
     function getAllVersions() external view returns (Version[] memory versions);
 
-    /// @notice CREATE2 address of a vault of `version` deployed with `salt`
+    /// @notice CREATE2 address of a vault of `version` deployed by `deployer` with `salt`
     /// @dev Reverts with UnknownVersion; works for disabled versions
-    function predictVaultAddress(Version calldata version, bytes32 salt) external view returns (address vault);
+    function predictVaultAddress(
+        Version calldata version,
+        address deployer,
+        bytes32 salt
+    ) external view returns (address vault);
 
     /// @notice Registered version of a vault's current implementation
     /// @dev Reads the vault's implementation() getter; reverts with UnregisteredImplementation
@@ -130,11 +143,12 @@ interface IUltraVaultFactory {
 
     /// @notice Deploy an ERC1967Proxy of the version's implementation via CREATE2 and call
     ///         its registered initializer with `initParams` in the same transaction
-    /// @dev The proxy is deployed with empty constructor data, so its address depends only on
-    ///      (factory, salt, implementation). A non-zero asset() is required after the call as
-    ///      proof of initialization. DEPLOYER_ROLE only
+    /// @dev The proxy is deployed with empty constructor data and a caller-bound salt, so its
+    ///      address depends only on (factory, msg.sender, salt, implementation). A non-zero
+    ///      asset() is required after the call as proof of initialization. DEPLOYER_ROLE only
     /// @param version Registered, non-disabled version to deploy
-    /// @param salt CREATE2 salt, used verbatim
+    /// @param salt CREATE2 salt; bound to the caller address, so deployers cannot occupy
+    ///        each other's predicted addresses
     /// @param initParams ABI-encoded initializer arguments without selector
     /// @return vault The deployed and initialized proxy
     function deployVault(
