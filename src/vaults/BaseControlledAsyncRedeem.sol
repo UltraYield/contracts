@@ -871,13 +871,13 @@ abstract contract BaseControlledAsyncRedeem is
     /// @notice Accept a previously proposed address update for the given key
     /// @param key The address key (see contract constants)
     /// @param newAddress The address being confirmed (must match the proposal)
-    /// @dev Pauses the vault so operators can verify the setup before resuming
+    /// @dev Ensures the vault is paused so operators can verify the setup before resuming
     function acceptAddressUpdate(bytes32 key, address newAddress) external onlyOwner {
         uint256 timelock = _timelockForKey(key);
         address oldAddress = _acceptAddressUpdate(key, newAddress, timelock);
         emit AddressUpdated(key, oldAddress, newAddress);
 
-        _pause();
+        if (!paused()) _pause();
     }
 
     /// @dev Resolve the per-key timelock duration. Reverts UnknownAddressKey for unsupported keys.
