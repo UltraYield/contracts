@@ -49,8 +49,7 @@ contract AllowlistUltraVault is UltraVault, IAllowlistEvents, IAllowlistErrors {
     }
 
     /// @notice Enable or disable mandatory allowlist enforcement on deposits/mints
-    /// @dev Owner-only master switch; enforcement is ON by default. Works while paused so the
-    ///      allowlist can be configured during the initial paused setup window.
+    /// @dev Owner-only master switch; enforcement is ON by default
     function setAllowlistEnabled(bool enabled) external onlyOwner {
         ComplianceLib.Storage storage $ = ComplianceLib._getComplianceStorage();
         bool disabled = !enabled;
