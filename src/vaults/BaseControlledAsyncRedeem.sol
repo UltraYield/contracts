@@ -336,6 +336,9 @@ abstract contract BaseControlledAsyncRedeem is
         uint256 shares,
         address receiver
     ) internal {
+        // Call before-deposit hook - use the actual asset amount to be transferred
+        _beforeDeposit(_asset, assets, shares, receiver);
+
         // Checks
         require(assets != 0, EmptyDeposit());
         require(shares != 0, NothingToMint());
@@ -891,6 +894,9 @@ abstract contract BaseControlledAsyncRedeem is
     ///////////
     // Hooks //
     ///////////
+
+    /// @dev Hook for executing custom logic right before deposit/mint (e.g. gating the depositor)
+    function _beforeDeposit(address _asset, uint256 assets, uint256 shares, address receiver) internal virtual {}
 
     /// @dev Hook for executing custom logic right after deposit/mint
     function _afterDeposit(address _asset, uint256 assets, uint256 shares, address receiver) internal virtual {}
