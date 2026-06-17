@@ -12,8 +12,7 @@ interface IAllowlistErrors {
 }
 
 /// @title IAllowlist
-/// @notice External interface for the deposit/mint allowlist gate
-/// @dev Enforcement applies only to the depositor (msg.sender) on the deposit/mint path
+/// @notice External interface for the allowlist gate
 interface IAllowlist is IAllowlistEvents, IAllowlistErrors {
     /// @notice Returns true if `account` is on the allowlist
     function isAllowed(address account) external view returns (bool);

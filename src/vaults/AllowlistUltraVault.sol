@@ -7,9 +7,12 @@ import { IAllowlistEvents, IAllowlistErrors } from "src/interfaces/IAllowlist.so
 import { ALLOWLIST_ROLE } from "src/utils/Roles.sol";
 
 /// @title AllowlistUltraVault
-/// @notice UltraVault variant that restricts deposits and mints to an allowlisted set of depositors.
-/// @dev The gate checks only the depositor (msg.sender) on the deposit/mint path. Receivers, redeems,
-///      transfers, and the owner-only `setupInitialBalances` bootstrap are intentionally unaffected.
+/// @notice UltraVault variant that confines share ownership and redemption proceeds to an allowlisted set of wallets.
+/// @dev The depositor (msg.sender) is gated on the deposit/mint path. Separately, every share
+///      movement is gated on its recipient via `_update` (the deposit/mint receiver, peer transfers,
+///      the cancel-redeem share return, the owner bootstrap, and the fee-share mint) — only burns and
+///      the vault itself are exempt, so shares can only ever land on allowlisted wallets. Redeemed
+///      assets are gated on `receiver` when it differs from the controller (self-exit stays open).
 /// @dev Allowlist state lives in the shared `ComplianceLib` namespace (`ultrayield.storage.Compliance`),
 ///      so it is canonical across variants and upgrades. Enforcement is ON by default via the
 ///      zero-value `allowlistDisabled` flag — a fresh deployment fails safe.
@@ -63,7 +66,8 @@ contract AllowlistUltraVault is UltraVault, IAllowlistEvents, IAllowlistErrors {
     // Hook Overrides //
     ////////////////////
 
-    /// @dev Gate the depositor (msg.sender) before every deposit/mint
+    /// @dev Gate the depositor (msg.sender) before every deposit/mint.
+    /// @dev The receiver is gated separately by `_update` on the share mint.
     function _beforeDeposit(
         address /* _asset */,
         uint256 /* assets */,
@@ -71,6 +75,32 @@ contract AllowlistUltraVault is UltraVault, IAllowlistEvents, IAllowlistErrors {
         address /* receiver */
     ) internal view override {
         _ensureAllowlisted(msg.sender);
+    }
+
+    /// @dev Gate the asset recipient when it differs from the controller (self-exit stays open).
+    function _beforeWithdraw(
+        address /* _asset */,
+        uint256 /* assets */,
+        uint256 /* shares */,
+        address receiver,
+        address controller
+    ) internal view override {
+        if (receiver != controller) _ensureAllowlisted(receiver);
+    }
+
+    /// @dev Gate the asset recipient when it differs from the controller (self-exit stays open).
+    function _beforeInstantRedeem(address receiver, address controller) internal view override {
+        if (receiver != controller) _ensureAllowlisted(receiver);
+    }
+
+    /// @dev Gate the recipient on every share movement except burns (`to == 0`) and redeem-request
+    ///      escrow into the vault itself (`to == this`). All other recipients — including the fee
+    ///      recipient and bootstrap users — must be allowlisted (ensured operationally).
+    function _update(address from, address to, uint256 value) internal override {
+        if (to != address(0) && to != address(this)) {
+            _ensureAllowlisted(to);
+        }
+        super._update(from, to, value);
     }
 
     //////////////////////
