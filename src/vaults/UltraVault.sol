@@ -49,7 +49,7 @@ struct UltraVaultInitParams {
 /// @title UltraVault
 /// @notice ERC-7540 compliant async redeem vault with UltraVaultOracle pricing and multisig asset management.
 /// @notice Abstract base holding all shared vault mechanics with no compliance access gating of its own. 
-contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVaultErrors {
+abstract contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVaultErrors {
     using FixedPointMathLib for uint256;
     using Math for uint256;
     using SafeERC20 for IERC20;
@@ -306,6 +306,12 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
         liquidity = balance < allowed ? balance : allowed;
     }
 
+    /// @dev Whether `controller` may instant-redeem (to themselves). Gating variants override this so
+    ///      `maxInstantRedeem` reflects their controller eligibility.
+    function _canInstantRedeem(address /* controller */) internal view virtual returns (bool) {
+        return true;
+    }
+
     /// @notice Returns the maximum shares a controller can instant-redeem for a given asset
     /// @dev Considers both the controller's share balance and available liquidity.
     ///      Liquidity bounds the gross payout (netAssets + fee are both pulled from the exitpoint),
@@ -317,6 +323,7 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
         address _asset,
         address controller
     ) external view returns (uint256 shares) {
+        if (!_canInstantRedeem(controller)) return 0;
         uint256 liquidity = getLiquidity(_asset);
         uint256 shareBalance = balanceOf(controller);
         if (liquidity == 0 || shareBalance == 0) {

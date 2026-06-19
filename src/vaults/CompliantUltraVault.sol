@@ -64,6 +64,22 @@ contract CompliantUltraVault is UltraVault, IComplianceEvents, IComplianceErrors
         if ($.frozen[account]) revert AddressFrozen(account);
     }
 
+    /// @dev Bool sibling of `_ensureNotRestricted` for view-only eligibility checks (no revert reason).
+    function _isRestricted(address account) internal view returns (bool) {
+        ComplianceLib.Storage storage $ = ComplianceLib._getComplianceStorage();
+        return $.blocklisted[account] || $.frozen[account];
+    }
+
+    /// @dev A restricted receiver can't receive minted shares, so its deposit/mint limit is 0.
+    function _canReceiveShares(address account) internal view override returns (bool) {
+        return !_isRestricted(account);
+    }
+
+    /// @dev A restricted controller can't instant-redeem (the gate rejects even a self-redeem).
+    function _canInstantRedeem(address controller) internal view override returns (bool) {
+        return !_isRestricted(controller);
+    }
+
     ////////////////////
     // Hook Overrides //
     ////////////////////

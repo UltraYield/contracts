@@ -29,6 +29,7 @@ interface IAllowlist is IAllowlistEvents, IAllowlistErrors {
     /// @notice Remove `account` from the allowlist
     function removeFromAllowlist(address account) external;
 
-    /// @notice Enable or disable mandatory allowlist enforcement on deposits/mints
+    /// @notice Enable or disable mandatory allowlist enforcement across all gated flows
+    ///         (deposits/mints, share transfers, and third-party redemption recipients)
     function setAllowlistEnabled(bool enabled) external;
 }

@@ -601,20 +601,26 @@ abstract contract BaseControlledAsyncRedeem is
     // Deposti & Withdraw Limits //
     ///////////////////////////////
 
+    /// @dev Whether `receiver` may receive freshly minted shares; mirrors the `_update` receiver gate.
+    ///      Gating variants override this so the deposit/mint limits don't over-advertise.
+    function _canReceiveShares(address /* receiver */) internal view virtual returns (bool) {
+        return true;
+    }
+
     /// @notice Get max assets for deposit
     /// @return assets Maximum deposit amount
     function maxDeposit(
-        address // receiver
+        address receiver
     ) public view virtual override returns (uint256) {
-        return paused() ? 0 : type(uint256).max;
+        return (paused() || !_canReceiveShares(receiver)) ? 0 : type(uint256).max;
     }
 
     /// @notice Get max shares for mint
     /// @return shares Maximum mint amount
     function maxMint(
-        address // receiver
+        address receiver
     ) public view virtual override returns (uint256) {
-        return paused() ? 0 : type(uint256).max;
+        return (paused() || !_canReceiveShares(receiver)) ? 0 : type(uint256).max;
     }
 
     /// @notice Get max assets for withdraw

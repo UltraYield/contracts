@@ -51,8 +51,10 @@ contract AllowlistUltraVault is UltraVault, IAllowlistEvents, IAllowlistErrors {
         ComplianceLib.removeFromAllowlist(account);
     }
 
-    /// @notice Enable or disable mandatory allowlist enforcement on deposits/mints
-    /// @dev Owner-only master switch; enforcement is ON by default
+    /// @notice Enable or disable mandatory allowlist enforcement across all gated flows
+    /// @dev Owner-only master switch; enforcement is ON by default. When disabled, every
+    ///      `_ensureAllowlisted` check is lifted — deposits/mints, share transfers, and non-self
+    ///      redemption recipients are all ungated until re-enabled.
     function setAllowlistEnabled(bool enabled) external onlyOwner {
         ComplianceLib.Storage storage $ = ComplianceLib._getComplianceStorage();
         bool disabled = !enabled;
@@ -107,11 +109,19 @@ contract AllowlistUltraVault is UltraVault, IAllowlistEvents, IAllowlistErrors {
     // Internal helpers //
     //////////////////////
 
+    /// @dev True if enforcement is disabled or `account` is on the allowlist
+    function _passesAllowlist(address account) internal view returns (bool) {
+        ComplianceLib.Storage storage $ = ComplianceLib._getComplianceStorage();
+        return $.allowlistDisabled || $.allowlisted[account];
+    }
+
     /// @dev Reverts if enforcement is enabled and `account` is not allowlisted
     function _ensureAllowlisted(address account) internal view {
-        ComplianceLib.Storage storage $ = ComplianceLib._getComplianceStorage();
-        if (!$.allowlistDisabled && !$.allowlisted[account]) {
-            revert NotAllowlisted(account);
-        }
+        if (!_passesAllowlist(account)) revert NotAllowlisted(account);
+    }
+
+    /// @dev A non-allowlisted receiver can't receive minted shares, so its deposit/mint limit is 0.
+    function _canReceiveShares(address account) internal view override returns (bool) {
+        return _passesAllowlist(account);
     }
 }
