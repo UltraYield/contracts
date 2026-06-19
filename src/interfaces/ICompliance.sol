@@ -2,10 +2,10 @@
 pragma solidity >=0.8.0;
 
 interface IComplianceEvents {
-    event Blocklisted(address indexed account);
-    event Unblocklisted(address indexed account);
-    event Frozen(address indexed account);
-    event Unfrozen(address indexed account);
+    event AccountBlocked(address indexed account);
+    event AccountUnblocked(address indexed account);
+    event AccountFrozen(address indexed account);
+    event AccountUnfrozen(address indexed account);
     event ForceBurned(address indexed account, uint256 amount);
 }
 
@@ -21,10 +21,13 @@ interface ICompliance is IComplianceEvents, IComplianceErrors {
     function restrictionStatus(address account) external view returns (bool blocked, bool frozen);
 
     /// @notice Add `account` to the blocklist
-    function blocklist(address account) external;
+    function addToBlocklist(address account) external;
+
+    /// @notice Add multiple `accounts` to the blocklist
+    function addToBlocklistBatch(address[] calldata accounts) external;
 
     /// @notice Remove `account` from the blocklist
-    function unblocklist(address account) external;
+    function removeFromBlocklist(address account) external;
 
     /// @notice Mark `account` as frozen
     function freeze(address account) external;

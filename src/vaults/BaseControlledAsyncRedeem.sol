@@ -336,6 +336,9 @@ abstract contract BaseControlledAsyncRedeem is
         uint256 shares,
         address receiver
     ) internal {
+        // Call before-deposit hook - use the actual asset amount to be transferred
+        _beforeDeposit(_asset, assets, shares, receiver);
+
         // Checks
         require(assets != 0, EmptyDeposit());
         require(shares != 0, NothingToMint());
@@ -598,20 +601,26 @@ abstract contract BaseControlledAsyncRedeem is
     // Deposti & Withdraw Limits //
     ///////////////////////////////
 
+    /// @dev Whether `receiver` may receive freshly minted shares; mirrors the `_update` receiver gate.
+    ///      Gating variants override this so the deposit/mint limits don't over-advertise.
+    function _canReceiveShares(address /* receiver */) internal view virtual returns (bool) {
+        return true;
+    }
+
     /// @notice Get max assets for deposit
     /// @return assets Maximum deposit amount
     function maxDeposit(
-        address // receiver
+        address receiver
     ) public view virtual override returns (uint256) {
-        return paused() ? 0 : type(uint256).max;
+        return (paused() || !_canReceiveShares(receiver)) ? 0 : type(uint256).max;
     }
 
     /// @notice Get max shares for mint
     /// @return shares Maximum mint amount
     function maxMint(
-        address // receiver
+        address receiver
     ) public view virtual override returns (uint256) {
-        return paused() ? 0 : type(uint256).max;
+        return (paused() || !_canReceiveShares(receiver)) ? 0 : type(uint256).max;
     }
 
     /// @notice Get max assets for withdraw
@@ -891,6 +900,9 @@ abstract contract BaseControlledAsyncRedeem is
     ///////////
     // Hooks //
     ///////////
+
+    /// @dev Hook for executing custom logic right before deposit/mint (e.g. gating the depositor)
+    function _beforeDeposit(address _asset, uint256 assets, uint256 shares, address receiver) internal virtual {}
 
     /// @dev Hook for executing custom logic right after deposit/mint
     function _afterDeposit(address _asset, uint256 assets, uint256 shares, address receiver) internal virtual {}

@@ -4,9 +4,8 @@ pragma solidity >=0.8.0;
 import { IBaseVault, IBaseVaultEvents, IBaseVaultErrors } from "src/interfaces/IBaseVault.sol";
 import { IPriceSource } from "src/interfaces/IPriceSource.sol";
 import { Fees } from "src/interfaces/Types.sol";
-import { ICompliance, IComplianceEvents, IComplianceErrors } from "src/interfaces/ICompliance.sol";
 
-interface IUltraVaultEvents is IBaseVaultEvents, IComplianceEvents {
+interface IUltraVaultEvents is IBaseVaultEvents {
     event FeesRecipientUpdated(address oldRecipient, address newRecipient);
     event FeesUpdated(Fees oldFees, Fees newFees);
     event FeesCollected(
@@ -28,17 +27,18 @@ interface IUltraVaultEvents is IBaseVaultEvents, IComplianceEvents {
     );
 }
 
-interface IUltraVaultErrors is IBaseVaultErrors, IComplianceErrors {
+interface IUltraVaultErrors is IBaseVaultErrors {
     error ZeroFeeRecipientAddress();
     error CannotSetBalancesInNonEmptyVault();
     error InvalidFees();
     error InsufficientLiquidity(address asset, uint256 requested, uint256 available);
     error InstantRedeemSlippageExceeded(uint256 received, uint256 minAssets);
+    error NotMigratable();
 }
 
 /// @title IUltraVault
 /// @notice A simplified interface for use in other contracts
-interface IUltraVault is IBaseVault, ICompliance {
+interface IUltraVault is IBaseVault {
     ////////////////////
     // View Functions //
     ////////////////////
@@ -140,7 +140,8 @@ interface IUltraVault is IBaseVault, ICompliance {
     ) external;
 
     /// @notice Cancel a user's pending redeem and return the locked shares to the controller's wallet
-    /// @dev Bypasses compliance restrictions so cleanup works even when the controller is blocklisted or frozen.
+    /// @dev Bypasses any transfer gating a derived vault imposes (e.g. a compliance blocklist/freeze),
+    ///      so cleanup works even for a restricted controller.
     /// @param asset The asset originally requested for redemption
     /// @param controller The user whose pending redeem is being cancelled
     /// @return shares The amount of shares returned to the controller
