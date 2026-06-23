@@ -140,7 +140,7 @@ interface IUltraVault is IBaseVault {
     ) external;
 
     /// @notice Cancel a user's pending redeem and return the locked shares to the controller's wallet
-    /// @dev Bypasses any transfer gating a derived vault imposes (e.g. a compliance blocklist/freeze),
+    /// @dev Bypasses any transfer gating a derived vault imposes (e.g. a compliance freeze),
     ///      so cleanup works even for a restricted controller.
     /// @param asset The asset originally requested for redemption
     /// @param controller The user whose pending redeem is being cancelled

@@ -463,7 +463,7 @@ abstract contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IU
 
     /// @notice Cancel a user's pending redeem and return the locked shares to the controller's wallet
     /// @dev Returns the shares via the base `_update`, bypassing any transfer gating a derived vault
-    ///      imposes (e.g. a compliance blocklist/freeze), so cleanup works even for a restricted controller.
+    ///      imposes (e.g. a compliance freeze), so cleanup works even for a restricted controller.
     /// @param _asset The asset originally requested for redemption
     /// @param controller The user whose pending redeem is being cancelled
     /// @return shares The amount of shares returned to the controller
