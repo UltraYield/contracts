@@ -10,7 +10,7 @@ import { SafeERC20, IERC20 } from "@openzeppelin/contracts/token/ERC20/utils/Saf
 import { PendingRedeem, ClaimableRedeem } from "src/interfaces/Types.sol";
 import { IRedeemAccounting } from "src/interfaces/IRedeemAccounting.sol";
 import { IUltraVaultRateProvider, Adjustment } from "src/interfaces/IUltraVaultRateProvider.sol";
-import { OPERATOR_ROLE, PAUSER_ROLE, UPGRADER_ROLE } from "src/utils/Roles.sol";
+import { OPERATOR_ROLE, PAUSER_ROLE, UNPAUSER_ROLE, UPGRADER_ROLE } from "src/utils/Roles.sol";
 import { AccessControlUpgradeable } from "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol";
 import { AddressUpdateProposal, AddressUpdatable } from "src/utils/AddressUpdates.sol";
 import { RATE_PROVIDER_KEY, UPGRADE_MODULE_KEY } from "src/utils/AddressKeys.sol";
@@ -111,6 +111,7 @@ abstract contract BaseControlledAsyncRedeem is
         _grantRole(DEFAULT_ADMIN_ROLE, params.owner);
         _grantRole(OPERATOR_ROLE, params.owner);
         _grantRole(PAUSER_ROLE, params.owner);
+        _grantRole(UNPAUSER_ROLE, params.owner);
         _grantRole(UPGRADER_ROLE, params.owner);
     }
 
@@ -930,14 +931,14 @@ abstract contract BaseControlledAsyncRedeem is
     }
 
     /// @notice Pause vault operations
-    /// @dev Caller must be owner or have PAUSER_ROLE
+    /// @dev Caller must have PAUSER_ROLE
     function pause() external onlyRole(PAUSER_ROLE) {
         _pause();
     }
 
     /// @notice Unpause vault operations
-    /// @dev Caller must be owner or have PAUSER_ROLE
-    function unpause() external onlyRole(PAUSER_ROLE) {
+    /// @dev Caller must have UNPAUSER_ROLE
+    function unpause() external onlyRole(UNPAUSER_ROLE) {
         _unpause();
     }
 
