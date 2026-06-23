@@ -344,10 +344,10 @@ abstract contract BaseControlledAsyncRedeem is
         require(assets != 0, EmptyDeposit());
         require(shares != 0, NothingToMint());
 
-        // Transfer assets from sender to the vault
+        // Transfer assets from sender to the deposit recipient
         IERC20(_asset).safeTransferFrom(
             msg.sender,
-            address(this),
+            _depositRecipient(),
             assets
         );
 
@@ -907,6 +907,11 @@ abstract contract BaseControlledAsyncRedeem is
 
     /// @dev Hook for executing custom logic right after deposit/mint
     function _afterDeposit(address _asset, uint256 assets, uint256 shares, address receiver) internal virtual {}
+
+    /// @dev Address that receives the deposited assets. Defaults to the vault itself.
+    function _depositRecipient() internal view virtual returns (address) {
+        return address(this);
+    }
 
     /// @dev Hook for executing custom logic right before withdraw/redeem
     function _beforeWithdraw(address _asset, uint256 assets, uint256 shares, address receiver, address controller) internal virtual {}
