@@ -9,15 +9,14 @@ bytes32 constant COMPLIANCE_STORAGE_LOCATION = 0xbe508e3cf19f76c02ce3ef084fcdeea
 
 /// @title ComplianceLib
 /// @notice External library for access-restriction state mutations and reads.
-/// @notice Holds both exclusion controls (blocklist/freeze) and the deposit allowlist. The ERC-7201
+/// @notice Holds both the freeze exclusion control and the deposit allowlist. The ERC-7201
 ///         namespace string stays `ultrayield.storage.Compliance` so the layout is canonical and
 ///         shared across vault variants (and upgrade-safe for existing compliance deployments).
 /// @dev Public functions are deployed separately and called via DELEGATECALL.
 library ComplianceLib {
     /// @custom:storage-location erc7201:ultrayield.storage.Compliance
-    /// @dev Allowlist fields are APPENDED after the original blocklist/freeze members; never reorder.
+    /// @dev Allowlist fields are APPENDED after the original freeze member; never reorder.
     struct Storage {
-        mapping(address => bool) blocklisted;
         mapping(address => bool) frozen;
         mapping(address => bool) allowlisted;
         bool allowlistDisabled; // allowlist enforcement ON by default
@@ -29,33 +28,17 @@ library ComplianceLib {
         }
     }
 
-    ////////////////////////
-    // Blocklist & Freeze //
-    ////////////////////////
-
-    function addToBlocklist(address account) external {
-        _addToBlocklist(account);
-    }
-
-    function addToBlocklistBatch(address[] calldata accounts) external {
-        for (uint256 i; i < accounts.length; i++) {
-            _addToBlocklist(accounts[i]);
-        }
-    }
-
-    function removeFromBlocklist(address account) external {
-        Storage storage $ = _getComplianceStorage();
-        if ($.blocklisted[account]) {
-            $.blocklisted[account] = false;
-            emit IComplianceEvents.AccountUnblocked(account);
-        }
-    }
+    ////////////
+    // Freeze //
+    ////////////
 
     function freeze(address account) external {
-        Storage storage $ = _getComplianceStorage();
-        if (!$.frozen[account]) {
-            $.frozen[account] = true;
-            emit IComplianceEvents.AccountFrozen(account);
+        _freeze(account);
+    }
+
+    function freezeBatch(address[] calldata accounts) external {
+        for (uint256 i; i < accounts.length; i++) {
+            _freeze(accounts[i]);
         }
     }
 
@@ -67,12 +50,12 @@ library ComplianceLib {
         }
     }
 
-    /// @dev Idempotent add — only writes/emits on an actual state change
-    function _addToBlocklist(address account) private {
+    /// @dev Idempotent freeze — only writes/emits on an actual state change
+    function _freeze(address account) private {
         Storage storage $ = _getComplianceStorage();
-        if (!$.blocklisted[account]) {
-            $.blocklisted[account] = true;
-            emit IComplianceEvents.AccountBlocked(account);
+        if (!$.frozen[account]) {
+            $.frozen[account] = true;
+            emit IComplianceEvents.AccountFrozen(account);
         }
     }
 
