@@ -17,6 +17,11 @@ contract SharedFreezeRegistry is AccessControl, IFreezeRegistry, IComplianceEven
     /// @notice Thrown when the admin address is zero at construction
     error ZeroAdminAddress();
 
+    /// @notice Thrown when freezing or unfreezing the zero address
+    /// @dev The zero address is the ERC20 mint/burn sentinel and must never be frozen — vaults OR
+    ///      this registry into their checks, so a frozen zero address could brick mint/burn flows.
+    error ZeroAddress();
+
     /// @dev Frozen state per address
     mapping(address => bool) private _frozen;
 
@@ -53,6 +58,7 @@ contract SharedFreezeRegistry is AccessControl, IFreezeRegistry, IComplianceEven
 
     /// @notice Unmark `account` as frozen
     function unfreeze(address account) external onlyRole(COMPLIANCE_ROLE) {
+        require(account != address(0), ZeroAddress());
         if (_frozen[account]) {
             _frozen[account] = false;
             emit AccountUnfrozen(account);
@@ -61,6 +67,7 @@ contract SharedFreezeRegistry is AccessControl, IFreezeRegistry, IComplianceEven
 
     /// @dev Idempotent freeze — only writes/emits on an actual state change
     function _freeze(address account) private {
+        require(account != address(0), ZeroAddress());
         if (!_frozen[account]) {
             _frozen[account] = true;
             emit AccountFrozen(account);
