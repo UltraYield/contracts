@@ -5,6 +5,8 @@ import { UltraVault } from "src/vaults/UltraVault.sol";
 import { ComplianceLib } from "src/utils/ComplianceLib.sol";
 import { COMPLIANCE_ROLE } from "src/utils/Roles.sol";
 import { IComplianceEvents, IComplianceErrors } from "src/interfaces/ICompliance.sol";
+import { IFreezeRegistry } from "src/interfaces/IFreezeRegistry.sol";
+import { FREEZE_REGISTRY_KEY } from "src/utils/AddressKeys.sol";
 
 /// @title CompliantUltraVault
 /// @notice UltraVault variant with the compliance suite: per-address freeze and forceBurn.
@@ -14,7 +16,7 @@ contract CompliantUltraVault is UltraVault, IComplianceEvents, IComplianceErrors
     // Getters //
     /////////////
 
-    /// @notice Returns true if `account` is frozen
+    /// @notice Returns true if `account` is frozen (effective state: local list OR shared registry)
     function isFrozen(address account) external view returns (bool) {
         return _isFrozen(account);
     }
@@ -53,8 +55,13 @@ contract CompliantUltraVault is UltraVault, IComplianceEvents, IComplianceErrors
     }
 
     /// @dev Bool sibling of `_ensureNotFrozen` for view-only eligibility checks (no revert reason).
+    /// @dev Effective freeze = local list OR shared registry. The registry is authoritative and cannot
+    ///      be overridden locally; when none is configured the registry lookup is skipped (local-only).
+    ///      A configured registry is a hard dependency: a reverting `isFrozen` reverts the caller.
     function _isFrozen(address account) internal view returns (bool) {
-        return ComplianceLib._getComplianceStorage().frozen[account];
+        if (ComplianceLib._getComplianceStorage().frozen[account]) return true;
+        address registry = _getCurrentAddress(FREEZE_REGISTRY_KEY);
+        return registry != address(0) && IFreezeRegistry(registry).isFrozen(account);
     }
 
     /// @dev A frozen receiver can't receive minted shares, so its deposit/mint limit is 0.
