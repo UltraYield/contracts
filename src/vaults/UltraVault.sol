@@ -247,15 +247,9 @@ abstract contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IU
     // Hook Overrides //
     ////////////////////
 
-    /// @dev Hook for executing custom logic right after deposit/mint
-    /// @dev Sends deposited funds to fundsHolder.
-    function _afterDeposit(
-        address _asset,
-        uint256 assets,
-        uint256 /* shares */,
-        address /* receiver */
-    ) internal override {
-        IERC20(_asset).safeTransfer(fundsHolder(), assets);
+    /// @dev Deposited assets are sent directly to the fundsHolder.
+    function _depositRecipient() internal view override returns (address) {
+        return fundsHolder();
     }
 
     /// @dev Before fulfill redeem - transfer funds from fundsHolder to vault
