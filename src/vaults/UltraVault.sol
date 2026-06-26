@@ -14,7 +14,8 @@ import {
     FUNDS_HOLDER_KEY,
     ORACLE_KEY,
     INSTANT_REDEEM_EXITPOINT_KEY,
-    UPGRADE_MODULE_KEY
+    UPGRADE_MODULE_KEY,
+    FREEZE_REGISTRY_KEY
 } from "src/utils/AddressKeys.sol";
 
 // keccak256(abi.encode(uint256(keccak256("ultrayield.storage.UltraVault")) - 1)) & ~bytes32(uint256(0xff));
@@ -44,6 +45,8 @@ struct UltraVaultInitParams {
     address instantRedeemExitpoint;
     // External timelocked upgrade module
     address upgradeModule;
+    // Shared freeze registry consulted alongside the local freeze list (optional; address(0) keeps local-only freezing)
+    address freezeRegistry;
 }
 
 /// @title UltraVault
@@ -70,6 +73,7 @@ abstract contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IU
     uint256 internal constant FUNDS_HOLDER_TIMELOCK = 3 days;
     uint256 internal constant ORACLE_TIMELOCK = 3 days;
     uint256 internal constant INSTANT_REDEEM_EXITPOINT_TIMELOCK = 3 days;
+    uint256 internal constant FREEZE_REGISTRY_TIMELOCK = 3 days;
 
     /////////////
     // Storage //
@@ -111,6 +115,7 @@ abstract contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IU
         _initAddress(FUNDS_HOLDER_KEY, params.fundsHolder);
         _initAddress(ORACLE_KEY, params.oracle);
         _initAddress(INSTANT_REDEEM_EXITPOINT_KEY, params.instantRedeemExitpoint);
+        _migrateAddress(FREEZE_REGISTRY_KEY, params.freezeRegistry);
         _pause();
         
         // Calling at the end since we need oracle to be setup
@@ -133,9 +138,11 @@ abstract contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IU
     /// @dev Pending V1 address-update proposals are intentionally not migrated
     /// @param _instantRedeemExitpoint Address for the new instant redeem exitpoint (not present in V1)
     /// @param _upgradeModule Address of the external timelocked upgrade module (not present in V1)
+    /// @param _freezeRegistry Address of the shared freeze registry (optional; address(0) keeps local-only freezing)
     function initializeV2(
         address _instantRedeemExitpoint,
-        address _upgradeModule
+        address _upgradeModule,
+        address _freezeRegistry
     ) external reinitializer(2) {
         UltraVaultStorage storage $ = _getUltraVaultStorage();
         // Guard: only a genuine V1 proxy carries a live address in the deprecated fundsHolder slot.
@@ -147,6 +154,7 @@ abstract contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IU
         _migrateAddress(ORACLE_KEY, address($._oracle));
         _initAddress(INSTANT_REDEEM_EXITPOINT_KEY, _instantRedeemExitpoint);
         _initAddress(UPGRADE_MODULE_KEY, _upgradeModule);
+        _migrateAddress(FREEZE_REGISTRY_KEY, _freezeRegistry);
 
         _pause();
     }
@@ -486,6 +494,7 @@ abstract contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IU
         if (key == FUNDS_HOLDER_KEY) return FUNDS_HOLDER_TIMELOCK;
         if (key == ORACLE_KEY) return ORACLE_TIMELOCK;
         if (key == INSTANT_REDEEM_EXITPOINT_KEY) return INSTANT_REDEEM_EXITPOINT_TIMELOCK;
+        if (key == FREEZE_REGISTRY_KEY) return FREEZE_REGISTRY_TIMELOCK;
         return super._timelockForKey(key);
     }
 

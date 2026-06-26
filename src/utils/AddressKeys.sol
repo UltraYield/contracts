@@ -17,3 +17,6 @@ bytes32 constant ORACLE_KEY = keccak256("oracle");
 
 /// @dev keccak256("instantRedeemExitpoint") = 0x48f088031e9e3abd14d32c601c02e21d4c8d0792bd677a8a5d6821b83ce55ca4
 bytes32 constant INSTANT_REDEEM_EXITPOINT_KEY = keccak256("instantRedeemExitpoint");
+
+/// @dev keccak256("freezeRegistry") = 0x5bdc6b5605eea9997e0e7b867552c8f434c588cb23341852fd213bb760b2cf45
+bytes32 constant FREEZE_REGISTRY_KEY = keccak256("freezeRegistry");
