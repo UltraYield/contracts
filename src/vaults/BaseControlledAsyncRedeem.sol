@@ -10,7 +10,7 @@ import { SafeERC20, IERC20 } from "@openzeppelin/contracts/token/ERC20/utils/Saf
 import { PendingRedeem, ClaimableRedeem } from "src/interfaces/Types.sol";
 import { IRedeemAccounting } from "src/interfaces/IRedeemAccounting.sol";
 import { IUltraVaultRateProvider, Adjustment } from "src/interfaces/IUltraVaultRateProvider.sol";
-import { OPERATOR_ROLE, PAUSER_ROLE, UPGRADER_ROLE } from "src/utils/Roles.sol";
+import { OPERATOR_ROLE, PAUSER_ROLE, UNPAUSER_ROLE, UPGRADER_ROLE } from "src/utils/Roles.sol";
 import { AccessControlUpgradeable } from "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol";
 import { AddressUpdateProposal, AddressUpdatable } from "src/utils/AddressUpdates.sol";
 import { RATE_PROVIDER_KEY, UPGRADE_MODULE_KEY } from "src/utils/AddressKeys.sol";
@@ -111,6 +111,7 @@ abstract contract BaseControlledAsyncRedeem is
         _grantRole(DEFAULT_ADMIN_ROLE, params.owner);
         _grantRole(OPERATOR_ROLE, params.owner);
         _grantRole(PAUSER_ROLE, params.owner);
+        _grantRole(UNPAUSER_ROLE, params.owner);
         _grantRole(UPGRADER_ROLE, params.owner);
     }
 
@@ -336,14 +337,17 @@ abstract contract BaseControlledAsyncRedeem is
         uint256 shares,
         address receiver
     ) internal {
+        // Call before-deposit hook - use the actual asset amount to be transferred
+        _beforeDeposit(_asset, assets, shares, receiver);
+
         // Checks
         require(assets != 0, EmptyDeposit());
         require(shares != 0, NothingToMint());
 
-        // Transfer assets from sender to the vault
+        // Transfer assets from sender to the deposit recipient
         IERC20(_asset).safeTransferFrom(
             msg.sender,
-            address(this),
+            _depositRecipient(),
             assets
         );
 
@@ -598,20 +602,26 @@ abstract contract BaseControlledAsyncRedeem is
     // Deposti & Withdraw Limits //
     ///////////////////////////////
 
+    /// @dev Whether `receiver` may receive freshly minted shares; mirrors the `_update` receiver gate.
+    ///      Gating variants override this so the deposit/mint limits don't over-advertise.
+    function _canReceiveShares(address /* receiver */) internal view virtual returns (bool) {
+        return true;
+    }
+
     /// @notice Get max assets for deposit
     /// @return assets Maximum deposit amount
     function maxDeposit(
-        address // receiver
+        address receiver
     ) public view virtual override returns (uint256) {
-        return paused() ? 0 : type(uint256).max;
+        return (paused() || !_canReceiveShares(receiver)) ? 0 : type(uint256).max;
     }
 
     /// @notice Get max shares for mint
     /// @return shares Maximum mint amount
     function maxMint(
-        address // receiver
+        address receiver
     ) public view virtual override returns (uint256) {
-        return paused() ? 0 : type(uint256).max;
+        return (paused() || !_canReceiveShares(receiver)) ? 0 : type(uint256).max;
     }
 
     /// @notice Get max assets for withdraw
@@ -871,13 +881,13 @@ abstract contract BaseControlledAsyncRedeem is
     /// @notice Accept a previously proposed address update for the given key
     /// @param key The address key (see contract constants)
     /// @param newAddress The address being confirmed (must match the proposal)
-    /// @dev Pauses the vault so operators can verify the setup before resuming
+    /// @dev Ensures the vault is paused so operators can verify the setup before resuming
     function acceptAddressUpdate(bytes32 key, address newAddress) external onlyOwner {
         uint256 timelock = _timelockForKey(key);
         address oldAddress = _acceptAddressUpdate(key, newAddress, timelock);
         emit AddressUpdated(key, oldAddress, newAddress);
 
-        _pause();
+        if (!paused()) _pause();
     }
 
     /// @dev Resolve the per-key timelock duration. Reverts UnknownAddressKey for unsupported keys.
@@ -892,8 +902,16 @@ abstract contract BaseControlledAsyncRedeem is
     // Hooks //
     ///////////
 
+    /// @dev Hook for executing custom logic right before deposit/mint (e.g. gating the depositor)
+    function _beforeDeposit(address _asset, uint256 assets, uint256 shares, address receiver) internal virtual {}
+
     /// @dev Hook for executing custom logic right after deposit/mint
     function _afterDeposit(address _asset, uint256 assets, uint256 shares, address receiver) internal virtual {}
+
+    /// @dev Address that receives the deposited assets. Defaults to the vault itself.
+    function _depositRecipient() internal view virtual returns (address) {
+        return address(this);
+    }
 
     /// @dev Hook for executing custom logic right before withdraw/redeem
     function _beforeWithdraw(address _asset, uint256 assets, uint256 shares, address receiver, address controller) internal virtual {}
@@ -918,14 +936,14 @@ abstract contract BaseControlledAsyncRedeem is
     }
 
     /// @notice Pause vault operations
-    /// @dev Caller must be owner or have PAUSER_ROLE
+    /// @dev Caller must have PAUSER_ROLE
     function pause() external onlyRole(PAUSER_ROLE) {
         _pause();
     }
 
     /// @notice Unpause vault operations
-    /// @dev Caller must be owner or have PAUSER_ROLE
-    function unpause() external onlyRole(PAUSER_ROLE) {
+    /// @dev Caller must have UNPAUSER_ROLE
+    function unpause() external onlyRole(UNPAUSER_ROLE) {
         _unpause();
     }
 

@@ -26,142 +26,114 @@ jobs:
         with:
           version: nightly
 
+      # `forge build --sizes` exits non-zero when a contract exceeds the EIP-170
+      # limit. Swallow that here so the job still parses sizes, posts the comment,
+      # and fails (if needed) via our own gate below with a clear message. A real
+      # compile error prints no size table, so the parse step still fails the job.
       - name: Build contracts (release profile)
-        run: FOUNDRY_PROFILE=release forge build --sizes src/vaults/UltraVault.sol > build-output.txt 2>&1
+        run: FOUNDRY_PROFILE=release forge build --sizes src/vaults/AllowlistUltraVault.sol src/vaults/CompliantUltraVault.sol > build-output.txt 2>&1 || true
 
-      - name: Extract UltraVault size
-        id: current_size
+      - name: Benchmark and compare
+        id: bench
         shell: bash
         run: |
-          SIZE=$(grep -E '^\|\s*UltraVault\s*\|' build-output.txt | head -n1 | awk -F '|' '{print $3}' | tr -d ', ' | xargs)
-          if [[ -z "$SIZE" ]]; then
-            echo "Failed to parse UltraVault size from forge output:"
-            cat build-output.txt
-            exit 1
-          fi
-          echo "size=$SIZE" >> "$GITHUB_OUTPUT"
-          echo "Current UltraVault size: $SIZE bytes"
-          rm build-output.txt
+          CONTRACTS=(AllowlistUltraVault CompliantUltraVault)
+          LIMIT=24576
+          MARKER="<!-- ultravault-size-bench -->"
 
-      - name: Fetch target branch benchmark
-        id: base_bench
-        shell: bash
-        run: |
-          git fetch origin "${{ github.base_ref }}"
+          # Base benchmark from the target branch (per-contract; missing key => initial).
+          git fetch origin "${{ github.base_ref }}" --quiet || true
+          BASE_CONTENT=""
           if git show "origin/${{ github.base_ref }}:benches/sizes" > /dev/null 2>&1; then
-            CONTENT=$(git show "origin/${{ github.base_ref }}:benches/sizes")
-            # Preferred new format: key=value lines, extract UltraVault
-            if echo "$CONTENT" | grep -qE '^UltraVault='; then
-              BASE_SIZE=$(echo "$CONTENT" | awk -F'=' '/^UltraVault=/{print $2}' | tr -d '[:space:]')
-            # Backward-compat: legacy file with just a number
-            elif echo "$CONTENT" | grep -qE '^[[:space:]]*[0-9]+[[:space:]]*$'; then
-              BASE_SIZE=$(echo "$CONTENT" | tr -d '[:space:]')
-            else
-              echo "Found benches/sizes but could not parse UltraVault entry."
-              echo "Content was:"
-              echo "$CONTENT"
+            BASE_CONTENT=$(git show "origin/${{ github.base_ref }}:benches/sizes")
+          fi
+
+          # Comment header.
+          {
+            echo "$MARKER"
+            echo "## 📊 UltraVault Variants Bytecode Size"
+            echo ""
+            echo "EVM limit: **${LIMIT} bytes**"
+            echo ""
+            echo "| Contract | Current | Previous | Change | Margin | Status |"
+            echo "|----------|---------|----------|--------|--------|--------|"
+          } > comment-body.md
+
+          # Fresh benchmark file (two keyed lines, drops the stale UltraVault key).
+          mkdir -p benches
+          : > benches/sizes
+
+          FAIL=false
+          OFFENDERS=""
+
+          for c in "${CONTRACTS[@]}"; do
+            CUR=$(grep -E "^\|\s*${c}\s*\|" build-output.txt | head -n1 | awk -F '|' '{print $3}' | tr -d ', ' | xargs)
+            if [[ -z "$CUR" ]]; then
+              echo "Failed to parse ${c} size from forge output:"
+              cat build-output.txt
               exit 1
             fi
-            echo "exists=true" >> "$GITHUB_OUTPUT"
-            echo "size=$BASE_SIZE" >> "$GITHUB_OUTPUT"
-            echo "Found base size: $BASE_SIZE bytes"
-          else
-            echo "exists=false" >> "$GITHUB_OUTPUT"
-            echo "No previous benchmark found"
-          fi
+            echo "Current ${c} size: ${CUR} bytes"
 
-      - name: Calculate comparison
-        id: compare
-        shell: bash
-        run: |
-          CURRENT=${{ steps.current_size.outputs.size }}
-          LIMIT=24576
-          MARGIN=$((LIMIT - CURRENT))
-          MARGIN_PCT=$(awk "BEGIN {printf \"%.2f\", (($MARGIN / $LIMIT) * 100)}")
-          
-          # Determine status
-          if [ "$CURRENT" -gt "$LIMIT" ]; then
-            STATUS="🔴 EXCEEDS LIMIT"
-          elif [ "$MARGIN" -lt 500 ]; then
-            STATUS="⚠️ CRITICAL"
-          elif [ "$MARGIN" -lt 2000 ]; then
-            STATUS="⚠️ WARNING"
-          else
-            STATUS="✅ HEALTHY"
-          fi
+            MARGIN=$((LIMIT - CUR))
+            MARGIN_PCT=$(awk "BEGIN {printf \"%.2f\", (($MARGIN / $LIMIT) * 100)}")
 
-          echo "current=$CURRENT" >> "$GITHUB_OUTPUT"
-          echo "margin=$MARGIN" >> "$GITHUB_OUTPUT"
-          echo "margin_pct=$MARGIN_PCT" >> "$GITHUB_OUTPUT"
-          echo "status=$STATUS" >> "$GITHUB_OUTPUT"
-
-          if [ "${{ steps.base_bench.outputs.exists }}" = "true" ]; then
-            BASE=${{ steps.base_bench.outputs.size }}
-            DIFF=$((CURRENT - BASE))
-            
-            if [ "$DIFF" -gt 0 ]; then
-              CHANGE_EMOJI="📈"
-              SIGN="+"
-            elif [ "$DIFF" -lt 0 ]; then
-              CHANGE_EMOJI="📉"
-              SIGN=""
+            if [ "$CUR" -gt "$LIMIT" ]; then
+              STATUS="🔴 EXCEEDS LIMIT"
+              FAIL=true
+              OFFENDERS="${OFFENDERS}${c} (${CUR} bytes) "
+            elif [ "$MARGIN" -lt 500 ]; then
+              STATUS="⚠️ CRITICAL"
+            elif [ "$MARGIN" -lt 2000 ]; then
+              STATUS="⚠️ WARNING"
             else
-              CHANGE_EMOJI="➡️"
-              SIGN=""
+              STATUS="✅ HEALTHY"
             fi
-            
-            if [ "$BASE" -gt 0 ]; then
-              PERCENT=$(awk "BEGIN {printf \"%.2f\", (($DIFF / $BASE) * 100)}")
+
+            BASE=$(echo "$BASE_CONTENT" | awk -F'=' -v k="$c" '$1==k {print $2}' | tr -d '[:space:]')
+            if [[ -n "$BASE" ]]; then
+              DIFF=$((CUR - BASE))
+              if [ "$DIFF" -gt 0 ]; then
+                EMOJI="📈"; SIGN="+"
+              elif [ "$DIFF" -lt 0 ]; then
+                EMOJI="📉"; SIGN=""
+              else
+                EMOJI="➡️"; SIGN=""
+              fi
+              if [ "$BASE" -gt 0 ]; then
+                PERCENT=$(awk "BEGIN {printf \"%.2f\", (($DIFF / $BASE) * 100)}")
+              else
+                PERCENT="0.00"
+              fi
+              PREV_CELL="${BASE} bytes"
+              CHANGE_CELL="${EMOJI} ${SIGN}${DIFF} (${SIGN}${PERCENT}%)"
             else
-              PERCENT="0.00"
+              PREV_CELL="—"
+              CHANGE_CELL="— (initial)"
             fi
-            echo "has_comparison=true" >> "$GITHUB_OUTPUT"
-            echo "base=$BASE"          >> "$GITHUB_OUTPUT"
-            echo "diff=$DIFF"          >> "$GITHUB_OUTPUT"
-            echo "sign=$SIGN"          >> "$GITHUB_OUTPUT"
-            echo "percent=$PERCENT"    >> "$GITHUB_OUTPUT"
-            echo "change_emoji=$CHANGE_EMOJI" >> "$GITHUB_OUTPUT"
-          else
-            echo "has_comparison=false" >> "$GITHUB_OUTPUT"
-          fi
+
+            echo "| ${c} | ${CUR} bytes | ${PREV_CELL} | ${CHANGE_CELL} | ${MARGIN} bytes (${MARGIN_PCT}%) | ${STATUS} |" >> comment-body.md
+            printf "%s=%s\n" "$c" "$CUR" >> benches/sizes
+          done
+
+          {
+            echo ""
+            echo "---"
+            echo "*This comment is automatically updated on each push.*"
+          } >> comment-body.md
+
+          echo "fail=${FAIL}" >> "$GITHUB_OUTPUT"
+          echo "offenders=${OFFENDERS}" >> "$GITHUB_OUTPUT"
+
+          rm -f build-output.txt
 
       - name: Create or update PR comment
         uses: actions/github-script@v7
         with:
           script: |
-            const current = '${{ steps.compare.outputs.current }}';
-            const margin = '${{ steps.compare.outputs.margin }}';
-            const marginPct = '${{ steps.compare.outputs.margin_pct }}';
-            const status = '${{ steps.compare.outputs.status }}';
-            const hasComparison = '${{ steps.compare.outputs.has_comparison }}' === 'true';
-
-            let body = '## 📊 UltraVault Bytecode Size\n\n';
-
-            if (hasComparison) {
-              const base = '${{ steps.compare.outputs.base }}';
-              const diff = '${{ steps.compare.outputs.diff }}';
-              const sign = '${{ steps.compare.outputs.sign }}';
-              const percent = '${{ steps.compare.outputs.percent }}';
-              const emoji = '${{ steps.compare.outputs.change_emoji }}';
-              body += '| Metric | Value |\n';
-              body += '|--------|-------|\n';
-              body += `| **Current Size** | ${current} bytes |\n`;
-              body += `| **Previous Size** | ${base} bytes |\n`;
-              body += `| **Change** | ${emoji} ${sign}${diff} bytes (${sign}${percent}%) |\n`;
-              body += `| **EVM Limit** | 24576 bytes |\n`;
-              body += `| **Margin** | ${margin} bytes (${marginPct}%) |\n`;
-              body += `| **Status** | ${status} |\n`;
-            } else {
-              body += '**Initial benchmark - no previous data to compare.**\n\n';
-              body += '| Metric | Value |\n';
-              body += '|--------|-------|\n';
-              body += `| **Size** | ${current} bytes |\n`;
-              body += `| **EVM Limit** | 24576 bytes |\n`;
-              body += `| **Margin** | ${margin} bytes (${marginPct}%) |\n`;
-              body += `| **Status** | ${status} |\n`;
-            }
-
-            body += '\n---\n*This comment is automatically updated on each push.*';
+            const fs = require('fs');
+            const body = fs.readFileSync('comment-body.md', 'utf8');
+            const MARKER = '<!-- ultravault-size-bench -->';
 
             const { data: comments } = await github.rest.issues.listComments({
               owner: context.repo.owner,
@@ -171,7 +143,7 @@ jobs:
 
             const botComment = comments.find(c =>
               c.user.type === 'Bot' &&
-              c.body.includes('📊 UltraVault Bytecode Size')
+              c.body.includes(MARKER)
             );
 
             if (botComment) {
@@ -189,11 +161,6 @@ jobs:
                 body
               });
             }
-
-      - name: Update benchmark file
-        run: |
-          mkdir -p benches
-          printf "UltraVault=%s\n" "${{ steps.current_size.outputs.size }}" > benches/sizes
 
       # Only commit back when the PR is from the same repository (not a fork),
       # and avoid looping when the actor is the bot.
@@ -218,8 +185,7 @@ jobs:
 
       - name: Check size limit
         run: |
-          CURRENT=${{ steps.compare.outputs.current }}
-          if [ "$CURRENT" -gt 24576 ]; then
-            echo "❌ ERROR: UltraVault bytecode size ($CURRENT bytes) exceeds the EVM limit (24576 bytes)!"
+          if [ "${{ steps.bench.outputs.fail }}" = "true" ]; then
+            echo "❌ ERROR: bytecode size exceeds the EVM limit (24576 bytes): ${{ steps.bench.outputs.offenders }}"
             exit 1
           fi

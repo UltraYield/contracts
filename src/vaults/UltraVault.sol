@@ -7,15 +7,15 @@ import { IPriceSource } from "src/interfaces/IPriceSource.sol";
 import { IUltraVaultEvents, IUltraVaultErrors } from "src/interfaces/IUltraVault.sol";
 import { Adjustment, Fees, PendingRedeem } from "src/interfaces/Types.sol";
 import { AddressUpdateProposal } from "src/utils/AddressUpdates.sol";
-import { ComplianceLib } from "src/utils/ComplianceLib.sol";
 import { FixedPointMathLib } from "src/utils/FixedPointMathLib.sol";
 import { BaseControlledAsyncRedeem, BaseControlledAsyncRedeemInitParams } from "src/vaults/BaseControlledAsyncRedeem.sol";
-import { COMPLIANCE_ROLE, OPERATOR_ROLE } from "src/utils/Roles.sol";
+import { OPERATOR_ROLE } from "src/utils/Roles.sol";
 import {
     FUNDS_HOLDER_KEY,
     ORACLE_KEY,
     INSTANT_REDEEM_EXITPOINT_KEY,
-    UPGRADE_MODULE_KEY
+    UPGRADE_MODULE_KEY,
+    FREEZE_REGISTRY_KEY
 } from "src/utils/AddressKeys.sol";
 
 // keccak256(abi.encode(uint256(keccak256("ultrayield.storage.UltraVault")) - 1)) & ~bytes32(uint256(0xff));
@@ -45,11 +45,14 @@ struct UltraVaultInitParams {
     address instantRedeemExitpoint;
     // External timelocked upgrade module
     address upgradeModule;
+    // Shared freeze registry consulted alongside the local freeze list (optional; address(0) keeps local-only freezing)
+    address freezeRegistry;
 }
 
 /// @title UltraVault
-/// @notice ERC-7540 compliant async redeem vault with UltraVaultOracle pricing and multisig asset management
-contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVaultErrors {
+/// @notice ERC-7540 compliant async redeem vault with UltraVaultOracle pricing and multisig asset management.
+/// @notice Abstract base holding all shared vault mechanics with no compliance access gating of its own. 
+abstract contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVaultErrors {
     using FixedPointMathLib for uint256;
     using Math for uint256;
     using SafeERC20 for IERC20;
@@ -70,6 +73,7 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
     uint256 internal constant FUNDS_HOLDER_TIMELOCK = 3 days;
     uint256 internal constant ORACLE_TIMELOCK = 3 days;
     uint256 internal constant INSTANT_REDEEM_EXITPOINT_TIMELOCK = 3 days;
+    uint256 internal constant FREEZE_REGISTRY_TIMELOCK = 3 days;
 
     /////////////
     // Storage //
@@ -111,6 +115,7 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
         _initAddress(FUNDS_HOLDER_KEY, params.fundsHolder);
         _initAddress(ORACLE_KEY, params.oracle);
         _initAddress(INSTANT_REDEEM_EXITPOINT_KEY, params.instantRedeemExitpoint);
+        _migrateAddress(FREEZE_REGISTRY_KEY, params.freezeRegistry);
         _pause();
         
         // Calling at the end since we need oracle to be setup
@@ -133,17 +138,23 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
     /// @dev Pending V1 address-update proposals are intentionally not migrated
     /// @param _instantRedeemExitpoint Address for the new instant redeem exitpoint (not present in V1)
     /// @param _upgradeModule Address of the external timelocked upgrade module (not present in V1)
+    /// @param _freezeRegistry Address of the shared freeze registry (optional; address(0) keeps local-only freezing)
     function initializeV2(
         address _instantRedeemExitpoint,
-        address _upgradeModule
+        address _upgradeModule,
+        address _freezeRegistry
     ) external reinitializer(2) {
+        UltraVaultStorage storage $ = _getUltraVaultStorage();
+        // Guard: only a genuine V1 proxy carries a live address in the deprecated fundsHolder slot.
+        require($._fundsHolder != address(0), NotMigratable());
+
         _migrateBaseControlledAsyncRedeemStateFromV1();
 
-        UltraVaultStorage storage $ = _getUltraVaultStorage();
         _migrateAddress(FUNDS_HOLDER_KEY, $._fundsHolder);
         _migrateAddress(ORACLE_KEY, address($._oracle));
         _initAddress(INSTANT_REDEEM_EXITPOINT_KEY, _instantRedeemExitpoint);
         _initAddress(UPGRADE_MODULE_KEY, _upgradeModule);
+        _migrateAddress(FREEZE_REGISTRY_KEY, _freezeRegistry);
 
         // Rescale the V1 high-water mark into V2's 1e18 price space. In V1 the HWM lived in
         // 10**decimals() share-value units; V2 compares it against the 1e18-scaled oracle price.
@@ -252,29 +263,9 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
     // Hook Overrides //
     ////////////////////
 
-    /// @dev Hook for executing custom logic right after deposit/mint
-    /// @dev Sends deposited funds to fundsHolder
-    function _afterDeposit(
-        address _asset, 
-        uint256 assets, 
-        uint256 /* shares */,
-        address /* receiver */
-    ) internal override {
-        _ensureNotRestricted(msg.sender);
-        IERC20(_asset).safeTransfer(fundsHolder(), assets);
-    }
-
-    /// @dev Hook for executing custom logic right before withdraw/redeem
-    /// @dev Enforces compliance restrictions on receiver and controller
-    function _beforeWithdraw(
-        address /* _asset */, 
-        uint256 /* assets */, 
-        uint256 /* shares */,
-        address receiver,
-        address controller
-    ) internal view override {
-        _ensureNotRestricted(receiver);
-        if (controller != receiver) _ensureNotRestricted(controller);
+    /// @dev Deposited assets are sent directly to the fundsHolder.
+    function _depositRecipient() internal view override returns (address) {
+        return fundsHolder();
     }
 
     /// @dev Before fulfill redeem - transfer funds from fundsHolder to vault
@@ -282,6 +273,10 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
     function _beforeFulfillRedeem(address _asset, uint256 assets, uint256) internal override {
         IERC20(_asset).safeTransferFrom(fundsHolder(), address(this), assets);
     }
+
+    /// @dev Hook for executing custom logic before an instant redeem executes (e.g. restriction checks)
+    /// @dev Default no-op; concrete variants override to gate receiver/controller.
+    function _beforeInstantRedeem(address receiver, address controller) internal view virtual {}
 
     ////////////////////
     // Deposit & Mint //
@@ -307,18 +302,6 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
         assets = super._mintWithAsset(_asset, shares, receiver);
     }
 
-    /// @dev Block restricted addresses from cancelling pending redeems
-    /// @dev Receiver is gated by `_update` on the share transfer back from the vault.
-    function _handleRedeemRequestCancelation(
-        address _asset,
-        uint256 shares,
-        address controller,
-        address receiver
-    ) internal override {
-        _ensureNotRestricted(controller);
-        super._handleRedeemRequestCancelation(_asset, shares, controller, receiver);
-    }
-
     ////////////////////
     // Instant Redeem //
     ////////////////////
@@ -333,6 +316,12 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
         liquidity = balance < allowed ? balance : allowed;
     }
 
+    /// @dev Whether `controller` may instant-redeem (to themselves). Gating variants override this so
+    ///      `maxInstantRedeem` reflects their controller eligibility.
+    function _canInstantRedeem(address /* controller */) internal view virtual returns (bool) {
+        return true;
+    }
+
     /// @notice Returns the maximum shares a controller can instant-redeem for a given asset
     /// @dev Considers both the controller's share balance and available liquidity.
     ///      Liquidity bounds the gross payout (netAssets + fee are both pulled from the exitpoint),
@@ -344,6 +333,7 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
         address _asset,
         address controller
     ) external view returns (uint256 shares) {
+        if (!_canInstantRedeem(controller)) return 0;
         uint256 liquidity = getLiquidity(_asset);
         uint256 shareBalance = balanceOf(controller);
         if (liquidity == 0 || shareBalance == 0) {
@@ -386,10 +376,7 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
         address controller
     ) external checkAccess(controller) whenNotPaused returns (uint256) {
         _ensureIsSupported(_asset);
-        _ensureNotRestricted(receiver);
-        if (controller != receiver) {
-            _ensureNotRestricted(controller);
-        }
+        _beforeInstantRedeem(receiver, controller);
         require(shares != 0, NothingToRedeem());
         require(balanceOf(controller) >= shares, InsufficientBalance());
 
@@ -485,7 +472,8 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
     }
 
     /// @notice Cancel a user's pending redeem and return the locked shares to the controller's wallet
-    /// @dev Bypasses compliance restrictions so the cleanup works even when the controller is blocklisted or frozen.
+    /// @dev Returns the shares via the base `_update`, bypassing any transfer gating a derived vault
+    ///      imposes (e.g. a compliance freeze), so cleanup works even for a restricted controller.
     /// @param _asset The asset originally requested for redemption
     /// @param controller The user whose pending redeem is being cancelled
     /// @return shares The amount of shares returned to the controller
@@ -499,7 +487,7 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
 
         _consumePendingRedeem(controller, _asset, shares);
 
-        // Call parent `_update` directly to bypass this contract's compliance gate; the controller may be restricted.
+        // Call the base `_update` directly to bypass any compliance gate a derived vault adds; the controller may be restricted.
         super._update(address(this), controller, shares);
 
         emit RedeemRequestCanceled(controller, controller, shares);
@@ -514,6 +502,7 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
         if (key == FUNDS_HOLDER_KEY) return FUNDS_HOLDER_TIMELOCK;
         if (key == ORACLE_KEY) return ORACLE_TIMELOCK;
         if (key == INSTANT_REDEEM_EXITPOINT_KEY) return INSTANT_REDEEM_EXITPOINT_TIMELOCK;
+        if (key == FREEZE_REGISTRY_KEY) return FREEZE_REGISTRY_TIMELOCK;
         return super._timelockForKey(key);
     }
 
@@ -572,65 +561,6 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
     /// @dev Updates fee-related variables
     function collectFees() external onlyOwner whenNotPaused {
         _collectFees();
-    }
-
-    ////////////////
-    // Compliance //
-    ////////////////
-
-    /// @notice Get blocklist and freeze status for `account`
-    /// @return blocked True if `account` is blocklisted
-    /// @return frozen True if `account` is frozen
-    function restrictionStatus(address account) external view returns (bool blocked, bool frozen) {
-        ComplianceLib.Storage storage $ = ComplianceLib._getComplianceStorage();
-        blocked = $.blocklisted[account];
-        frozen = $.frozen[account];
-    }
-
-    /// @notice Add `account` to the blocklist
-    function blocklist(address account) external onlyRole(COMPLIANCE_ROLE) {
-        ComplianceLib.blocklist(account);
-    }
-
-    /// @notice Remove `account` from the blocklist
-    function unblocklist(address account) external onlyRole(COMPLIANCE_ROLE) {
-        ComplianceLib.unblocklist(account);
-    }
-
-    /// @notice Mark `account` as frozen
-    function freeze(address account) external onlyRole(COMPLIANCE_ROLE) {
-        ComplianceLib.freeze(account);
-    }
-
-    /// @notice Unmark `account` as frozen
-    function unfreeze(address account) external onlyRole(COMPLIANCE_ROLE) {
-        ComplianceLib.unfreeze(account);
-    }
-
-    /// @notice Burn `amount` shares from `target`'s wallet balance.
-    /// @dev Only affects `balanceOf(target)`; pending and claimable redeems are untouched.
-    function forceBurn(address target, uint256 amount) external onlyRole(COMPLIANCE_ROLE) {
-        _burn(target, amount);
-        emit ForceBurned(target, amount);
-    }
-
-    /// @dev Reverts if `account` is blocklisted or frozen.
-    /// @dev Returns early on `address(0)` so callers don't need to special-case mints/burns.
-    function _ensureNotRestricted(address account) internal view {
-        if (account == address(0)) return;
-        ComplianceLib.Storage storage $ = ComplianceLib._getComplianceStorage();
-        if ($.blocklisted[account]) revert AddressBlocklisted(account);
-        if ($.frozen[account]) revert AddressFrozen(account);
-    }
-
-    /// @dev Gates share transfers and mints.
-    /// @dev Burns (`to == 0`) skip the from-side check so `forceBurn` can destroy a restricted address's shares.
-    function _update(address from, address to, uint256 value) internal override {
-        if (to != address(0)) {
-            _ensureNotRestricted(from);
-        }
-        _ensureNotRestricted(to);
-        super._update(from, to, value);
     }
 
     //////////////////////
