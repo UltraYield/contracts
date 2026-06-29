@@ -107,12 +107,8 @@ abstract contract BaseControlledAsyncRedeem is
         _initAddress(RATE_PROVIDER_KEY, params.rateProvider);
         _initAddress(UPGRADE_MODULE_KEY, params.upgradeModule);
 
-        // Grant roles to owner
+        // Grant default admin role to owner
         _grantRole(DEFAULT_ADMIN_ROLE, params.owner);
-        _grantRole(OPERATOR_ROLE, params.owner);
-        _grantRole(PAUSER_ROLE, params.owner);
-        _grantRole(UNPAUSER_ROLE, params.owner);
-        _grantRole(UPGRADER_ROLE, params.owner);
     }
 
     /////////////////

@@ -152,9 +152,9 @@ abstract contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IU
 
         _migrateAddress(FUNDS_HOLDER_KEY, $._fundsHolder);
         _migrateAddress(ORACLE_KEY, address($._oracle));
+        _migrateAddress(FREEZE_REGISTRY_KEY, _freezeRegistry);
         _initAddress(INSTANT_REDEEM_EXITPOINT_KEY, _instantRedeemExitpoint);
         _initAddress(UPGRADE_MODULE_KEY, _upgradeModule);
-        _migrateAddress(FREEZE_REGISTRY_KEY, _freezeRegistry);
 
         // Rescale the V1 high-water mark into V2's 1e18 price space. In V1 the HWM lived in
         // 10**decimals() share-value units; V2 compares it against the 1e18-scaled oracle price.
