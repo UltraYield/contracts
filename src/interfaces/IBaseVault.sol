@@ -56,7 +56,7 @@ interface IBaseVaultEvents {
 }
 
 /// @title IBaseVault
-/// @notice An interface of basic vault functionality for both UltraVault and UltraFeeder contracts
+/// @notice An interface of basic vault functionality for UltraVault contracts
 interface IBaseVault is 
   IBaseVaultEvents,
   IBaseVaultErrors,
@@ -360,18 +360,6 @@ interface IBaseVault is
         address controller,
         address receiver
     ) external returns (uint256 shares);
-
-    /// @notice Cancel redeem request for controller partially, for a specific amount of shares
-    /// @param asset Asset
-    /// @param shares Amount of shares to cancel
-    /// @param controller Controller address
-    /// @param receiver Share recipient
-    function cancelRedeemRequestPartially(
-        address asset,
-        uint256 shares,
-        address controller,
-        address receiver
-    ) external;
 
     /////////////////////
     // Admin Functions //
