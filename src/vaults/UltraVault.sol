@@ -203,8 +203,10 @@ abstract contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IU
         }
 
         // Anchor the high-water mark to the live share price so value bootstrapped here is not
-        // later booked as performance
-        _getUltraVaultStorage().fees.highwaterMark = _getSharePrice();
+        // later booked as performance, and reset the management-fee clock.
+        Fees storage fees = _getUltraVaultStorage().fees;
+        fees.highwaterMark = _getSharePrice();
+        fees.lastUpdateTimestamp = uint64(block.timestamp);
     }
 
     ////////////////
