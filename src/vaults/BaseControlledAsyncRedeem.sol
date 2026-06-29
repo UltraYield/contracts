@@ -10,7 +10,7 @@ import { SafeERC20, IERC20 } from "@openzeppelin/contracts/token/ERC20/utils/Saf
 import { PendingRedeem, ClaimableRedeem } from "src/interfaces/Types.sol";
 import { IRedeemAccounting } from "src/interfaces/IRedeemAccounting.sol";
 import { IUltraVaultRateProvider, Adjustment } from "src/interfaces/IUltraVaultRateProvider.sol";
-import { OPERATOR_ROLE, PAUSER_ROLE, UNPAUSER_ROLE, UPGRADER_ROLE } from "src/utils/Roles.sol";
+import { OPERATOR_ROLE, PAUSER_ROLE, UNPAUSER_ROLE } from "src/utils/Roles.sol";
 import { AccessControlUpgradeable } from "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol";
 import { AddressUpdateProposal, AddressUpdatable } from "src/utils/AddressUpdates.sol";
 import { RATE_PROVIDER_KEY, UPGRADE_MODULE_KEY } from "src/utils/AddressKeys.sol";
@@ -663,7 +663,7 @@ abstract contract BaseControlledAsyncRedeem is
     /// @notice Request redeem of shares
     /// @param _asset Asset
     /// @param shares Amount to redeem
-    /// @param controller Share recipient
+    /// @param controller Account that controls/claims this request; must be msg.sender or have approved msg.sender as operator
     /// @param owner Share owner
     /// @param autoClaim If true, fulfilling this request auto-delivers assets to controller in the same tx
     /// @return requestId Request identifier
@@ -685,7 +685,7 @@ abstract contract BaseControlledAsyncRedeem is
         address controller,
         address owner,
         bool autoClaim
-    ) internal checkAccess(owner) returns (uint256 requestId) {
+    ) internal checkAccess(owner) checkAccess(controller) returns (uint256 requestId) {
         // Checks
         require(shares != 0, NothingToRedeem());
         require(balanceOf(owner) >= shares, InsufficientBalance());
