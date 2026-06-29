@@ -152,11 +152,15 @@ abstract contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IU
 
         _migrateAddress(FUNDS_HOLDER_KEY, $._fundsHolder);
         _migrateAddress(ORACLE_KEY, address($._oracle));
+        _migrateAddress(FREEZE_REGISTRY_KEY, _freezeRegistry);
         _initAddress(INSTANT_REDEEM_EXITPOINT_KEY, _instantRedeemExitpoint);
         _initAddress(UPGRADE_MODULE_KEY, _upgradeModule);
-        _migrateAddress(FREEZE_REGISTRY_KEY, _freezeRegistry);
 
-        _pause();
+        // Rescale the V1 high-water mark into V2's 1e18 price space. In V1 the HWM lived in
+        // 10**decimals() share-value units; V2 compares it against the 1e18-scaled oracle price.
+        $.fees.highwaterMark *= 10 ** (18 - uint256(decimals()));
+
+        if (!paused()) _pause();
     }
 
     /////////////
@@ -197,6 +201,12 @@ abstract contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IU
         for (uint256 i; i < users.length; i++) {
             _mint(users[i], shares[i]);
         }
+
+        // Anchor the high-water mark to the live share price so value bootstrapped here is not
+        // later booked as performance, and reset the management-fee clock.
+        Fees storage fees = _getUltraVaultStorage().fees;
+        fees.highwaterMark = _getSharePrice();
+        fees.lastUpdateTimestamp = uint64(block.timestamp);
     }
 
     ////////////////
@@ -581,7 +591,7 @@ abstract contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IU
 
         Fees memory currentFees = getFees();
         if (currentFees.highwaterMark == 0) {
-            newFees.highwaterMark = 10 ** decimals();
+            newFees.highwaterMark = SCALE;
         } else {
             newFees.highwaterMark = currentFees.highwaterMark;
         }
@@ -651,7 +661,7 @@ abstract contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IU
         }
         return performanceFee.mulDivDown(
             (totals.sharePrice - fees.highwaterMark) * totals.totalShares,
-            (10 ** (18 + decimals()))
+            (SCALE * SCALE)
         );
     }
 
