@@ -352,9 +352,6 @@ abstract contract BaseControlledAsyncRedeem is
 
         // Emit event
         emit Deposit(msg.sender, receiver, assets, shares);
-
-        // Call after-deposit hook - use the actual asset amount that was transferred
-        _afterDeposit(_asset, assets, shares, receiver);
     }
 
     ///////////////////////
@@ -693,9 +690,6 @@ abstract contract BaseControlledAsyncRedeem is
         require(shares != 0, NothingToRedeem());
         require(balanceOf(owner) >= shares, InsufficientBalance());
 
-        // Call before-request-redeem hook
-        _beforeRequestRedeem(_asset, shares, controller, owner);
-
         // Update pending redeem and persist autoClaim preference (last-writer-wins)
         _increasePendingRedeem(controller, _asset, shares, autoClaim);
 
@@ -726,21 +720,6 @@ abstract contract BaseControlledAsyncRedeem is
         address receiver
     ) external returns (uint256 shares) {
         shares = _cancelRedeemForAllPendingShares(_asset, controller, receiver);
-    }
-
-    /// @notice Cancel redeem request for controller partially, for a specific amount of shares
-    /// @param _asset Asset
-    /// @param shares Amount of shares to cancel
-    /// @param controller Controller address
-    /// @param receiver Share recipient
-    /// @dev Transfers pending shares back to receiver
-    function cancelRedeemRequestPartially(
-        address _asset,
-        uint256 shares,
-        address controller,
-        address receiver
-    ) external {
-        _handleRedeemRequestCancelation(_asset, shares, controller, receiver);
     }
 
     /// @dev Internal function for canceling redeem requests for all pending shares for a user
@@ -843,9 +822,6 @@ abstract contract BaseControlledAsyncRedeem is
         // Emit event
         emit RedeemRequestFulfilled(controller, msg.sender, shares, assets);
 
-        // Call after-fulfill redeem hook
-        _afterFulfillRedeem(_asset, assets, shares, controller);
-
         // Auto-claim path: equivalent to the controller invoking `redeem` immediately after fulfillment.
         if (autoClaim) {
             uint256 deliverable = _calculateClaimableAssetsForShares(controller, _asset, shares);
@@ -901,9 +877,6 @@ abstract contract BaseControlledAsyncRedeem is
     /// @dev Hook for executing custom logic right before deposit/mint (e.g. gating the depositor)
     function _beforeDeposit(address _asset, uint256 assets, uint256 shares, address receiver) internal virtual {}
 
-    /// @dev Hook for executing custom logic right after deposit/mint
-    function _afterDeposit(address _asset, uint256 assets, uint256 shares, address receiver) internal virtual {}
-
     /// @dev Address that receives the deposited assets. Defaults to the vault itself.
     function _depositRecipient() internal view virtual returns (address) {
         return address(this);
@@ -912,14 +885,8 @@ abstract contract BaseControlledAsyncRedeem is
     /// @dev Hook for executing custom logic right before withdraw/redeem
     function _beforeWithdraw(address _asset, uint256 assets, uint256 shares, address receiver, address controller) internal virtual {}
 
-    /// @dev Hook for inheriting contracts after request redeem
-    function _beforeRequestRedeem(address _asset, uint256 shares, address controller, address owner) internal virtual {}
-
     /// @dev Hook for inheriting contracts before fulfill
     function _beforeFulfillRedeem(address _asset, uint256 assets, uint256 shares) internal virtual {}
-
-    /// @dev Hook for inheriting contracts after fulfill
-    function _afterFulfillRedeem(address _asset, uint256 assets, uint256 shares, address controller) internal virtual {}
 
     //////////////
     // Pausable //
