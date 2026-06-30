@@ -85,8 +85,7 @@ contract ChainlinkRateProvider is IRateProvider {
         uint256 assets
     ) external view returns (uint256) {
         require(_asset == secondaryAsset, UnsupportedAsset());
-        uint256 assetPrice = _readPrice(secondaryFeed);
-        uint256 underlyingPrice = _readPrice(underlyingFeed);
+        (uint256 underlyingPrice, uint256 assetPrice) = _readPrices();
         uint256 result = Math.mulDiv(assets, assetPrice, underlyingPrice);
         return _normalizeDecimals(result, secondaryDecimals, underlyingDecimals);
     }
@@ -97,8 +96,7 @@ contract ChainlinkRateProvider is IRateProvider {
         uint256 baseAssets
     ) external view returns (uint256) {
         require(_asset == secondaryAsset, UnsupportedAsset());
-        uint256 assetPrice = _readPrice(secondaryFeed);
-        uint256 underlyingPrice = _readPrice(underlyingFeed);
+        (uint256 underlyingPrice, uint256 assetPrice) = _readPrices();
         uint256 result = Math.mulDiv(baseAssets, underlyingPrice, assetPrice);
         return _normalizeDecimals(result, underlyingDecimals, secondaryDecimals);
     }
@@ -106,6 +104,16 @@ contract ChainlinkRateProvider is IRateProvider {
     //////////////////
     // Internal Fns //
     //////////////////
+
+    function _readPrices() internal view returns (uint256 underlyingPrice, uint256 assetPrice) {
+        underlyingPrice = _readPrice(underlyingFeed);
+        assetPrice = _readPrice(secondaryFeed);
+        _validateRate(underlyingPrice, assetPrice);
+    }
+
+    /// @dev Hook to validate the rate implied by the two feed prices. No-op by default;
+    ///      override to enforce constraints (e.g. stable-pair deviation bounds).
+    function _validateRate(uint256 underlyingPrice, uint256 assetPrice) internal view virtual {}
 
     function _readPrice(AggregatorV3Interface feed) internal view returns (uint256) {
         (
