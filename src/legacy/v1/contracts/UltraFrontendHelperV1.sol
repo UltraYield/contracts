@@ -2,7 +2,7 @@
 pragma solidity 0.8.28;
 
 import { IUltraVaultV1 } from "src/legacy/v1/interfaces/IUltraVaultV1.sol";
-import { IUltraFrontendHelper } from "src/interfaces/IUltraFrontendHelper.sol";
+import { IUltraFrontendHelperV1 } from "src/legacy/v1/interfaces/IUltraFrontendHelperV1.sol";
 import { Ownable2StepUpgradeable } from "@openzeppelin/contracts-upgradeable/access/Ownable2StepUpgradeable.sol";
 import { UUPSUpgradeable } from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -10,7 +10,7 @@ import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 // keccak256(abi.encode(uint256(keccak256("ultrayield.storage.UltraFrontendHelper")) - 1)) & ~bytes32(uint256(0xff));
 bytes32 constant ULTRA_FRONTEND_HELPER_STORAGE_LOCATION = 0xb0722828b3d7d54293138ffa77a01c09742cd65ca869b0919a7d833efbba8900;
 
-contract UltraFrontendHelperV1 is IUltraFrontendHelper, Ownable2StepUpgradeable, UUPSUpgradeable {
+contract UltraFrontendHelperV1 is IUltraFrontendHelperV1, Ownable2StepUpgradeable, UUPSUpgradeable {
     /////////////
     // Storage //
     /////////////
@@ -51,13 +51,13 @@ contract UltraFrontendHelperV1 is IUltraFrontendHelper, Ownable2StepUpgradeable,
     // View Functions //
     ////////////////////
 
-    /// @inheritdoc IUltraFrontendHelper
+    /// @inheritdoc IUltraFrontendHelperV1
     function getVault() external view returns (address) {
         Storage storage $ = _getStorage();
         return $.vault;
     }
     
-    /// @inheritdoc IUltraFrontendHelper
+    /// @inheritdoc IUltraFrontendHelperV1
     function getVaultState() external view returns (VaultState memory) {
         IUltraVaultV1 vault = _getVault();
         uint8 decimals = vault.decimals();
@@ -68,7 +68,7 @@ contract UltraFrontendHelperV1 is IUltraFrontendHelper, Ownable2StepUpgradeable,
         });
     }
 
-    /// @inheritdoc IUltraFrontendHelper
+    /// @inheritdoc IUltraFrontendHelperV1
     function previewDeposit(address asset, uint256 amount) external view returns (uint256) {
         IUltraVaultV1 vault = _getVault();
         uint256 baseAssets = vault.convertToUnderlying(asset, amount);
@@ -76,7 +76,7 @@ contract UltraFrontendHelperV1 is IUltraFrontendHelper, Ownable2StepUpgradeable,
         return shares;
     }
 
-    /// @inheritdoc IUltraFrontendHelper
+    /// @inheritdoc IUltraFrontendHelperV1
     function previewRedeem(address asset, uint256 shares) external view returns (uint256) {
         IUltraVaultV1 vault = _getVault();
         uint256 baseAssets = vault.convertToAssets(shares);
@@ -85,7 +85,7 @@ contract UltraFrontendHelperV1 is IUltraFrontendHelper, Ownable2StepUpgradeable,
         return assets - withdrawalFee;
     }
 
-    /// @inheritdoc IUltraFrontendHelper
+    /// @inheritdoc IUltraFrontendHelperV1
     function collectPendingRedeems(address[] calldata users) external view returns (Redeem[] memory redeems) {
         IUltraVaultV1 vault = _getVault();
         address[] memory assets = _getVaultAssets();
@@ -122,7 +122,7 @@ contract UltraFrontendHelperV1 is IUltraFrontendHelper, Ownable2StepUpgradeable,
     // Admin Functions //
     /////////////////////
     
-    /// @inheritdoc IUltraFrontendHelper
+    /// @inheritdoc IUltraFrontendHelperV1
     function addAsset(address asset) external onlyOwner {
         require(asset != address(0), "Zero asset address");
         require(_getVault().rateProvider().isSupported(asset), "Asset not supported");
@@ -134,7 +134,7 @@ contract UltraFrontendHelperV1 is IUltraFrontendHelper, Ownable2StepUpgradeable,
         emit AssetAdded(asset);
     }
 
-    /// @inheritdoc IUltraFrontendHelper
+    /// @inheritdoc IUltraFrontendHelperV1
     function removeAsset(address asset) external onlyOwner {
         Storage storage $ = _getStorage();
         bool didRemove = false;
