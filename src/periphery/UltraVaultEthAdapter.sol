@@ -131,6 +131,8 @@ contract UltraVaultEthAdapter is
         uint256 shares,
         address receiver
     ) public whenNotPaused returns (uint256 ethAmount) {
+        require(receiver != address(0), ZeroAddress());
+
         // Redeem WETH from vault to this adapter
         address controller = msg.sender;
         ethAmount = vault.redeemAsset(address(weth), shares, address(this), controller);
