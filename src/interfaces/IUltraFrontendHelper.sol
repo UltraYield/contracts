@@ -4,13 +4,6 @@ pragma solidity >=0.8.0;
 /// @title IUltraFrontendHelper
 /// @notice Interface for the UltraFrontendHelper contract that provides helper functions for frontend integration
 interface IUltraFrontendHelper {
-    ////////////
-    // Events //
-    ////////////
-
-    event AssetAdded(address indexed asset);
-    event AssetRemoved(address indexed asset);
-
     /////////////
     // Structs //
     /////////////
@@ -27,6 +20,7 @@ interface IUltraFrontendHelper {
         address user;
         address asset;
         uint256 shares;
+        uint256 requestTime;
     }
 
     ////////////////////
@@ -54,20 +48,8 @@ interface IUltraFrontendHelper {
     function previewRedeem(address asset, uint256 shares) external view returns (uint256 assets);
 
     /// @notice Collect all pending redeems for a list of users
+    /// @param assets The list of assets to collect pending redeems for
     /// @param users The list of users to collect pending redeems for
     /// @return redeems Array of pending redeems
-    function collectPendingRedeems(address[] calldata users) external view returns (Redeem[] memory redeems);
-
-    /////////////////////
-    // Admin Functions //
-    /////////////////////
-
-    /// @notice Add an additional asset to track
-    /// @param asset The asset address to add
-    function addAsset(address asset) external;
-
-    /// @notice Remove an asset from tracking
-    /// @param asset The asset address to remove
-    function removeAsset(address asset) external;
+    function collectPendingRedeems(address[] calldata assets, address[] calldata users) external view returns (Redeem[] memory redeems);
 }
-
