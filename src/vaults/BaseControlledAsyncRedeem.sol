@@ -68,8 +68,8 @@ abstract contract BaseControlledAsyncRedeem is
     /// @custom:storage-location erc7201:ultrayield.storage.BaseControlledAsyncRedeem
     struct BaseAsyncRedeemStorage {
         mapping(address => mapping(address => bool)) isOperator;
-        IUltraVaultRateProvider __rateProvider; // Deprecated in V2
-        AddressUpdateProposal __proposedRateProvider; // Deprecated in V2
+        IUltraVaultRateProvider _rateProvider; // Deprecated in V2
+        AddressUpdateProposal _proposedRateProvider; // Deprecated in V2
     }
 
     /// @dev Returns the namespaced ERC-7201 storage struct for BaseControlledAsyncRedeem
@@ -82,7 +82,7 @@ abstract contract BaseControlledAsyncRedeem is
     /// @dev Copies the legacy V1 rate provider address into V2 address-update storage
     function _migrateBaseControlledAsyncRedeemStateFromV1() internal {
         BaseAsyncRedeemStorage storage $ = _getBaseAsyncRedeemStorage();
-        _migrateAddress(RATE_PROVIDER_KEY, address($.__rateProvider));
+        _migrateAddress(RATE_PROVIDER_KEY, address($._rateProvider));
     }
 
     //////////

@@ -1,6 +1,6 @@
 # V1 to V2 Migration
 
-UltraYield V2 is delivered as an **upgrade of the existing V1 proxies**, not a fresh deployment. The proxy addresses, share token, and user balances are preserved; only the implementation behind each proxy changes. A one-time migration hook, `initializeV2`, moves live state into the V2 shape after the implementation is swapped.
+UltraYield V2 is delivered as an **upgrade of the existing V1 proxies**, not only as a fresh deployment. The proxy addresses, share token, and user balances are preserved; only the implementation behind each proxy changes. A one-time migration hook, `initializeV2`, moves live state into the V2 shape after the implementation is swapped.
 
 This document is for integrators upgrading their tooling and for auditors reviewing the migration path. For the rebuilt pricing stack see [Oracles](ORACLES.md); for the fee model see [Economics](ECONOMICS.md); for the redeem lifecycle see [Flows](FLOWS.md).
 
@@ -24,7 +24,7 @@ flowchart LR
 - **High-water-mark rescale.** V2 accounting lives in a single 1e18 share-price space. The stored high-water mark is rescaled out of V1's `10**decimals()` share-value units with `highwaterMark *= 10 ** (18 - decimals())` so it compares correctly against the 1e18-scaled oracle price.
 - **Leaves the vault paused.** Migration ends with the vault paused so operators can verify migrated addresses and price before reopening.
 
-The 1e18 move is also reflected in the renamed in-memory accounting struct `Totals`: V1's `totalSupply`/`shareValue` fields are now `totalShares`/`sharePrice`. The deprecated V1 slots (`_fundsHolder`, `_oracle`, `_proposedFundsHolder`, `_proposedOracle`, `__rateProvider`) remain in the storage layout for compatibility but are superseded by the registry.
+The 1e18 move is also reflected in the renamed in-memory accounting struct `Totals`: V1's `totalSupply`/`shareValue` fields are now `totalShares`/`sharePrice`. The deprecated V1 slots (`_fundsHolder`, `_oracle`, `_proposedFundsHolder`, `_proposedOracle`, `_rateProvider`) remain in the storage layout for compatibility but are superseded by the registry.
 
 ## Legacy V1 code
 

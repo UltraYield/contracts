@@ -1,6 +1,6 @@
 # Contract Architecture
 
-UltraYield V2 is a UUPS-upgradeable, ERC-7540-style async-redeem vault priced by a deterministic on-chain oracle. The core is split into one abstract mechanics base and thin concrete variants that add regulatory gating, with heavy logic factored into external libraries and an external upgrade module to keep proxy bytecode small.
+UltraYield V2 is a UUPS-upgradeable, ERC-7540-style async-redeem vault priced by a deterministic on-chain oracle. The core is split into one abstract mechanics base and thin concrete variants that add regulatory gating, with heavy logic factored into external libraries and an external upgrade module to keep proxy bytecode in bounds.
 
 ## Inheritance diagram
 
@@ -36,7 +36,7 @@ flowchart TD
 
 ## ERC-7201 storage
 
-Every module owns a namespaced ERC-7201 storage struct at a fixed slot, so layouts stay upgrade-safe and disjoint: `UltraVaultStorage` (fees, `feeRecipient`), `BaseAsyncRedeemStorage` (`isOperator`), `RedeemQueue`'s `REDEEM_QUEUE_STORAGE_LOCATION`, `AddressUpdatable`'s registry, and `ComplianceLib`'s `COMPLIANCE_STORAGE_LOCATION`. A handful of V1 slots (`_fundsHolder`, `_oracle`, `__rateProvider`, …) are deprecated and retained only for layout compatibility and V1-migration detection.
+Every module owns a namespaced ERC-7201 storage struct at a fixed slot, so layouts stay upgrade-safe and disjoint: `UltraVaultStorage` (fees, `feeRecipient`), `BaseAsyncRedeemStorage` (`isOperator`), `RedeemQueue`'s `REDEEM_QUEUE_STORAGE_LOCATION`, `AddressUpdatable`'s registry, and `ComplianceLib`'s `COMPLIANCE_STORAGE_LOCATION`. A handful of V1 slots (`_fundsHolder`, `_oracle`, `_rateProvider`, …) are deprecated and retained only for layout compatibility and V1-migration detection.
 
 ## Core modules
 
