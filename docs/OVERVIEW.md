@@ -57,7 +57,7 @@ Fulfillment cadence depends on the vault's spec; under normal operations it is e
 ## Detailed docs
 
 - [Architecture](ARCHITECTURE.md) — contract inheritance, storage, and module split.
-- [Flows](FLOWS.md) — deposit, request, fulfillment, claim, and address-update lifecycles.
+- [Flows](FLOWS.md) — deposit, request, fulfillment, and claim lifecycles.
 - [Oracles](ORACLES.md) — deterministic price curve and the cross-chain price manager.
 - [Economics](ECONOMICS.md) — management, performance, withdrawal, and instant-redeem fees.
 - [Permissions](PERMISSIONS.md) — roles, gating, and the compliance/allowlist variants.

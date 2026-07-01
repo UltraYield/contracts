@@ -1,6 +1,6 @@
 # Periphery Contracts
 
-Periphery contracts sit outside the core vault accounting and are not required for the vault to function. They exist to make integration easier: one wraps native-ETH UX around a WETH vault, the other aggregates read-only state for frontends. Both are new in V2 and both depend only on the public `IUltraVault` surface — they hold no privileged accounting power over the vault.
+Periphery contracts sit outside the core vault accounting and are not required for the vault to function. They exist to make integration easier: one wraps native-ETH UX around a WETH vault, the other aggregates read-only state for frontends. Both are new in V2 and hold no privileged accounting power over the vault; they build only on public interfaces — the vault's `IUltraVault` surface, plus WETH (`IWETH9`) for the adapter and `IUltraVaultRateProvider` for the helper.
 
 ## UltraVaultEthAdapter
 
@@ -33,7 +33,7 @@ sequenceDiagram
 
 ### Redeem flow
 
-`redeemEth(shares[, receiver])` settles an **already-fulfilled async redeem request** back into native ETH. It calls `vault.redeemAsset(weth, shares, address(this), controller)` with `controller = msg.sender`, so WETH lands on the adapter; the adapter then `weth.withdraw(...)` and forwards ETH to `receiver` via a low-level call, reverting `EthTransferFailed` on failure and emitting `EthWithdraw`. The caller is always the redeem controller; `receiver` only receives the ETH. See the vault's async redeem lifecycle in [Flows](FLOWS.md).
+`redeemEth(shares[, receiver])` settles an **already-fulfilled async redeem request** back into native ETH. It calls `vault.redeemAsset(weth, shares, address(this), controller)` with `controller = msg.sender`, so WETH lands on the adapter; the adapter then `weth.withdraw(...)` and forwards ETH to `receiver` via a low-level call, reverting `EthTransferFailed` on failure and emitting `EthWithdraw`. The caller is always the redeem controller; `receiver` only receives the ETH. **Prerequisite:** the user must first authorize the adapter as an operator on the vault (`vault.setOperator(adapter, true)`); otherwise `redeemAsset`'s `checkAccess(controller)` sees the adapter as `msg.sender` rather than the controller and reverts `AccessDenied`. Deposits need no such approval — the asymmetry is because redeem authority is controller-scoped. See the vault's async redeem lifecycle in [Flows](FLOWS.md).
 
 ### ETH intake guard
 
@@ -43,9 +43,9 @@ sequenceDiagram
 
 `UltraFrontendHelper` is a stateless, read-only aggregator for a single vault. It bundles several vault calls into one round-trip so a frontend can render vault state, quote a deposit/redeem, and enumerate pending withdrawals without orchestrating many low-level calls. It is non-upgradeable, not pausable, and has no roles; `vault` is `immutable`, validated in the constructor (`"ZERO_ADDRESS"`, then `vault.fundsHolder() != address(0)` → `"INVALID_VAULT"`).
 
-- `getVaultState()` returns a `VaultState { totalAssets, totalShares, sharePrice }`, where `sharePrice` is assets per one whole share (`convertToAssets(10 ** decimals)`).
+- `getVaultState()` returns a `VaultState { totalAssets, totalShares, sharePrice }`, where `sharePrice` is assets per one whole share (`convertToAssets(10 ** decimals)`) — denominated in the base asset's native decimals, distinct from the oracle's 1e18-scaled `currentSharePrice()` (the two differ by ~1e12 for a 6-decimal asset).
 - `previewDeposit(asset, amount)` converts the input asset to base units (`Adjustment.DOWN`) then to shares. It does **not** subtract a deposit fee.
-- `previewRedeem(asset, shares)` returns the net assets after the **async withdrawal fee** (`calculateWithdrawalFee`). It reflects only the queue path — not the instant-redeem premium. For asset conversion and rounding semantics see [Oracle and Rate Provider System](ORACLES.md).
+- `previewRedeem(asset, shares)` returns the net assets after the **async withdrawal fee** (`calculateWithdrawalFee`). It reflects only the queue path — not the instant-redeem premium. For asset conversion and rounding semantics see [Rate Providers](RATE_PROVIDERS.md).
 - `collectPendingRedeems(assets, users)` validates each asset via `rateProvider().isSupported(...)` (`"UNSUPPORTED_ASSET"`) and returns one `Redeem { user, asset, shares, requestTime }` per non-empty `getPendingRedeem(asset, user)`, or an empty array when none.
 
 Note the helper uses string reverts, while the adapter uses custom errors.

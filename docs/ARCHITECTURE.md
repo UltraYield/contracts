@@ -18,7 +18,7 @@ flowchart TD
     BaseControlledAsyncRedeem --> RedeemQueue
 
     RedeemQueue -. DELEGATECALL .-> RedeemQueueLib
-    UltraVault -. _authorizeUpgrade .-> TimelockedUpgradeModule
+    BaseControlledAsyncRedeem -. _authorizeUpgrade .-> TimelockedUpgradeModule
     CompliantUltraVault -. DELEGATECALL .-> ComplianceLib
     AllowlistUltraVault -. DELEGATECALL .-> ComplianceLib
 
@@ -32,7 +32,7 @@ flowchart TD
 
 - `BaseControlledAsyncRedeem` provides the ERC-7540 controlled async redeem flow: deposit/mint, request/cancel/fulfill redeem, claim (`withdraw`/`redeem`), operator approvals (`setOperator`), multi-asset conversion via the rate provider, pause control, the key-based address registry, and UUPS upgrade authorization delegated externally.
 - `UltraVault` adds: assets held on `fundsHolder` (deposits route straight to custody), oracle-driven `totalAssets`, the fee engine, and instant redeem out of a separate `instantRedeemExitpoint`.
-- The concrete variants override the `virtual` gating hooks. `CompliantUltraVault` overrides all five (`_beforeDeposit`, `_beforeWithdraw`, `_beforeInstantRedeem`, `_canReceiveShares`, `_canInstantRedeem`); `AllowlistUltraVault` overrides only the first four and leaves `_canInstantRedeem` at its base default (returns `true`), so a non-allowlisted controller can still instant-redeem to itself.
+- The concrete variants override the `virtual` gating hooks. `CompliantUltraVault` overrides all five (`_beforeDeposit`, `_beforeWithdraw`, `_beforeInstantRedeem`, `_canReceiveShares`, `_canInstantRedeem`); `AllowlistUltraVault` overrides only the first four and leaves `_canInstantRedeem` at its base default (returns `true`), so a non-allowlisted controller can still instant-redeem to itself. Both variants additionally override the ERC-20 `_update` transfer hook — the chokepoint that confines share ownership — and `CompliantUltraVault` also overrides `_handleRedeemRequestCancelation`.
 
 ## ERC-7201 storage
 
