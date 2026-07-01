@@ -17,7 +17,7 @@ flowchart TD
 
 ### `UltraVaultOracle`
 
-`UltraVaultOracle` is an append-only, single-vault share-price oracle (`Ownable2Step`). It records each update verbatim into a sorted `PriceUpdate[]` history and reports the live price as a **pure function of `block.timestamp`**. Identical bytecode and identical recorded updates therefore yield identical prices on every chain — the property that makes cross-chain valuation trustless.
+`UltraVaultOracle` is an append-only, single-vault share-price oracle (`Ownable2Step`). It records each update verbatim into a sorted `PriceUpdate[]` history and reports the live price as a **pure function of `block.timestamp`**. Identical bytecode evaluating the same recorded update at the same timestamp therefore yields the same price on any chain — so chains price off one shared update log rather than independent feeds. This is *synchronized* pricing, not instantaneous lockstep across chains: CCIP delivery latency and per-chain `block.timestamp` skew mean two chains can read slightly different live prices at the same wall-clock moment, converging as updates propagate. That determinism is what makes cross-chain valuation trustless.
 
 The constructor binds the oracle to one ERC-4626 `vault` and its `asset`, and requires the two to share decimals (`DecimalsMismatch`). It then seeds an instant initial price, so the history is never empty.
 

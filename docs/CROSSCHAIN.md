@@ -4,7 +4,7 @@
 
 An UltraYield vault may be deployed on several chains while one share price must govern all of them. Rather than running an independent price feed per chain (which would drift), the system authors **one canonical share price on a main chain** and mirrors it to every remote chain over Chainlink CCIP.
 
-The trick that makes this safe is determinism: the price is not a stored number that must arrive intact, it is a curve. Each update carries a `startTimestamp`, `startPrice`, `targetPrice`, and `vestingDuration`, and the oracle (`UltraVaultOracle`) interpolates the live price as a pure function of `block.timestamp`. The same update applied verbatim on any chain therefore yields the same price at the same wall-clock instant. A broadcast that arrives late still converges onto the identical curve. See [Oracles](ORACLES.md) for the curve model.
+The trick that makes this safe is determinism: the price is not a stored number that must arrive intact, it is a curve. Each update carries a `startTimestamp`, `startPrice`, `targetPrice`, and `vestingDuration`, and the oracle (`UltraVaultOracle`) interpolates the live price as a pure function of `block.timestamp`. The same update, evaluated at the same timestamp on any chain running identical bytecode, therefore yields the same price — so every chain prices off one shared update log, not an independent feed. This gives *synchronized* pricing rather than instantaneous lockstep: until a broadcast is delivered a remote chain keeps evaluating its previous update, and each chain reads its own `block.timestamp`, so live prices can differ transiently and converge as updates propagate. See [Oracles](ORACLES.md) for the curve model.
 
 ## Architecture
 
@@ -26,7 +26,7 @@ flowchart LR
 
 ## Price-propagation flow
 
-`instantPriceUpdate` and `linearPriceUpdate` apply locally first, then broadcast, in a single transaction. It is **all-or-nothing**: `ccipSend` is called with no try/catch, so any leg that reverts unwinds the local update too — the main chain can never end up applied while a broadcast was silently lost.
+`instantPriceUpdate` and `linearPriceUpdate` apply locally first, then broadcast, in a single transaction. That transaction is **locally atomic**: `ccipSend` is called with no try/catch, so if enqueuing any destination reverts, the local oracle write reverts with it — the main chain never ends up updated while a send was dropped at broadcast time. This is *not* an end-to-end delivery guarantee: a successful `ccipSend` only means the router accepted the message. Each remote chain applies it later and asynchronously, and the receiver independently re-validates it (the trusted-source and nonce checks below), so a broadcast can still be rejected or arrive out of order after the main-chain transaction has committed.
 
 ```mermaid
 sequenceDiagram
@@ -81,7 +81,7 @@ Nonce continuity across redeploys is operator-managed through the `_initialNonce
 ## Operational details
 
 - **`failOnPause`** — on the main chain the caller chooses revert-vs-pause when an update breaches the `jumpUp`/`jumpDown` limits (`UpdateWouldPause` if true). On the remote, `_applyUpdate` is called with `failOnPause = false` hardcoded: an authentic broadcast must always land, so a limit breach pauses the local vault instead of reverting the receive. A remote evaluates its *own* `limits`, so it can pause locally even when the main chain applied cleanly.
-- **Apply delay** — updates are future-dated to `block.timestamp + delay`, bounded by `MIN_DELAY` (15m) and `MAX_DELAY` (3h), default `DEFAULT_DELAY` (1h), set via `setDelay`. The lead time gives CCIP room to deliver before the curve activates.
+- **Apply delay** — updates are future-dated to `block.timestamp + delay`, bounded by `MIN_DELAY` (15m) and `MAX_DELAY` (3h), default `DEFAULT_DELAY` (1h), set via `setDelay`. This is an operational buffer, not a correctness condition: it gives CCIP time to deliver before the curve activates so remote chains ideally reflect the new price on schedule, but it does not guarantee delivery by the activation instant. A late broadcast still converges onto the same curve (see above) — the delay reduces visible lag, it doesn't gate correctness.
 - **Destination registry** — owners manage targets with `addDestination` / `removeDestination` / `updateDestinationConfig`; `setDestinationActive` is an admin-or-owner escape hatch to deactivate a stuck destination. `_broadcastUpdate` skips any destination whose `active` flag is false, and the broadcast still succeeds for the rest.
 - **LINK management** — the constructor pre-approves `type(uint256).max` LINK to the router so each `ccipSend` can pull its fee; the contract is funded with LINK and `withdrawLink` (owner) recovers it.
 
