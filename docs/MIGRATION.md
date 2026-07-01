@@ -20,7 +20,7 @@ flowchart LR
 `initializeV2(address instantRedeemExitpoint, address upgradeModule, address freezeRegistry)` is a `reinitializer(2)` hook run once on a live proxy that already holds user funds:
 
 - **Migratability guard.** Reverts `NotMigratable()` unless the deprecated V1 `_fundsHolder` slot is non-zero. A populated slot is the proof that the proxy carries genuine V1 state; an empty slot means there is nothing to migrate.
-- **Address registry seeding.** Live V1 addresses are copied into V2's key-based registry: the rate provider (`RATE_PROVIDER_KEY`), funds holder (`FUNDS_HOLDER_KEY`), and oracle (`ORACLE_KEY`). The two V2-only keys are initialized from the call arguments — `INSTANT_REDEEM_EXITPOINT_KEY` and `UPGRADE_MODULE_KEY` — and `FREEZE_REGISTRY_KEY` is set from `freezeRegistry` (`address(0)` keeps freezing local-only). Pending V1 address-update proposals are intentionally **not** migrated.
+- **Address registry seeding.** Live V1 addresses are copied into V2's key-based registry: the rate provider (`RATE_PROVIDER_KEY`), funds holder (`FUNDS_HOLDER_KEY`), and oracle (`ORACLE_KEY`). The two V2-only keys are initialized from the call arguments — `INSTANT_REDEEM_EXITPOINT_KEY` and `UPGRADE_MODULE_KEY` — and `FREEZE_REGISTRY_KEY` is set from `freezeRegistry` (`address(0)` keeps freezing local-only). Only the *live* V1 addresses are copied; any pending V1 address-update proposal (`proposedFundsHolder` / `proposedOracle`) is intentionally **not** migrated — a queued rotation is dropped, so resolve or record it before migrating (see the checklist).
 - **High-water-mark rescale.** V2 accounting lives in a single 1e18 share-price space. The stored high-water mark is rescaled out of V1's `10**decimals()` share-value units with `highwaterMark *= 10 ** (18 - decimals())` so it compares correctly against the 1e18-scaled oracle price.
 - **Leaves the vault paused.** Migration ends with the vault paused so operators can verify migrated addresses and price before reopening.
 
@@ -43,7 +43,8 @@ The original V1 contracts are preserved verbatim under `src/legacy/v1/` (e.g. `U
 ## Step-by-step upgrade
 
 1. **Deploy V2 supporting contracts.** The concrete vault implementation (`CompliantUltraVault` or `AllowlistUltraVault`), the external `upgradeModule` (timelocked upgrade authority), the V2 oracle/`VaultPriceManager`, and — if used — the `instantRedeemExitpoint` and `freezeRegistry`.
-2. **Swap the implementation.** Point each live V1 proxy at the V2 implementation using the existing V1 upgrade authority.
-3. **Run the migration.** Call `initializeV2(instantRedeemExitpoint, upgradeModule, freezeRegistry)` once per proxy. It seeds the registry, rescales the high-water mark, and leaves the vault paused.
-4. **Wire pricing and upgrades.** Hand the oracle to its `VaultPriceManager` (`claimOracleOwnership`), configure CCIP destinations for cross-chain vaults, and confirm UUPS authorization now routes through `upgradeModule()`. Switch to a new oracle, if desired, via `proposeAddressUpdate(ORACLE_KEY, …)`.
-5. **Verify, then reopen.** Check the migrated registry addresses and the live `currentSharePrice()`, then unpause with `UNPAUSER_ROLE`.
+2. **Drain queued V1 governance first.** `initializeV2` carries over only the live V1 addresses; any outstanding V1 address-update proposal (`proposedFundsHolder` / `proposedOracle`) is dropped, not migrated — a silent state loss. Before swapping, either accept or cancel every pending V1 proposal, or record it and replay it after migration via `proposeAddressUpdate` / `acceptAddressUpdate`.
+3. **Swap the implementation.** Point each live V1 proxy at the V2 implementation using the existing V1 upgrade authority.
+4. **Run the migration.** Call `initializeV2(instantRedeemExitpoint, upgradeModule, freezeRegistry)` once per proxy. It seeds the registry, rescales the high-water mark, and leaves the vault paused.
+5. **Wire pricing and upgrades.** Hand the oracle to its `VaultPriceManager` (`claimOracleOwnership`), configure CCIP destinations for cross-chain vaults, and confirm UUPS authorization now routes through `upgradeModule()`. Switch to a new oracle, if desired, via `proposeAddressUpdate(ORACLE_KEY, …)`.
+6. **Verify, then reopen.** Check the migrated registry addresses and the live `currentSharePrice()`, then unpause with `UNPAUSER_ROLE`.
