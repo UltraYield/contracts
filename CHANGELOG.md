@@ -29,7 +29,7 @@ V2 ships as an **upgrade of the existing V1 proxies**: `initializeV2` migrates l
 - *Added:* instant redeem — `instantRedeem`, `previewInstantRedeem`, `maxInstantRedeem`, `getLiquidity`, `instantRedeemExitpoint`; emits `InstantRedeem` plus a standard ERC-4626 `Withdraw`.
 - *Added:* `initializeV2(exitpoint, upgradeModule, freezeRegistry)` V1→V2 migration (reverts `NotMigratable` when there is no V1 state) and `cancelRedeemRequestByOperator(asset, controller)` for operators.
 
-**CompliantUltraVault** *(new)* — `UltraVault` with a freeze gate (`COMPLIANCE_ROLE`): `freeze`/`unfreeze` (+ batch), `isFrozen`, and `forceBurn`. Honors both a local freeze list and an optional shared `IFreezeRegistry`.
+**CompliantUltraVault** *(new)* — `UltraVault` with a freeze gate (`COMPLIANCE_ROLE`): `freeze`/`unfreeze` (+ batch), `isFrozen`, and `forceBurn`. Honors both a local freeze list and an optional shared `IFreezeRegistry`; the local freeze list rejects the zero address, matching `SharedFreezeRegistry`.
 
 **AllowlistUltraVault** *(new)* — `UltraVault` that restricts share ownership and redemption proceeds to an allowlist (`ALLOWLIST_ROLE`), enabled by default: `addToAllowlist`/`removeFromAllowlist` (+ batch), `setAllowlistEnabled`.
 
