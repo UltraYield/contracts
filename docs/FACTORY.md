@@ -23,7 +23,7 @@ Registration is a privileged, deliberate act (vetting a new implementation); dep
 
 Proxies are deployed with **empty constructor data**, so a vault address depends only on `(factory, deployer, salt, implementation)`. The effective CREATE2 salt binds the caller's salt to the deployer: `keccak256(abi.encode(deployer, salt))`. This prevents one deployer from occupying an address predicted for another.
 
-Because the address is computable in advance via `predictVaultAddress(version, deployer, salt)`, a deployer can pre-deploy contracts that reference the vault — its `TimelockedUpgradeModule`, its oracle and [rate provider](ORACLES.md) — before the vault itself exists, then wire them in at initialization.
+Because the address is computable in advance via `predictVaultAddress(version, deployer, salt)`, a deployer can pre-deploy contracts that reference the vault — its `TimelockedUpgradeModule`, its oracle and [rate provider](RATE_PROVIDERS.md) — before the vault itself exists, then wire them in at initialization.
 
 ```mermaid
 sequenceDiagram
@@ -45,7 +45,7 @@ sequenceDiagram
 
 ## Deploy flow guarantees
 
-`deployVault` resolves the implementation (`UnknownVersion` if absent, `DisabledVersion` if disabled), checks the predicted address is empty (`SaltAlreadyUsed` otherwise — a `(deployer, salt)` pair is consumable once), deploys the proxy, then calls the registered initializer in the same transaction. Initializer reverts bubble up. Finally it requires `IERC4626(vault).asset() != address(0)`. This is a sanity check that the initializer actually ran — an uninitialized proxy reports `address(0)` — not proof that every field was configured correctly; it only asserts the ERC-4626 asset slot is populated. It catches a proxy left wholly uninitialized before `VaultDeployed` is emitted, but verifying full configuration (registry addresses, fees, roles) remains the caller's responsibility.
+`deployVault` resolves the implementation (`UnknownVersion` if absent, `DisabledVersion` if disabled), checks the predicted address is empty (`SaltAlreadyUsed` otherwise — a `(deployer, salt, implementation)` triple is consumable once), deploys the proxy, then calls the registered initializer in the same transaction. Initializer reverts bubble up. Finally it requires `IERC4626(vault).asset() != address(0)`. This is a sanity check that the initializer actually ran — an uninitialized proxy reports `address(0)` — not proof that every field was configured correctly; it only asserts the ERC-4626 asset slot is populated. It catches a proxy left wholly uninitialized before `VaultDeployed` is emitted, but verifying full configuration (registry addresses, fees, roles) remains the caller's responsibility.
 
 The `initParams` carry the vault's configuration, including the addresses of pre-deployed dependencies such as the upgrade module and freeze registry, which the vault records in its key-based address registry.
 

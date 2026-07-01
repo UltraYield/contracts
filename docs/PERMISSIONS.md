@@ -30,7 +30,7 @@ V2 separates pausing from unpausing. `pause()` requires `PAUSER_ROLE`; `unpause(
 Separate from the role table, share controllers can delegate their own request/cancel/claim authority to another address:
 
 - `setOperator(operator, approved)` records the approval and emits `OperatorSet(controller, operator, approved)`. A controller cannot set itself (`CannotSetSelfAsOperator`).
-- The `checkAccess(controller)` modifier guards the async-redeem flows: it passes when `msg.sender == controller` **or** the controller has approved `msg.sender` as an operator, otherwise it reverts `AccessDenied()`.
+- The `checkAccess(controller)` modifier guards the async-redeem flows: it passes when `msg.sender == controller` **or** the controller has approved `msg.sender` as an operator, otherwise it reverts `AccessDenied()`. `requestRedeem` applies it to **both** the `owner` and the `controller` (each must authorize `msg.sender`); cancellation and claim are controller-only.
 
 This is per-user delegation (ERC-7540 style), not an `AccessControl` role — it never grants protocol-wide privileges.
 
