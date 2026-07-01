@@ -15,7 +15,7 @@ Both variants persist their state through the external library `ComplianceLib` (
 - `mapping(address => bool) allowlisted`
 - `bool allowlistDisabled` — a **negated** flag, so the zero-value (`false`) means enforcement is **enabled**; a fresh deployment fails safe.
 
-The allowlist fields are appended after `frozen` and must never be reordered, so the layout stays canonical and upgrade-safe across both variants. All mutators are idempotent — they write and emit only on an actual state change. `ComplianceLib` has no access control and does not gate the zero address; role checks and sentinel handling live in the calling vault.
+The allowlist fields are appended after `frozen` and must never be reordered, so the layout stays canonical and upgrade-safe across both variants. All mutators are idempotent — they write and emit only on an actual state change. `ComplianceLib` has no access control — role checks live in the calling vault. Its freeze mutators reject the zero address (`ZeroAddress()`) to match `SharedFreezeRegistry`, so the local and shared freeze paths reject the mint/burn sentinel identically.
 
 ## `CompliantUltraVault`
 
@@ -44,7 +44,7 @@ Gating uses `_ensureAllowlisted` (reverts `NotAllowlisted`). The depositor is ch
 
 `src/registry/SharedFreezeRegistry.sol` is a standalone, **non-upgradeable** `AccessControl` contract implementing `IFreezeRegistry`. An address is frozen once here and honored by every `CompliantUltraVault` pointed at it; vaults OR this registry into their checks and **never write to it**. Its `constructor(admin)` grants `DEFAULT_ADMIN_ROLE` (which administers `COMPLIANCE_ROLE` membership); `freeze` / `freezeBatch` / `unfreeze` are gated by `COMPLIANCE_ROLE`.
 
-Unlike `ComplianceLib`, the registry **hard-rejects the zero address** (`ZeroAddress()`) on freeze and unfreeze, since the zero address is the ERC20 mint/burn sentinel and freezing it could brick those flows. The constructor rejects a zero admin (`ZeroAdminAddress()`). Rotating the registry means deploying a new one and re-pointing vaults.
+Like `ComplianceLib`'s local freeze list, the registry **hard-rejects the zero address** (`ZeroAddress()`) on freeze and unfreeze, since the zero address is the ERC20 mint/burn sentinel and freezing it could brick those flows. The constructor rejects a zero admin (`ZeroAdminAddress()`). Rotating the registry means deploying a new one and re-pointing vaults.
 
 ```mermaid
 flowchart TD

@@ -28,6 +28,9 @@ library ComplianceLib {
         }
     }
 
+    /// @notice Thrown when freezing or unfreezing the zero address
+    error ZeroAddress();
+
     ////////////
     // Freeze //
     ////////////
@@ -43,6 +46,7 @@ library ComplianceLib {
     }
 
     function unfreeze(address account) external {
+        require(account != address(0), ZeroAddress());
         Storage storage $ = _getComplianceStorage();
         if ($.frozen[account]) {
             $.frozen[account] = false;
@@ -52,6 +56,7 @@ library ComplianceLib {
 
     /// @dev Idempotent freeze — only writes/emits on an actual state change
     function _freeze(address account) private {
+        require(account != address(0), ZeroAddress());
         Storage storage $ = _getComplianceStorage();
         if (!$.frozen[account]) {
             $.frozen[account] = true;
