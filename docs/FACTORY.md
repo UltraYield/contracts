@@ -45,7 +45,7 @@ sequenceDiagram
 
 ## Deploy flow guarantees
 
-`deployVault` resolves the implementation (`UnknownVersion` if absent, `DisabledVersion` if disabled), checks the predicted address is empty (`SaltAlreadyUsed` otherwise — a `(deployer, salt)` pair is consumable once), deploys the proxy, then calls the registered initializer in the same transaction. Initializer reverts bubble up. Finally it requires `IERC4626(vault).asset() != address(0)`, since an uninitialized proxy reports `address(0)` — proof the vault is live before `VaultDeployed` is emitted.
+`deployVault` resolves the implementation (`UnknownVersion` if absent, `DisabledVersion` if disabled), checks the predicted address is empty (`SaltAlreadyUsed` otherwise — a `(deployer, salt)` pair is consumable once), deploys the proxy, then calls the registered initializer in the same transaction. Initializer reverts bubble up. Finally it requires `IERC4626(vault).asset() != address(0)`. This is a sanity check that the initializer actually ran — an uninitialized proxy reports `address(0)` — not proof that every field was configured correctly; it only asserts the ERC-4626 asset slot is populated. It catches a proxy left wholly uninitialized before `VaultDeployed` is emitted, but verifying full configuration (registry addresses, fees, roles) remains the caller's responsibility.
 
 The `initParams` carry the vault's configuration, including the addresses of pre-deployed dependencies such as the upgrade module and freeze registry, which the vault records in its key-based address registry.
 
