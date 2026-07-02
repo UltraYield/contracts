@@ -123,6 +123,12 @@ abstract contract BaseVaultPriceManager is Ownable2Step {
         Ownable2Step(address(oracle)).acceptOwnership();
     }
 
+    /// @notice Begin transferring `oracle` ownership to `newOwner`.
+    function transferOracleOwnership(address newOwner) external onlyOwner {
+        require(newOwner != address(0), ZeroAddress());
+        Ownable2Step(address(oracle)).transferOwnership(newOwner);
+    }
+
     ////////////////////////
     // Public Safety View //
     ////////////////////////

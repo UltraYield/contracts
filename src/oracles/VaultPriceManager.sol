@@ -7,6 +7,7 @@ import { IRouterClient } from "@chainlink/contracts-ccip/src/v0.8/ccip/interface
 import { Client } from "@chainlink/contracts-ccip/src/v0.8/ccip/libraries/Client.sol";
 import { BaseVaultPriceManager } from "src/crosschain/BaseVaultPriceManager.sol";
 import { PriceSyncMessage, PriceSyncMessageLib } from "src/crosschain/PriceSyncMessage.sol";
+import { PriceUpdate } from "src/interfaces/IUltraVaultOracle.sol";
 
 /// @title VaultPriceManager
 /// @notice Main-chain price manager: applies updates locally and broadcasts them over
@@ -119,6 +120,31 @@ contract VaultPriceManager is BaseVaultPriceManager {
         _broadcastUpdate(startPrice, newPrice, duration, startTimestamp);
     }
 
+    /// @notice Re-broadcast the oracle's latest stored update to a single destination under
+    ///         its original nonce (the current `broadcastNonce`), without touching local
+    ///         state. Heals a destination that missed broadcasts while deactivated, and
+    ///         probes a lane before reactivating it.
+    /// @dev    Idempotent: the nonce is not bumped, so a destination that already applied
+    ///         this update rejects the re-send as stale, retries are free, and a healthy
+    ///         remote keeps `lastNonce == broadcastNonce`.
+    ///         Deliberately callable for inactive destinations (lane probe).
+    function resyncDestination(uint64 selector) external onlyAdminOrOwner {
+        Destination memory dest = destinations[selector];
+        require(dest.exists, DestinationNotFound());
+
+        // Field widths match PriceSyncMessage; ranges were enforced by the oracle on write.
+        PriceUpdate memory u = oracle.lastUpdate();
+        uint64 nonce = broadcastNonce;
+        PriceSyncMessage memory psm = PriceSyncMessage({
+            nonce: nonce,
+            startPrice: u.startPrice,
+            targetPrice: u.targetPrice,
+            vestingDuration: u.vestingDuration,
+            startTimestamp: u.startTimestamp
+        });
+        _ccipSendTo(selector, dest, PriceSyncMessageLib.encode(psm), nonce);
+    }
+
     /// @notice Update the activation lead time (bounded).
     function setDelay(uint256 newDelay) external onlyOwner {
         require(newDelay >= MIN_DELAY && newDelay <= MAX_DELAY, InvalidDelay());
@@ -220,17 +246,26 @@ contract VaultPriceManager is BaseVaultPriceManager {
             Destination memory dest = destinations[selector];
             if (!dest.active) continue;
 
-            Client.EVM2AnyMessage memory ccipMsg = Client.EVM2AnyMessage({
-                receiver: abi.encode(dest.receiver),
-                data: payload,
-                tokenAmounts: new Client.EVMTokenAmount[](0),
-                extraArgs: Client._argsToBytes(Client.EVMExtraArgsV1({ gasLimit: dest.gasLimit })),
-                feeToken: address(linkToken)
-            });
-
             // No try/catch: any send failure reverts the whole tx (all-or-nothing).
-            bytes32 messageId = ccipRouter.ccipSend(selector, ccipMsg);
-            emit Broadcast(selector, nonce, messageId);
+            _ccipSendTo(selector, dest, payload, nonce);
         }
+    }
+
+    function _ccipSendTo(
+        uint64 selector,
+        Destination memory dest,
+        bytes memory payload,
+        uint64 nonce
+    ) internal {
+        Client.EVM2AnyMessage memory ccipMsg = Client.EVM2AnyMessage({
+            receiver: abi.encode(dest.receiver),
+            data: payload,
+            tokenAmounts: new Client.EVMTokenAmount[](0),
+            extraArgs: Client._argsToBytes(Client.EVMExtraArgsV1({ gasLimit: dest.gasLimit })),
+            feeToken: address(linkToken)
+        });
+
+        bytes32 messageId = ccipRouter.ccipSend(selector, ccipMsg);
+        emit Broadcast(selector, nonce, messageId);
     }
 }
