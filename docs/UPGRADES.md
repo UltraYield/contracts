@@ -4,7 +4,7 @@ V2 moves two privileged operations — replacing the implementation behind a vau
 
 ## Upgrade model
 
-Vaults are UUPS proxies, but they no longer carry their own timelock logic (V1's in-tree `TimelockedUUPSUpgradeable` is gone). Instead each vault delegates its upgrade authority to an external `TimelockedUpgradeModule`:
+Vaults are UUPS proxies, but they no longer carry their own timelock logic (V1's inherited `TimelockedUUPSUpgradeable` mixin now serves only the periphery — see [Periphery self-upgrades](#periphery-self-upgrades)). Instead each vault delegates its upgrade authority to an external `TimelockedUpgradeModule`:
 
 - The vault's `_authorizeUpgrade` does only one check — `require(msg.sender == upgradeModule(), AccessDenied())`. The vault trusts whichever module address is registered under `UPGRADE_MODULE_KEY` (see below).
 - The module is bound to exactly one vault for its lifetime (`address public immutable vault`, rejecting zero via `ZeroVaultAddress()`). It holds no roles of its own; its `onlyUpgrader` modifier reads `UPGRADER_ROLE` straight from the vault's `AccessControl` table.
@@ -25,6 +25,15 @@ sequenceDiagram
 ```
 
 `executeUpgrade` re-validates the exact `(implementation, data)` pair against the proposal (`UpgradeImplementationMismatch`, `UpgradeDataMismatch`), requires the delay to have elapsed (`UpgradeNotReady`), and clears the pending slot *before* the external `upgradeToAndCall`. `cancelUpgrade` drops a pending proposal at any time, and `isUpgradeReady` exposes the same checks as a view. Relevant events: `UpgradeProposed`, `UpgradeExecuted`, `UpgradeCancelled`.
+
+## Periphery self-upgrades
+
+`UltraVaultEthAdapter` is also a UUPS proxy, but it is `Ownable2Step`-owned rather than `AccessControl`-governed, so the vault's external module (which reads `UPGRADER_ROLE` from the vault's role table) does not fit it. Instead the adapter inherits `TimelockedUUPSUpgradeable` — the in-tree timelock mixin carried over from V1:
+
+- The owner is the sole authority: `proposeUpgrade(impl, data)`, `cancelUpgrade()`, and the final `upgradeToAndCall(impl, data)` are all owner-gated.
+- The rules mirror the vault module: one pending upgrade at a time (`PendingUpgradeAlreadyProposed`), the same 7-day `MIN_UPGRADE_DELAY`, and only `keccak256(data)` is stored. Execution re-validates the exact `(implementation, data)` pair and the elapsed delay (`UpgradeImplementationMismatch`, `UpgradeDataMismatch`, `UpgradeNotReady`), clears the pending slot before switching implementations, and emits the same event set: `UpgradeProposed`, `UpgradeExecuted`, `UpgradeCancelled`. `getPendingUpgrade` and `isUpgradeReady` expose the pending state.
+
+`UltraVaultFactory` is the deliberate exception: its self-upgrade remains instant and admin-gated (`DEFAULT_ADMIN_ROLE`). The factory holds no user funds, and its implementation only determines how *future* vaults are deployed — upgrading it can never touch a live vault, which stays protected by its own upgrade module.
 
 ## Key-based address management
 
