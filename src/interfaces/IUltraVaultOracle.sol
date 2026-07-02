@@ -1,115 +1,74 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity >=0.8.0;
 
-import { IPriceSource } from "./IPriceSource.sol";
+import { IPriceSource } from "src/interfaces/IPriceSource.sol";
+import { IPriceSourceV1 } from "src/legacy/v1/interfaces/IPriceSourceV1.sol";
 
-/// @notice Price data for base/quote pair
-/// @param price Current price
-/// @param targetPrice Target price for gradual changes
-/// @param timestampForFullVesting Target timestamp for full vesting
-/// @param lastUpdatedTimestamp Last timestamp price was updated
-struct Price {
-    uint256 price;
-    uint256 targetPrice;
-    uint256 timestampForFullVesting;
-    uint256 lastUpdatedTimestamp;
+/// @notice A single price update recorded by the oracle. Packs into one slot.
+struct PriceUpdate {
+    uint88 startPrice;       // +88
+    uint88 targetPrice;      // +88=176
+    uint40 vestingDuration;  // +40=216; 0 = instant
+    uint40 startTimestamp;   // +40=256; absolute activation time
 }
 
 /// @title IUltraVaultOracle
-/// @notice Interface for push-based price oracle
-/// @dev Extends IPriceSource with price setting capabilities
-interface IUltraVaultOracle is IPriceSource {
+/// @notice Push-based share-price oracle. Stores curves supplied by the price manager
+///         and prices purely off `block.timestamp`; identical on every chain.
+interface IUltraVaultOracle is IPriceSource, IPriceSourceV1 {
     ////////////
     // Events //
     ////////////
 
+    /// @notice Emitted once per recorded price update.
     event PriceUpdated(
-        address indexed base,
-        address indexed quote,
-        uint256 price,
+        uint256 startPrice,
         uint256 targetPrice,
-        uint256 timestampForFullVesting
+        uint256 vestingDuration,
+        uint256 startTimestamp
     );
 
     ////////////
     // Errors //
     ////////////
 
-    error NoPriceData(address base, address quote);
-    error InputLengthMismatch();
-    error InvalidVestingTime(address base, address quote, uint256 vestingTime);
-    error ZeroVestingStartPrice(address base, address quote);
-    error InvalidAssetsDecimals();
+    error ZeroAddress();
+    error VaultMismatch();
+    error AssetMismatch();
+    error DecimalsMismatch();
+    error NoPriceData();
+    error InvalidVestingDuration();
+    error DrawdownVestingNotAllowed();
+    error Overflow();
+    error NonMonotonicTimestamp();
 
-    ////////////////////
-    // View Functions //
-    ////////////////////
+    //////////////
+    // View Fns //
+    //////////////
 
-    /// @notice Get current price for base/quote pair
-    /// @param base The base asset
-    /// @param quote The quote asset
-    /// @return Current price of base in terms of quote
-    function getCurrentPrice(
-        address base,
-        address quote
-    ) external view returns (uint256);
+    /// @notice Vault priced by this oracle.
+    function vault() external view returns (address);
 
-    /// @notice Get price data for base/quote pair
-    /// @param base The base asset
-    /// @param quote The quote asset
-    /// @return Price data for the pair
-    function prices(
-        address base,
-        address quote
-    ) external view returns (Price memory);
+    /// @notice Share price at an arbitrary timestamp (past history or future projection).
+    function sharePriceAt(uint256 timestamp) external view returns (uint256);
 
-    /////////////////////
-    // Write Functions //
-    /////////////////////
+    /// @notice The most recently recorded price update.
+    function lastUpdate() external view returns (PriceUpdate memory);
 
-    /// @notice Set base/quote pair price
-    /// @param base The base asset
-    /// @param quote The quote asset
-    /// @param price The price of the base in terms of the quote
-    function setPrice(
-        address base,
-        address quote,
-        uint256 price
-    ) external;
+    /// @notice Number of recorded price updates (including the initial seed).
+    function updatesCount() external view returns (uint256);
 
-    /// @notice Set multiple base/quote pair prices
-    /// @param bases The base assets
-    /// @param quotes The quote assets
-    /// @param prices The prices of the bases in terms of the quotes
-    /// @dev Array lengths must match
-    function setPrices(
-        address[] memory bases,
-        address[] memory quotes,
-        uint256[] memory prices
-    ) external;
+    ///////////////
+    // Write Fns //
+    ///////////////
 
-    /// @notice Set base/quote pair price with gradual change
-    /// @param base The base asset
-    /// @param quote The quote asset
-    /// @param targetPrice The target price of the base in terms of the quote
-    /// @param vestingTime The time over which vesting would occur
-    function scheduleLinearPriceUpdate(
-        address base,
-        address quote,
+    /// @notice Record a price update verbatim with an absolute `startTimestamp` (no delay).
+    /// @dev `startTimestamp` must be monotonic; `vestingDuration == 0` is instant, otherwise
+    ///      a linear vest requiring `targetPrice > startPrice` and a duration within bounds.
+    function applyPriceUpdate(
+        uint256 startPrice,
         uint256 targetPrice,
-        uint256 vestingTime
-    ) external;
-
-    /// @notice Set multiple base/quote pair prices with gradual changes
-    /// @param bases The base assets
-    /// @param quotes The quote assets
-    /// @param targetPrices The target prices of the bases in terms of the quotes
-    /// @param vestingTimes The times over which vesting would occur
-    /// @dev Array lengths must match
-    function scheduleLinearPricesUpdates(
-        address[] memory bases,
-        address[] memory quotes,
-        uint256[] memory targetPrices,
-        uint256[] memory vestingTimes
+        uint256 vestingDuration,
+        uint256 startTimestamp
     ) external;
 }

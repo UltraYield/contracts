@@ -3,51 +3,42 @@ pragma solidity >=0.8.0;
 
 import { IBaseVault, IBaseVaultEvents, IBaseVaultErrors } from "src/interfaces/IBaseVault.sol";
 import { IPriceSource } from "src/interfaces/IPriceSource.sol";
+import { Fees } from "src/interfaces/Types.sol";
 
-/// @dev Vault fee configuration
-struct Fees {
-    // Performance fee rate (100% = 1e18)
-    uint64 performanceFee;
-    // Management fee rate (100% = 1e18)
-    uint64 managementFee;
-    // Withdrawal fee rate (100% = 1e18)
-    uint64 withdrawalFee;
-    // Last fee update timestamp
-    uint64 lastUpdateTimestamp;
-    // High water mark for performance fees
-    uint256 highwaterMark;
-}
-
-interface IUltraVaultEvents {
-    event FundsHolderProposed(address indexed proposedFundsHolder);
-    event FundsHolderChanged(address indexed oldFundsHolder, address indexed newFundsHolder);
-    event OracleProposed(address indexed proposedOracle);
-    event OracleUpdated(address indexed oldOracle, address indexed newOracle);
+interface IUltraVaultEvents is IBaseVaultEvents {
     event FeesRecipientUpdated(address oldRecipient, address newRecipient);
     event FeesUpdated(Fees oldFees, Fees newFees);
-    event FeesCollected(uint256 shares, uint256 managementFee, uint256 performanceFee);
+    event FeesCollected(
+        uint256 shares,
+        uint256 managementFee,
+        uint256 performanceFee,
+        uint256 totalAssets,
+        uint256 totalShares,
+        uint256 sharePrice
+    );
     event WithdrawalFeeCollected(uint256 amount);
+    event InstantRedeem(
+        address indexed controller,
+        address indexed receiver,
+        address indexed asset,
+        uint256 shares,
+        uint256 assets,
+        uint256 fee
+    );
 }
 
-interface IUltraVaultErrors {
-    error ZeroFundsHolderAddress();
-    error ZeroOracleAddress();
+interface IUltraVaultErrors is IBaseVaultErrors {
     error ZeroFeeRecipientAddress();
-    error NoPendingFundsHolderUpdate();
-    error ProposedFundsHolderMismatch();
-    error CannotAcceptFundsHolderYet();
-    error FundsHolderUpdateExpired();
-    error NoOracleProposed();
-    error ProposedOracleMismatch();
-    error CannotAcceptOracleYet();
-    error OracleUpdateExpired();
     error CannotSetBalancesInNonEmptyVault();
     error InvalidFees();
+    error InsufficientLiquidity(address asset, uint256 requested, uint256 available);
+    error InstantRedeemSlippageExceeded(uint256 received, uint256 minAssets);
+    error NotMigratable();
 }
 
 /// @title IUltraVault
 /// @notice A simplified interface for use in other contracts
-interface IUltraVault is IBaseVault, IUltraVaultEvents, IUltraVaultErrors {
+interface IUltraVault is IBaseVault {
     ////////////////////
     // View Functions //
     ////////////////////
@@ -68,22 +59,60 @@ interface IUltraVault is IBaseVault, IUltraVaultEvents, IUltraVaultErrors {
     function feeRecipient() external view returns (address);
 
     /// @notice Get total accrued fees
-    function accruedFees() external view returns (uint256);
-
-    /// @notice Get accrued management fees
-    function accruedManagementFees() external view returns (uint256);
-
-    /// @notice Get accrued performance fees
-    function accruedPerformanceFees() external view returns (uint256);
+    function accruedFees() external view returns (uint256 managementFee, uint256 performanceFee);
 
     /// @notice Get the withdrawal fee
     function calculateWithdrawalFee(uint256 assets) external view returns (uint256);
 
-    /// @notice Get the proposed funds holder
-    function proposedFundsHolder() external view returns (address, uint256);
-    
-    /// @notice Get the proposed oracle
-    function proposedOracle() external view returns (address, uint256);
+    /// @notice Returns the instant redeem exitpoint address
+    function instantRedeemExitpoint() external view returns (address);
+
+    ////////////////////
+    // Instant Redeem //
+    ////////////////////
+
+    /// @notice Returns the available liquidity for instant redeem of a given asset
+    /// @param asset The asset address to check liquidity for
+    /// @return liquidity The available liquidity (minimum of exitpoint balance and allowance to this vault)
+    function getLiquidity(address asset) external view returns (uint256 liquidity);
+
+    /// @notice Returns the maximum shares a controller can instant-redeem for a given asset
+    /// @dev Considers both the controller's share balance and available liquidity (min of exitpoint balance and allowance)
+    /// @param asset The asset address to redeem for
+    /// @param controller The address whose shares would be redeemed
+    /// @return shares The maximum redeemable shares
+    function maxInstantRedeem(
+        address asset,
+        address controller
+    ) external view returns (uint256 shares);
+
+    /// @notice Previews the net assets a receiver would get for instant-redeeming a given number of shares
+    /// @dev Returns gross assets minus the additive fee (withdrawalFee + instantRedeemPremium)
+    /// @param _asset The asset address to receive
+    /// @param shares The number of shares to redeem
+    /// @return assets The net asset amount after fee deduction
+    function previewInstantRedeem(
+        address _asset,
+        uint256 shares
+    ) external view returns (uint256 assets);
+
+    /// @notice Instantly redeems shares for assets, bypassing the async redemption queue
+    /// @dev Burns shares from controller, transfers net assets to receiver, transfers fee to feeRecipient.
+    ///      Collects accrued fees before processing. Reverts if insufficient liquidity.
+    ///      Reverts with InstantRedeemSlippageExceeded if netAssets < minAssets.
+    /// @param asset The asset address to receive
+    /// @param shares The number of shares to redeem
+    /// @param minAssets Minimum net assets the receiver must receive; reverts InstantRedeemSlippageExceeded if not met. Pass 0 to disable.
+    /// @param receiver The address to receive the net assets
+    /// @param controller The address whose shares are burned
+    /// @return assets The net asset amount transferred to receiver (after fee deduction)
+    function instantRedeem(
+        address asset,
+        uint256 shares,
+        uint256 minAssets,
+        address receiver,
+        address controller
+    ) external returns (uint256 assets);
 
     /////////////////////
     // Admin Functions //
@@ -100,25 +129,6 @@ interface IUltraVault is IBaseVault, IUltraVaultEvents, IUltraVaultErrors {
     /// @notice Mint fees as shares to fee recipient
     function collectFees() external;
 
-    /// @notice Propose fundsHolder change, can be accepted after delay
-    /// @param newFundsHolder New fundsHolder address
-    /// @dev changing the holder should be used only in case of multisig upgrade after funds transfer
-    function proposeFundsHolder(address newFundsHolder) external;
-
-    /// @notice Accept proposed fundsHolder
-    /// @dev Pauses vault to ensure oracle setup and prevent deposits with faulty prices
-    /// @dev Oracle must be switched before unpausing
-    function acceptFundsHolder(address newFundsHolder) external;
-
-    /// @notice Propose new oracle for owner acceptance after delay
-    /// @param newOracle Address of the new oracle
-    function proposeOracle(address newOracle) external;
-
-    /// @notice Accept proposed oracle
-    /// @dev Pauses vault to ensure oracle setup and prevent deposits with faulty prices
-    /// @dev Oracle must be switched before unpausing
-    function acceptProposedOracle(address newOracle) external;
-
     /// @notice Setup initial balances in the vault without depositing the funds
     /// @notice We expect the funds to be separately sent to funds holder
     /// @param users Array of users to setup balances
@@ -128,4 +138,15 @@ interface IUltraVault is IBaseVault, IUltraVaultEvents, IUltraVaultErrors {
         address[] memory users,
         uint256[] memory shares
     ) external;
-} 
+
+    /// @notice Cancel a user's pending redeem and return the locked shares to the controller's wallet
+    /// @dev Bypasses any transfer gating a derived vault imposes (e.g. a compliance freeze),
+    ///      so cleanup works even for a restricted controller.
+    /// @param asset The asset originally requested for redemption
+    /// @param controller The user whose pending redeem is being cancelled
+    /// @return shares The amount of shares returned to the controller
+    function cancelRedeemRequestByOperator(
+        address asset,
+        address controller
+    ) external returns (uint256 shares);
+}

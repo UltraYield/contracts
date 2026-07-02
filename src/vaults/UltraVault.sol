@@ -2,13 +2,21 @@
 pragma solidity 0.8.28;
 
 import { SafeERC20, IERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import { IERC20Metadata } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
+import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
 import { IPriceSource } from "src/interfaces/IPriceSource.sol";
-import { Fees, IUltraVaultEvents, IUltraVaultErrors } from "src/interfaces/IUltraVault.sol";
+import { IUltraVaultEvents, IUltraVaultErrors } from "src/interfaces/IUltraVault.sol";
+import { Adjustment, Fees, PendingRedeem } from "src/interfaces/Types.sol";
 import { AddressUpdateProposal } from "src/utils/AddressUpdates.sol";
 import { FixedPointMathLib } from "src/utils/FixedPointMathLib.sol";
 import { BaseControlledAsyncRedeem, BaseControlledAsyncRedeemInitParams } from "src/vaults/BaseControlledAsyncRedeem.sol";
 import { OPERATOR_ROLE } from "src/utils/Roles.sol";
+import {
+    FUNDS_HOLDER_KEY,
+    ORACLE_KEY,
+    INSTANT_REDEEM_EXITPOINT_KEY,
+    UPGRADE_MODULE_KEY,
+    FREEZE_REGISTRY_KEY
+} from "src/utils/AddressKeys.sol";
 
 // keccak256(abi.encode(uint256(keccak256("ultrayield.storage.UltraVault")) - 1)) & ~bytes32(uint256(0xff));
 bytes32 constant ULTRA_VAULT_STORAGE_LOCATION = 0x4a2c313ed01a3f9b3ba2e7d99f5ac7985ad5a3c0482c127738b38df017064300;
@@ -33,12 +41,20 @@ struct UltraVaultInitParams {
     address oracle;
     // FundsHolder which will manage the assets
     address fundsHolder;
+    // Exitpoint address for instant redeems
+    address instantRedeemExitpoint;
+    // External timelocked upgrade module
+    address upgradeModule;
+    // Shared freeze registry consulted alongside the local freeze list (optional; address(0) keeps local-only freezing)
+    address freezeRegistry;
 }
 
 /// @title UltraVault
-/// @notice ERC-7540 compliant async redeem vault with UltraVaultOracle pricing and multisig asset management
-contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVaultErrors {
+/// @notice ERC-7540 compliant async redeem vault with UltraVaultOracle pricing and multisig asset management.
+/// @notice Abstract base holding all shared vault mechanics with no compliance access gating of its own. 
+abstract contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVaultErrors {
     using FixedPointMathLib for uint256;
+    using Math for uint256;
     using SafeERC20 for IERC20;
 
     ///////////////
@@ -46,11 +62,18 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
     ///////////////
 
     uint256 internal constant ONE_YEAR = 365 * 24 * 60 * 60; // 31_536_000 seconds
-    uint256 internal constant ONE_UNIT = 1e18; // Default scale
-    uint64 internal constant ONE_PERCENT = uint64(ONE_UNIT) / 100;
+    uint256 internal constant SCALE = 1e18; // Default scale
+    // forge-lint: disable-next-line(unsafe-typecast)
+    uint64 internal constant ONE_PERCENT = uint64(SCALE) / 100;
     uint64 internal constant MAX_PERFORMANCE_FEE = 30 * ONE_PERCENT; // 30%
     uint64 internal constant MAX_MANAGEMENT_FEE = 5 * ONE_PERCENT; // 5%
     uint64 internal constant MAX_WITHDRAWAL_FEE = ONE_PERCENT; // 1%
+    uint64 internal constant MAX_INSTANT_REDEEM_PREMIUM = ONE_PERCENT / 2; // 0.5%
+
+    uint256 internal constant FUNDS_HOLDER_TIMELOCK = 3 days;
+    uint256 internal constant ORACLE_TIMELOCK = 3 days;
+    uint256 internal constant INSTANT_REDEEM_EXITPOINT_TIMELOCK = 3 days;
+    uint256 internal constant FREEZE_REGISTRY_TIMELOCK = 3 days;
 
     /////////////
     // Storage //
@@ -58,20 +81,21 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
 
     /// @custom:storage-location erc7201:ultrayield.storage.UltraVault
     struct UltraVaultStorage {
-        address fundsHolder;
-        IPriceSource oracle;
-        AddressUpdateProposal proposedFundsHolder;
-        AddressUpdateProposal proposedOracle;
+        address _fundsHolder; // Deprecated in V2
+        IPriceSource _oracle; // Deprecated in V2
+        AddressUpdateProposal _proposedFundsHolder; // Deprecated in V2
+        AddressUpdateProposal _proposedOracle; // Deprecated in V2
         address feeRecipient;
         Fees fees;
     }
 
+    /// @dev Returns the namespaced ERC-7201 storage struct for UltraVault
     function _getUltraVaultStorage() private pure returns (UltraVaultStorage storage $) {
         assembly {
             $.slot := ULTRA_VAULT_STORAGE_LOCATION
         }
     }
-    
+
     //////////
     // Init //
     //////////
@@ -81,17 +105,17 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
         _disableInitializers();
     }
 
+    /// @notice Initialize the vault; sets addresses, pauses, then initializes the base contract and fees
     /// @param params Initialization parameters struct
     function initialize(
         UltraVaultInitParams memory params
     ) external initializer {
-        require(params.fundsHolder != address(0), ZeroFundsHolderAddress());
-        require(params.oracle != address(0), ZeroOracleAddress());
         require(params.feeRecipient != address(0), ZeroFeeRecipientAddress());
 
-        UltraVaultStorage storage $ = _getUltraVaultStorage();
-        $.fundsHolder = params.fundsHolder;
-        $.oracle = IPriceSource(params.oracle);
+        _initAddress(FUNDS_HOLDER_KEY, params.fundsHolder);
+        _initAddress(ORACLE_KEY, params.oracle);
+        _initAddress(INSTANT_REDEEM_EXITPOINT_KEY, params.instantRedeemExitpoint);
+        _migrateAddress(FREEZE_REGISTRY_KEY, params.freezeRegistry);
         _pause();
         
         // Calling at the end since we need oracle to be setup
@@ -100,12 +124,43 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
             asset: params.asset,
             name: params.name,
             symbol: params.symbol,
-            rateProvider: params.rateProvider
+            rateProvider: params.rateProvider,
+            upgradeModule: params.upgradeModule
         }));
 
-        $.feeRecipient = params.feeRecipient;
+        _getUltraVaultStorage().feeRecipient = params.feeRecipient;
         emit FeesRecipientUpdated(address(0), params.feeRecipient);
         _setFees(params.fees);
+    }
+
+    /// @notice V1 -> V2 migration hook
+    /// @dev Copies only the live V1 contract addresses into the V2 address registry
+    /// @dev Pending V1 address-update proposals are intentionally not migrated
+    /// @param _instantRedeemExitpoint Address for the new instant redeem exitpoint (not present in V1)
+    /// @param _upgradeModule Address of the external timelocked upgrade module (not present in V1)
+    /// @param _freezeRegistry Address of the shared freeze registry (optional; address(0) keeps local-only freezing)
+    function initializeV2(
+        address _instantRedeemExitpoint,
+        address _upgradeModule,
+        address _freezeRegistry
+    ) external reinitializer(2) {
+        UltraVaultStorage storage $ = _getUltraVaultStorage();
+        // Guard: only a genuine V1 proxy carries a live address in the deprecated fundsHolder slot.
+        require($._fundsHolder != address(0), NotMigratable());
+
+        _migrateBaseControlledAsyncRedeemStateFromV1();
+
+        _migrateAddress(FUNDS_HOLDER_KEY, $._fundsHolder);
+        _migrateAddress(ORACLE_KEY, address($._oracle));
+        _migrateAddress(FREEZE_REGISTRY_KEY, _freezeRegistry);
+        _initAddress(INSTANT_REDEEM_EXITPOINT_KEY, _instantRedeemExitpoint);
+        _initAddress(UPGRADE_MODULE_KEY, _upgradeModule);
+
+        // Rescale the V1 high-water mark into V2's 1e18 price space. In V1 the HWM lived in
+        // 10**decimals() share-value units; V2 compares it against the 1e18-scaled oracle price.
+        $.fees.highwaterMark *= 10 ** (18 - uint256(decimals()));
+
+        if (!paused()) _pause();
     }
 
     /////////////
@@ -114,24 +169,17 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
 
     /// @notice Get the funds holder address
     function fundsHolder() public view returns (address) {
-        return _getUltraVaultStorage().fundsHolder;
+        return _getCurrentAddress(FUNDS_HOLDER_KEY);
     }
 
     /// @notice Get the oracle address
     function oracle() public view returns (IPriceSource) {
-        return _getUltraVaultStorage().oracle;
+        return IPriceSource(_getCurrentAddress(ORACLE_KEY));
     }
 
-    /// @notice Get the proposed funds holder
-    function proposedFundsHolder() public view returns (address, uint256) {
-        AddressUpdateProposal memory proposal = _getUltraVaultStorage().proposedFundsHolder;
-        return (proposal.addr, proposal.timestamp);
-    }
-
-    /// @notice Get the proposed oracle
-    function proposedOracle() public view returns (address, uint256) {
-        AddressUpdateProposal memory proposal = _getUltraVaultStorage().proposedOracle;
-        return (proposal.addr, proposal.timestamp);
+    /// @notice Get the instant redeem exitpoint address
+    function instantRedeemExitpoint() public view returns (address) {
+        return _getCurrentAddress(INSTANT_REDEEM_EXITPOINT_KEY);
     }
 
     ////////////////////////////
@@ -153,6 +201,12 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
         for (uint256 i; i < users.length; i++) {
             _mint(users[i], shares[i]);
         }
+
+        // Anchor the high-water mark to the live share price so value bootstrapped here is not
+        // later booked as performance, and reset the management-fee clock.
+        Fees storage fees = _getUltraVaultStorage().fees;
+        fees.highwaterMark = _getSharePrice();
+        fees.lastUpdateTimestamp = uint64(block.timestamp);
     }
 
     ////////////////
@@ -161,23 +215,70 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
 
     /// @notice Get total assets managed by fundsHolder
     function totalAssets() public view override returns (uint256) {
-        return oracle().getQuote(totalSupply(), share(), asset());
+        uint256 totalShares = totalSupply();
+        return convertToAssets(totalShares);
+    }
+
+    /// @notice Convert shares to underlying assets at the current oracle share price (rounded down)
+    function convertToAssets(uint256 shares) public view override returns (uint256) {
+        uint256 sharePrice = _getSharePrice();
+        return _optimizedConvertToAssets(shares, sharePrice);
+    }
+
+    /// @notice Convert underlying assets to shares at the current oracle share price (rounded down)
+    function convertToShares(uint256 assets) public view override returns (uint256) {
+        uint256 sharePrice = _getSharePrice();
+        return _optimizedConvertToShares(assets, sharePrice);
+    }
+
+    /// @dev Optimized function for converting shares to assets.
+    /// @dev Uses pre-fetched share price. Always rounds down.
+    function _optimizedConvertToAssets(
+        uint256 shares,
+        uint256 sharePrice
+    ) internal pure returns (uint256 assets) {
+        return shares.mulDivDown(sharePrice, SCALE);
+    }
+
+    /// @dev Optimized function for converting assets to shares.
+    /// @dev Uses pre-fetched share price. Always rounds down.
+    function _optimizedConvertToShares(
+        uint256 assets,
+        uint256 sharePrice
+    ) internal pure returns (uint256 shares) {
+        return assets.mulDivDown(SCALE, sharePrice);
+    }
+
+    /// @dev Oracle-based conversion used by ERC4626 preview/deposit/mint/withdraw/redeem.
+    ///      Overriding these ensures the deposit path uses the same math as the public
+    ///      convertToShares/convertToAssets (oracle-driven), avoiding a virtual-offset
+    ///      mispricing on first deposit when the oracle is not 1:1.
+    function _convertToShares(uint256 assets, Math.Rounding rounding) internal view override returns (uint256) {
+        return assets.mulDiv(SCALE, _getSharePrice(), rounding);
+    }
+
+    function _convertToAssets(uint256 shares, Math.Rounding rounding) internal view override returns (uint256) {
+        return shares.mulDiv(_getSharePrice(), SCALE, rounding);
     }
 
     ////////////////////
     // Hook Overrides //
     ////////////////////
 
-    /// @dev After deposit hook - collect fees and send funds to fundsHolder
-    function afterDeposit(address _asset, uint256 assets, uint256) internal override {
-        IERC20(_asset).safeTransfer(fundsHolder(), assets);
+    /// @dev Deposited assets are sent directly to the fundsHolder.
+    function _depositRecipient() internal view override returns (address) {
+        return fundsHolder();
     }
 
     /// @dev Before fulfill redeem - transfer funds from fundsHolder to vault
     /// @dev "assets" will already be correct given the token user requested
-    function beforeFulfillRedeem(address _asset, uint256 assets, uint256) internal override {
+    function _beforeFulfillRedeem(address _asset, uint256 assets, uint256) internal override {
         IERC20(_asset).safeTransferFrom(fundsHolder(), address(this), assets);
     }
+
+    /// @dev Hook for executing custom logic before an instant redeem executes (e.g. restriction checks)
+    /// @dev Default no-op; concrete variants override to gate receiver/controller.
+    function _beforeInstantRedeem(address receiver, address controller) internal view virtual {}
 
     ////////////////////
     // Deposit & Mint //
@@ -203,43 +304,124 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
         assets = super._mintWithAsset(_asset, shares, receiver);
     }
 
+    ////////////////////
+    // Instant Redeem //
+    ////////////////////
+
+    /// @notice Returns the available liquidity for instant redeem of a given asset
+    /// @param _asset The asset address to check liquidity for
+    /// @return liquidity The available liquidity (minimum of exitpoint balance and allowance to this vault)
+    function getLiquidity(address _asset) public view returns (uint256 liquidity) {
+        address exitpoint = instantRedeemExitpoint();
+        uint256 balance = IERC20(_asset).balanceOf(exitpoint);
+        uint256 allowed = IERC20(_asset).allowance(exitpoint, address(this));
+        liquidity = balance < allowed ? balance : allowed;
+    }
+
+    /// @dev Whether `controller` may instant-redeem (to themselves). Gating variants override this so
+    ///      `maxInstantRedeem` reflects their controller eligibility.
+    function _canInstantRedeem(address /* controller */) internal view virtual returns (bool) {
+        return true;
+    }
+
+    /// @notice Returns the maximum shares a controller can instant-redeem for a given asset
+    /// @dev Considers both the controller's share balance and available liquidity.
+    ///      Liquidity bounds the gross payout (netAssets + fee are both pulled from the exitpoint),
+    ///      so the shares are derived from liquidity directly and capped at controller balance.
+    /// @param _asset The asset address to redeem for
+    /// @param controller The address whose shares would be redeemed
+    /// @return shares The maximum redeemable shares
+    function maxInstantRedeem(
+        address _asset,
+        address controller
+    ) external view returns (uint256 shares) {
+        if (!_canInstantRedeem(controller)) return 0;
+        uint256 liquidity = getLiquidity(_asset);
+        uint256 shareBalance = balanceOf(controller);
+        if (liquidity == 0 || shareBalance == 0) {
+            return 0;
+        }
+        uint256 maxUnderlyingAssets = convertToUnderlying(_asset, liquidity, Adjustment.UP);
+        uint256 maxShares = convertToShares(maxUnderlyingAssets);
+        return maxShares < shareBalance ? maxShares : shareBalance;
+    }
+
+    /// @notice Previews the net assets a receiver would get for instant-redeeming a given number of shares
+    /// @dev Converts shares to gross assets via oracle, then deducts the additive instant redeem fee
+    /// @param _asset The asset address to receive
+    /// @param shares The number of shares to redeem
+    /// @return assets The net asset amount after fee deduction
+    function previewInstantRedeem(
+        address _asset,
+        uint256 shares
+    ) public view returns (uint256) {
+        (, , uint256 netAssets) = _previewInstantRedeem(_asset, shares);
+        return netAssets;
+    }
+
+    /// @notice Instantly redeems shares for assets, bypassing the async redemption queue
+    /// @dev Collects accrued fees, calculates additive fee (withdrawalFee + instantRedeemPremium),
+    ///      burns shares from controller, transfers net assets to receiver, transfers fee to feeRecipient.
+    ///      Reverts if insufficient liquidity in instantRedeemExitpoint.
+    ///      Reverts with InstantRedeemSlippageExceeded if netAssets < minAssets.
+    /// @param _asset The asset address to receive
+    /// @param shares The number of shares to redeem
+    /// @param minAssets Minimum net assets the receiver must receive; reverts InstantRedeemSlippageExceeded if not met. Pass 0 to disable.
+    /// @param receiver The address to receive the net assets
+    /// @param controller The address whose shares are burned
+    /// @return assets The net asset amount transferred to receiver (after fee deduction)
+    function instantRedeem(
+        address _asset,
+        uint256 shares,
+        uint256 minAssets,
+        address receiver,
+        address controller
+    ) external checkAccess(controller) whenNotPaused returns (uint256) {
+        _ensureIsSupported(_asset);
+        _beforeInstantRedeem(receiver, controller);
+        require(shares != 0, NothingToRedeem());
+        require(balanceOf(controller) >= shares, InsufficientBalance());
+
+        // Collect accrued fees before processing (consistent with deposits and fulfillRedeem)
+        _collectFees();
+
+        // Prepare instant redeem amounts
+        (uint256 grossAssets, uint256 fee, uint256 netAssets) = _previewInstantRedeem(_asset, shares);
+        require(netAssets != 0, NothingToWithdraw());
+
+        // Slippage protection — bound caller's worst-case received amount
+        if (netAssets < minAssets) {
+            revert InstantRedeemSlippageExceeded(netAssets, minAssets);
+        }
+
+        // Check liquidity
+        uint256 availableLiquidity = getLiquidity(_asset);
+        if (grossAssets > availableLiquidity) {
+            revert InsufficientLiquidity(_asset, grossAssets, availableLiquidity);
+        }
+
+        // Burn shares from controller
+        _burn(controller, shares);
+
+        // Transfer net assets to receiver
+        address exitpoint = instantRedeemExitpoint();
+        IERC20(_asset).safeTransferFrom(exitpoint, receiver, netAssets);
+
+        // Transfer fee to feeRecipient
+        if (fee > 0) {
+            IERC20(_asset).safeTransferFrom(exitpoint, feeRecipient(), fee);
+        }
+
+        // Standard ERC-4626 event so generic indexers can track instant-redeem flows
+        emit Withdraw(msg.sender, receiver, controller, netAssets, shares);
+        emit InstantRedeem(controller, receiver, _asset, shares, netAssets, fee);
+
+        return netAssets;
+    }
+
     ////////////////////////
     // Redeem Fulfillment //
     ////////////////////////
-
-    /// @notice Fulfill redeem request
-    /// @param _asset Asset
-    /// @param shares Amount to redeem
-    /// @param controller Controller address
-    /// @return assets Amount of claimable assets
-    function fulfillRedeem(
-        address _asset,
-        uint256 shares,
-        address controller
-    ) external override onlyRole(OPERATOR_ROLE) returns (uint256 assets) {
-        // Collect fees accrued to date
-        _collectFees();
-        
-        // Convert shares to underlying assets, then to asset units
-        uint256 underlyingAssets = convertToAssets(shares);
-        assets = _convertFromUnderlying(_asset, underlyingAssets);
-        
-        // Calculate the withdrawal incentive fee directly in asset units
-        uint256 withdrawalFee = assets.mulDivDown(getFees().withdrawalFee, ONE_UNIT);
-
-        // Fulfill request with asset units (base contract expects asset units)
-        uint256 withdrawalAmount = assets - withdrawalFee;
-        _fulfillRedeem(_asset, withdrawalAmount, shares, controller);
-
-        // Burn shares
-        _burn(address(this), shares);
-
-        // Collect withdrawal fee in asset units
-        _transferWithdrawalFeeInAsset(_asset, withdrawalFee);
-
-        // Return the amount in asset units for consistency with base contract
-        return withdrawalAmount;
-    }
 
     /// @notice Fulfill multiple redeem requests
     /// @param assets Array of assets
@@ -262,8 +444,7 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
 
         // Prepare values for calculations
         uint256 totalShares;
-        uint256 _totalAssets = totalAssets();
-        uint256 _totalSupply = totalSupply();
+        uint256 sharePrice = _getSharePrice();
         uint256 withdrawalFeeRate = getFees().withdrawalFee;
         uint256[] memory result = new uint256[](length);
         for (uint256 i; i < length; ) {
@@ -271,11 +452,11 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
             address _asset = assets[i];
             uint256 _shares = shares[i];
             address _controller = controllers[i];
-            uint256 underlyingAssets = _optimizedConvertToAssets(_shares, _totalAssets, _totalSupply);
-            uint256 convertedAssets = _convertFromUnderlying(_asset, underlyingAssets);
+            uint256 underlyingAssets = _optimizedConvertToAssets(_shares, sharePrice);
+            uint256 convertedAssets = convertFromUnderlying(_asset, underlyingAssets, Adjustment.DOWN);
 
             // Calculate and transfer withdrawal fee (in asset units)
-            uint256 withdrawalFee = convertedAssets.mulDivDown(withdrawalFeeRate, ONE_UNIT);
+            uint256 withdrawalFee = convertedAssets.mulDivDown(withdrawalFeeRate, SCALE);
             _transferWithdrawalFeeInAsset(_asset, withdrawalFee);
 
             // Fulfill redeem
@@ -292,79 +473,39 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
         return result;
     }
 
-    //////////////////////////
-    // Funds Holder Updates //
-    //////////////////////////
+    /// @notice Cancel a user's pending redeem and return the locked shares to the controller's wallet
+    /// @dev Returns the shares via the base `_update`, bypassing any transfer gating a derived vault
+    ///      imposes (e.g. a compliance freeze), so cleanup works even for a restricted controller.
+    /// @param _asset The asset originally requested for redemption
+    /// @param controller The user whose pending redeem is being cancelled
+    /// @return shares The amount of shares returned to the controller
+    function cancelRedeemRequestByOperator(
+        address _asset,
+        address controller
+    ) external onlyRole(OPERATOR_ROLE) returns (uint256 shares) {
+        PendingRedeem memory pending = _getPendingRedeem(controller, _asset);
+        shares = pending.shares;
+        require(shares != 0, NoPendingRedeem());
 
-    /// @notice Propose fundsHolder change, can be accepted after delay
-    /// @param newFundsHolder New fundsHolder address
-    /// @dev changing the holder should be used only in case of multisig upgrade after funds transfer
-    function proposeFundsHolder(address newFundsHolder) external onlyOwner {
-        require(newFundsHolder != address(0), ZeroFundsHolderAddress());
+        _consumePendingRedeem(controller, _asset, shares);
 
-        _getUltraVaultStorage().proposedFundsHolder = AddressUpdateProposal({
-            addr: newFundsHolder,
-            timestamp: uint96(block.timestamp)
-        });
+        // Call the base `_update` directly to bypass any compliance gate a derived vault adds; the controller may be restricted.
+        super._update(address(this), controller, shares);
 
-        emit FundsHolderProposed(newFundsHolder);
+        emit RedeemRequestCanceled(controller, controller, shares);
     }
 
-    /// @notice Accept proposed fundsHolder
-    /// @dev Pauses vault to ensure oracle setup and prevent deposits with faulty prices
-    /// @dev Oracle must be switched before unpausing
-    function acceptFundsHolder(address newFundsHolder) external onlyOwner {
-        (address proposedHolder, uint256 proposalTimestamp) = proposedFundsHolder();
-        require(proposedHolder != address(0), NoPendingFundsHolderUpdate());
-        require(proposedHolder == newFundsHolder, ProposedFundsHolderMismatch());
-        require(block.timestamp >= proposalTimestamp + ADDRESS_UPDATE_TIMELOCK, CannotAcceptFundsHolderYet());
-        require(block.timestamp <= proposalTimestamp + MAX_ADDRESS_UPDATE_WAIT, FundsHolderUpdateExpired());
+    /////////////////////
+    // Address Updates //
+    /////////////////////
 
-        emit FundsHolderChanged(fundsHolder(), newFundsHolder);
-
-        UltraVaultStorage storage $ = _getUltraVaultStorage();
-        $.fundsHolder = newFundsHolder;
-        delete $.proposedFundsHolder;
-
-        // Pause to manually check the setup by operators
-        _pause();
-    }
-
-    ////////////////////
-    // Oracle Updates //
-    ////////////////////
-
-    /// @notice Propose new oracle for owner acceptance after delay
-    /// @param newOracle Address of the new oracle
-    function proposeOracle(address newOracle) external onlyOwner {
-        require(newOracle != address(0), ZeroOracleAddress());
-
-        _getUltraVaultStorage().proposedOracle = AddressUpdateProposal({
-            addr: newOracle,
-            timestamp: uint96(block.timestamp)
-        });
-
-        emit OracleProposed(newOracle);
-    }
-
-    /// @notice Accept proposed oracle
-    /// @dev Pauses vault to ensure oracle setup and prevent deposits with faulty prices
-    /// @dev Oracle must be switched before unpausing
-    function acceptProposedOracle(address newOracle) external onlyOwner {
-        (address pendingOracle, uint256 proposalTimestamp) = proposedOracle();
-        require(pendingOracle != address(0), NoOracleProposed());
-        require(pendingOracle == newOracle, ProposedOracleMismatch());
-        require(block.timestamp >= proposalTimestamp + ADDRESS_UPDATE_TIMELOCK, CannotAcceptOracleYet());
-        require(block.timestamp <= proposalTimestamp + MAX_ADDRESS_UPDATE_WAIT, OracleUpdateExpired());
-
-        emit OracleUpdated(address(oracle()), newOracle);
-
-        UltraVaultStorage storage $ = _getUltraVaultStorage();
-        $.oracle = IPriceSource(newOracle);
-        delete $.proposedOracle;
-
-        // Pause to manually check the setup by operators
-        _pause();
+    /// @inheritdoc BaseControlledAsyncRedeem
+    function _timelockForKey(bytes32 key) internal pure override returns (uint256) {
+        if (key == FUNDS_HOLDER_KEY) return FUNDS_HOLDER_TIMELOCK;
+        if (key == ORACLE_KEY) return ORACLE_TIMELOCK;
+        if (key == INSTANT_REDEEM_EXITPOINT_KEY) return INSTANT_REDEEM_EXITPOINT_TIMELOCK;
+        if (key == FREEZE_REGISTRY_KEY) return FREEZE_REGISTRY_TIMELOCK;
+        return super._timelockForKey(key);
     }
 
     //////////
@@ -382,29 +523,16 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
     }
 
     /// @notice Get total accrued fees
-    function accruedFees() external view returns (uint256) {
+    function accruedFees() external view returns (uint256 managementFee, uint256 performanceFee) {
         Fees memory fees = getFees();
         Totals memory totals = _snapshotTotals();
-        return _calculateAccruedPerformanceFee(fees, totals) + _calculateAccruedManagementFee(fees, totals);
-    }
-
-    /// @notice Get accrued management fees
-    function accruedManagementFees() external view returns (uint256) {
-        Fees memory fees = getFees();
-        Totals memory totals = _snapshotTotals();
-        return _calculateAccruedManagementFee(fees, totals);
-    }
-
-    /// @notice Get accrued performance fees
-    function accruedPerformanceFees() external view returns (uint256) {
-        Fees memory fees = getFees();
-        Totals memory totals = _snapshotTotals();
-        return _calculateAccruedPerformanceFee(fees, totals);
+        managementFee = _calculateAccruedManagementFee(fees, totals);
+        performanceFee = _calculateAccruedPerformanceFee(fees, totals);
     }
 
     /// @notice Get the withdrawal fee
     function calculateWithdrawalFee(uint256 assets) external view returns (uint256) {
-        return assets.mulDivDown(getFees().withdrawalFee, ONE_UNIT);
+        return assets.mulDivDown(getFees().withdrawalFee, SCALE);
     }
 
     /// @notice Update vault's fee recipient
@@ -412,12 +540,13 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
     /// @dev Collects pending fees before update
     function setFeeRecipient(address newFeeRecipient) public onlyOwner whenNotPaused {
         require(newFeeRecipient != address(0), ZeroFeeRecipientAddress());
+        UltraVaultStorage storage $ = _getUltraVaultStorage();
 
-        address currentFeeRecipient = feeRecipient();
-        if (currentFeeRecipient != newFeeRecipient) {
+        address oldFeeRecipient = $.feeRecipient;
+        if (oldFeeRecipient != newFeeRecipient) {
             _collectFees();
-            _getUltraVaultStorage().feeRecipient = newFeeRecipient;
-            emit FeesRecipientUpdated(currentFeeRecipient, newFeeRecipient);
+            $.feeRecipient = newFeeRecipient;
+            emit FeesRecipientUpdated(oldFeeRecipient, newFeeRecipient);
         }
     }
 
@@ -436,38 +565,42 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
         _collectFees();
     }
 
-    ////////////////////////
-    // Internal functions //
-    ////////////////////////
+    //////////////////////
+    // Internal helpers //
+    //////////////////////
 
     /// @dev Struct wrapping total assets, supply and share value to optimize fee calculations
     struct Totals {
         uint256 totalAssets;
-        uint256 totalSupply;
-        uint256 shareValue;
+        uint256 totalShares;
+        uint256 sharePrice;
     }
 
-    function _setFees(Fees memory fees) internal {
+    /// @dev Validates fees against caps, refreshes the update timestamp, and preserves/seeds the highwater mark
+    function _setFees(Fees memory newFees) internal {
+        // Validate fees
         require(
-            fees.performanceFee <= MAX_PERFORMANCE_FEE &&
-            fees.managementFee <= MAX_MANAGEMENT_FEE &&
-            fees.withdrawalFee <= MAX_WITHDRAWAL_FEE,
+            newFees.performanceFee <= MAX_PERFORMANCE_FEE &&
+            newFees.managementFee <= MAX_MANAGEMENT_FEE &&
+            newFees.withdrawalFee <= MAX_WITHDRAWAL_FEE &&
+            newFees.instantRedeemPremium <= MAX_INSTANT_REDEEM_PREMIUM,
             InvalidFees()
         );
 
-        fees.lastUpdateTimestamp = uint64(block.timestamp);
+        newFees.lastUpdateTimestamp = uint64(block.timestamp);
 
         Fees memory currentFees = getFees();
         if (currentFees.highwaterMark == 0) {
-            fees.highwaterMark = 10 ** IERC20Metadata(asset()).decimals();
+            newFees.highwaterMark = SCALE;
         } else {
-            fees.highwaterMark = currentFees.highwaterMark;
+            newFees.highwaterMark = currentFees.highwaterMark;
         }
-        _getUltraVaultStorage().fees = fees;
+        _getUltraVaultStorage().fees = newFees;
 
-        emit FeesUpdated(currentFees, fees);
+        emit FeesUpdated(currentFees, newFees);
     }
 
+    /// @dev Accrue management + performance fees, bump the highwater mark, and mint fee shares to `feeRecipient`
     function _collectFees() internal {
         // Prepare inputs for calculations
         Fees memory fees = getFees();
@@ -479,8 +612,8 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
         uint256 totalFeesInAssets = managementFee + performanceFee;
 
         // Update highwater mark
-        if (totals.shareValue > fees.highwaterMark) {
-            _getUltraVaultStorage().fees.highwaterMark = totals.shareValue;
+        if (totals.sharePrice > fees.highwaterMark) {
+            _getUltraVaultStorage().fees.highwaterMark = totals.sharePrice;
         }
         // Collect fees as shares if non-zero
         if (totalFeesInAssets > 0) {
@@ -488,22 +621,30 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
             _getUltraVaultStorage().fees.lastUpdateTimestamp = uint64(block.timestamp);
 
             // Convert fees to shares
-            uint256 feesInShares = _optimizedConvertToShares(totalFeesInAssets, totals.totalAssets, totals.totalSupply);
+            uint256 feesInShares = _optimizedConvertToShares(totalFeesInAssets, totals.sharePrice);
 
             // Mint shares to fee recipient
             _mint(feeRecipient(), feesInShares);
 
-            emit FeesCollected(feesInShares, managementFee, performanceFee);
+            emit FeesCollected(
+                feesInShares, 
+                managementFee, 
+                performanceFee, 
+                totals.totalAssets, 
+                totals.totalShares, 
+                totals.sharePrice
+            );
         }
     }
 
+    /// @dev Snapshots share price, total supply, and total assets into a single struct for fee math
     function _snapshotTotals() internal view returns (Totals memory) {
-        uint256 _totalAssets = totalAssets();
-        uint256 _totalSupply = totalSupply();
+        uint256 sharePrice = _getSharePrice();
+        uint256 totalShares = totalSupply();
         return Totals({
-            totalAssets: _totalAssets,
-            totalSupply: _totalSupply,
-            shareValue: _optimizedConvertToAssets(10 ** decimals(), _totalAssets, _totalSupply)
+            totalAssets: _optimizedConvertToAssets(totalShares, sharePrice),
+            totalShares: totalShares,
+            sharePrice: sharePrice
         });
     }
 
@@ -511,16 +652,16 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
     /// @return accruedPerformanceFee Fee amount in asset token
     /// @dev Based on high water mark value
     function _calculateAccruedPerformanceFee(
-        Fees memory fees, 
+        Fees memory fees,
         Totals memory totals
     ) internal view returns (uint256) {
         uint256 performanceFee = fees.performanceFee;
-        if (performanceFee == 0 || totals.shareValue <= fees.highwaterMark) {
+        if (performanceFee == 0 || totals.sharePrice <= fees.highwaterMark) {
             return 0;
         }
         return performanceFee.mulDivDown(
-            (totals.shareValue - fees.highwaterMark) * totals.totalSupply,
-            (10 ** (18 + decimals()))
+            (totals.sharePrice - fees.highwaterMark) * totals.totalShares,
+            (SCALE * SCALE)
         );
     }
 
@@ -533,7 +674,28 @@ contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IUltraVault
             return 0;
         }
         uint256 timePassed = block.timestamp - fees.lastUpdateTimestamp;
-        return managementFee.mulDivDown(totals.totalAssets * timePassed, ONE_YEAR) / ONE_UNIT;
+        return managementFee.mulDivDown(totals.totalAssets * timePassed, ONE_YEAR) / SCALE;
+    }
+
+    /// @dev Returns the current share price from the oracle (underlying assets per share, scaled by SCALE)
+    function _getSharePrice() internal view returns (uint256) {
+        return oracle().currentSharePrice();
+    }
+
+    /// @dev Computes instant redeem amounts for `shares` paid out in `_asset`
+    /// @return grossAssets Assets owed before fees (rounded down on the underlying->asset conversion)
+    /// @return fee Additive fee in asset units: withdrawalFee + instantRedeemPremium applied to grossAssets
+    /// @return netAssets grossAssets minus fee, transferred to the receiver
+    function _previewInstantRedeem(address _asset, uint256 shares)
+        internal
+        view
+        returns (uint256 grossAssets, uint256 fee, uint256 netAssets)
+    {
+        uint256 underlyingAssets = convertToAssets(shares);
+        grossAssets = convertFromUnderlying(_asset, underlyingAssets, Adjustment.DOWN);
+        Fees memory fees = getFees();
+        fee = grossAssets.mulDivDown(fees.withdrawalFee + fees.instantRedeemPremium, SCALE);
+        netAssets = grossAssets - fee;
     }
 
     /// @notice Transfer withdrawal fee to fee recipient

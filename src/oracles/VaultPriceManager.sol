@@ -1,290 +1,271 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity 0.8.28;
 
-import { FixedPointMathLib } from "src/utils/FixedPointMathLib.sol";
-import { IERC4626 } from "@openzeppelin/contracts/interfaces/IERC4626.sol";
-import { IUltraVaultOracle, Price } from "src/interfaces/IUltraVaultOracle.sol";
-import { IOwnable } from "src/interfaces/IOwnable.sol";
-import { IERC20Supply } from "src/interfaces/IERC20Supply.sol";
-import { IPausable } from "src/interfaces/IPausable.sol";
-import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
-import { Ownable2Step } from "@openzeppelin/contracts/access/Ownable2Step.sol";
-
-/// @notice Price update struct
-struct PriceUpdate {
-    // The vault to update the price for
-    address vault;
-    // The asset to update the price for (the asset the vault is denominated in)
-    address asset;
-    // The share value in assets
-    uint256 shareValueInAssets;
-}
-
-/// @notice Safety limits for price updates
-struct Limit {
-    // Maximum allowed price jump from one update to the next (1e18 = 100%)
-    uint256 jump;
-    // Maximum allowed drawdown from the highwaterMark (1e18 = 100%)
-    uint256 drawdown;
-}
+import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import { IRouterClient } from "@chainlink/contracts-ccip/src/v0.8/ccip/interfaces/IRouterClient.sol";
+import { Client } from "@chainlink/contracts-ccip/src/v0.8/ccip/libraries/Client.sol";
+import { BaseVaultPriceManager } from "src/crosschain/BaseVaultPriceManager.sol";
+import { PriceSyncMessage, PriceSyncMessageLib } from "src/crosschain/PriceSyncMessage.sol";
+import { PriceUpdate } from "src/interfaces/IUltraVaultOracle.sol";
 
 /// @title VaultPriceManager
-/// @notice Contract managing vault price updates with limits
-/// @dev Has built in safety mechanisms to pause vault upon sudden moves
-contract VaultPriceManager is Ownable2Step {
-    using FixedPointMathLib for uint256;
+/// @notice Main-chain price manager: applies updates locally and broadcasts them over
+///         CCIP to every active destination so all chains stay in lockstep.
+contract VaultPriceManager is BaseVaultPriceManager {
+    using SafeERC20 for IERC20;
 
     ////////////
     // Events //
     ////////////
 
-    event VaultAdded(address indexed vault);
-    event OracleUpdated(address indexed oldOracle, address indexed newOracle);
-    event LimitsUpdated(address indexed vault, Limit oldLimit, Limit newLimit);
-    event AdminUpdated(address indexed vault, address indexed admin, bool isAdmin);
+    event DestinationAdded(uint64 indexed selector, address receiver, uint256 gasLimit);
+    event DestinationRemoved(uint64 indexed selector);
+    event DestinationConfigUpdated(uint64 indexed selector, address receiver, uint256 gasLimit);
+    event DestinationActiveSet(uint64 indexed selector, bool active);
+    event Broadcast(uint64 indexed selector, uint64 indexed nonce, bytes32 messageId);
+    event LinkWithdrawn(address indexed to, uint256 amount);
+    event DelayUpdated(uint256 oldDelay, uint256 newDelay);
 
     ////////////
     // Errors //
     ////////////
 
-    error ZeroOracleAddress();
-    error CannotAddNonEmptyVault();
-    error InputLengthMismatch();
-    error NotAdminOrOwner();
-    error InvalidLimit();
+    error DestinationNotFound();
+    error DestinationAlreadyExists();
+    error InvalidGasLimit();
+    error InvalidDelay();
+    error Overflow();
 
     ///////////////
     // Constants //
     ///////////////
 
-    uint256 internal constant SCALE = 1e18;
-    uint256 public constant MAX_JUMP_LIMIT = SCALE;
-    uint256 public constant MAX_DRAWDOWN_LIMIT = SCALE;
+    uint256 public constant MIN_DELAY = 15 minutes;
+    uint256 public constant MAX_DELAY = 3 hours;
+    uint256 public constant DEFAULT_DELAY = 1 hours;
+
+    ///////////
+    // Types //
+    ///////////
+
+    struct Destination {
+        address receiver;
+        uint256 gasLimit;
+        bool active;
+        bool exists;
+    }
 
     /////////////
     // Storage //
     /////////////
 
-    IUltraVaultOracle public oracle;
-    mapping(address => uint256) public highwaterMarks; // vault => highwaterMark
-    mapping(address => Limit) public limits; // vault => Limit
-    mapping(address => mapping(address => bool)) public isAdmin; // vault => admin => isAdmin
+    IRouterClient public immutable ccipRouter;
+    IERC20 public immutable linkToken;
+
+    /// @notice Lead time before a scheduled update activates (main chain only).
+    uint256 public delay;
+
+    mapping(uint64 chainSelector => Destination) public destinations;
+    uint64[] public destinationSelectors;
+
+    /// @notice Last broadcast nonce. Incremented per broadcast and stamped on each message.
+    uint64 public broadcastNonce;
 
     /////////////////
     // Constructor //
     /////////////////
 
-    /// @notice Initialize controller with oracle and owner
-    /// @param _oracle Oracle contract address
-    /// @param _owner Owner address
-    constructor(address _oracle, address _owner) Ownable(_owner) {
-        require(_oracle != address(0), ZeroOracleAddress());
-        oracle = IUltraVaultOracle(_oracle);
+    /// @param _initialNonce Starting broadcast nonce; the first broadcast uses
+    ///        `_initialNonce + 1`. On a redeploy, set this to the highest `lastNonce`
+    ///        across remotes so they keep accepting broadcasts (0 for a fresh deploy).
+    constructor(
+        address _oracle,
+        address _vault,
+        address _owner,
+        address _ccipRouter,
+        address _linkToken,
+        uint64 _initialNonce
+    ) BaseVaultPriceManager(_oracle, _vault, _owner) {
+        require(_ccipRouter != address(0) && _linkToken != address(0), ZeroAddress());
+        ccipRouter = IRouterClient(_ccipRouter);
+        linkToken = IERC20(_linkToken);
+        delay = DEFAULT_DELAY;
+        broadcastNonce = _initialNonce;
+
+        // Pre-approve max LINK so each ccipSend can pull its fee.
+        IERC20(_linkToken).approve(_ccipRouter, type(uint256).max);
     }
 
     //////////////////
     // Oracle Logic //
     //////////////////
 
-    /// @notice Add vault to controller
-    /// @param vault Vault address to add
-    /// @dev Initializes price to 1e18 (1:1)
-    /// @dev Must be called before vault receives deposits
-    function addVault(address vault) external onlyOwner {
-        // Ensure vault is empty
-        require(IERC20Supply(vault).totalSupply() == 0, CannotAddNonEmptyVault());
-
-        uint256 initialPrice = SCALE;
-        highwaterMarks[vault] = initialPrice;
-        oracle.setPrice(vault, address(IERC4626(vault).asset()), initialPrice);
-
-        emit VaultAdded(vault);
+    /// @notice Schedule an instant update and broadcast it. Activates at `now + delay`.
+    /// @param failOnPause If true, revert instead of pausing when `newPrice` breaches the limits.
+    function instantPriceUpdate(uint256 newPrice, bool failOnPause) external onlyAdminOrOwner {
+        uint256 startTimestamp = block.timestamp + delay;
+        // startPrice is unused for an instant update; reuse newPrice.
+        _applyUpdate(newPrice, newPrice, 0, startTimestamp, failOnPause);
+        _broadcastUpdate(newPrice, newPrice, 0, startTimestamp);
     }
 
-    /// @notice Update vault price and highwaterMark
-    /// @param priceUpdate Price update data
-    /// @dev Pauses vault on large price jumps or drawdowns
-    function updatePriceInstantly(PriceUpdate calldata priceUpdate) external {
-        _updatePriceInstantly(priceUpdate);
+    /// @notice Schedule a linear-vested update and broadcast it. Vesting begins at
+    ///         `now + delay`; the start price is projected to that instant for continuity.
+    /// @param failOnPause If true, revert instead of pausing when `newPrice` breaches the limits.
+    function linearPriceUpdate(uint256 newPrice, uint256 duration, bool failOnPause) external onlyAdminOrOwner {
+        uint256 startTimestamp = block.timestamp + delay;
+        uint256 startPrice = oracle.sharePriceAt(startTimestamp);
+        _applyUpdate(startPrice, newPrice, duration, startTimestamp, failOnPause);
+        _broadcastUpdate(startPrice, newPrice, duration, startTimestamp);
     }
 
-    /// @notice Update prices for multiple vaults
-    /// @param priceUpdates Array of price updates
-    function updatePricesInstantly(PriceUpdate[] calldata priceUpdates) external {
-        for (uint256 i; i < priceUpdates.length; i++) {
-            _updatePriceInstantly(priceUpdates[i]);
-        }
+    /// @notice Re-broadcast the oracle's latest stored update to a single destination under
+    ///         its original nonce (the current `broadcastNonce`), without touching local
+    ///         state. Heals a destination that missed broadcasts while deactivated, and
+    ///         probes a lane before reactivating it.
+    /// @dev    Idempotent: the nonce is not bumped, so a destination that already applied
+    ///         this update rejects the re-send as stale, retries are free, and a healthy
+    ///         remote keeps `lastNonce == broadcastNonce`.
+    ///         Deliberately callable for inactive destinations (lane probe).
+    function resyncDestination(uint64 selector) external onlyAdminOrOwner {
+        Destination memory dest = destinations[selector];
+        require(dest.exists, DestinationNotFound());
+
+        // Field widths match PriceSyncMessage; ranges were enforced by the oracle on write.
+        PriceUpdate memory u = oracle.lastUpdate();
+        uint64 nonce = broadcastNonce;
+        PriceSyncMessage memory psm = PriceSyncMessage({
+            nonce: nonce,
+            startPrice: u.startPrice,
+            targetPrice: u.targetPrice,
+            vestingDuration: u.vestingDuration,
+            startTimestamp: u.startTimestamp
+        });
+        _ccipSendTo(selector, dest, PriceSyncMessageLib.encode(psm), nonce);
     }
 
-    /// @notice Internal price update function
-    function _updatePriceInstantly(
-        PriceUpdate calldata priceUpdate
-    ) internal onlyAdminOrOwner(priceUpdate.vault) {
-        _checkSuddenMovements(priceUpdate);
-
-        oracle.setPrice(
-            priceUpdate.vault,
-            priceUpdate.asset,
-            priceUpdate.shareValueInAssets
-        );
+    /// @notice Update the activation lead time (bounded).
+    function setDelay(uint256 newDelay) external onlyOwner {
+        require(newDelay >= MIN_DELAY && newDelay <= MAX_DELAY, InvalidDelay());
+        uint256 oldDelay = delay;
+        delay = newDelay;
+        emit DelayUpdated(oldDelay, newDelay);
     }
 
-    /// @notice Update vault price gradually over multiple blocks
-    /// @param priceUpdate Price update data
-    /// @param duration Vesting duration
-    /// @dev Pauses vault on large price jumps
-    function updatePriceWithVesting(
-        PriceUpdate calldata priceUpdate,
-        uint256 duration
-    ) external {
-        _updatePriceWithVesting(priceUpdate, duration);
+    ///////////////////////////
+    // Destination Registry  //
+    ///////////////////////////
+
+    function addDestination(uint64 selector, address receiver, uint256 gasLimit) external onlyOwner {
+        require(receiver != address(0), ZeroAddress());
+        require(gasLimit != 0, InvalidGasLimit());
+        require(!destinations[selector].exists, DestinationAlreadyExists());
+        destinations[selector] = Destination({
+            receiver: receiver,
+            gasLimit: gasLimit,
+            active: true,
+            exists: true
+        });
+        destinationSelectors.push(selector);
+        emit DestinationAdded(selector, receiver, gasLimit);
     }
 
-    /// @notice Update prices for multiple vaults gradually
-    /// @param priceUpdates Array of price updates
-    /// @param durations Array of vesting durations
-    function updatePricesWithVesting(
-        PriceUpdate[] calldata priceUpdates,
-        uint256[] calldata durations
-    ) external {
-        require(priceUpdates.length == durations.length, InputLengthMismatch());
-
-        for (uint256 i; i < priceUpdates.length; i++) {
-            _updatePriceWithVesting(
-                priceUpdates[i],
-                durations[i]
-            );
-        }
-    }
-
-    /// @notice Internal gradual price update function
-    function _updatePriceWithVesting(
-        PriceUpdate calldata priceUpdate,
-        uint256 duration
-    ) internal onlyAdminOrOwner(priceUpdate.vault) {
-        _checkSuddenMovements(priceUpdate);
-        oracle.scheduleLinearPriceUpdate(
-            priceUpdate.vault,
-            priceUpdate.asset,
-            priceUpdate.shareValueInAssets,
-            duration
-        );
-    }
-
-    /// @notice Check price update for sudden price swings and update highwatermark
-    function _checkSuddenMovements(
-        PriceUpdate calldata priceUpdate
-    ) internal {
-        uint256 lastPrice = oracle.getCurrentPrice(
-            priceUpdate.vault,
-            priceUpdate.asset
-        );
-        uint256 highwaterMark = highwaterMarks[priceUpdate.vault];
-        Limit memory limit = limits[priceUpdate.vault];
-        if (
-            // Sudden drop
-            priceUpdate.shareValueInAssets <
-            lastPrice.mulDivDown(SCALE - limit.jump, SCALE) ||
-            // Sudden increase
-            priceUpdate.shareValueInAssets >
-            lastPrice.mulDivDown(SCALE + limit.jump, SCALE) ||
-            // Drawdown check
-            priceUpdate.shareValueInAssets <
-            highwaterMark.mulDivDown(SCALE - limit.drawdown, SCALE)
-        ) {
-            IPausable vault = IPausable(priceUpdate.vault);
-            if (!vault.paused()) {
-                vault.pause();
+    function removeDestination(uint64 selector) external onlyOwner {
+        require(destinations[selector].exists, DestinationNotFound());
+        delete destinations[selector];
+        uint256 len = destinationSelectors.length;
+        for (uint256 i; i < len; ++i) {
+            if (destinationSelectors[i] == selector) {
+                destinationSelectors[i] = destinationSelectors[len - 1];
+                destinationSelectors.pop();
+                break;
             }
-        } else if (priceUpdate.shareValueInAssets > highwaterMark) {
-            highwaterMarks[priceUpdate.vault] = priceUpdate.shareValueInAssets;
+        }
+        emit DestinationRemoved(selector);
+    }
+
+    function updateDestinationConfig(uint64 selector, address receiver, uint256 gasLimit)
+        external
+        onlyOwner
+    {
+        require(destinations[selector].exists, DestinationNotFound());
+        require(receiver != address(0), ZeroAddress());
+        require(gasLimit != 0, InvalidGasLimit());
+        destinations[selector].receiver = receiver;
+        destinations[selector].gasLimit = gasLimit;
+        emit DestinationConfigUpdated(selector, receiver, gasLimit);
+    }
+
+    /// @notice Flip a destination's active flag (escape hatch for a stuck destination).
+    function setDestinationActive(uint64 selector, bool active_) external onlyAdminOrOwner {
+        require(destinations[selector].exists, DestinationNotFound());
+        destinations[selector].active = active_;
+        emit DestinationActiveSet(selector, active_);
+    }
+
+    function destinationsCount() external view returns (uint256) {
+        return destinationSelectors.length;
+    }
+
+    function withdrawLink(address to, uint256 amount) external onlyOwner {
+        require(to != address(0), ZeroAddress());
+        linkToken.safeTransfer(to, amount);
+        emit LinkWithdrawn(to, amount);
+    }
+
+    //////////////
+    // Internal //
+    //////////////
+
+    function _broadcastUpdate(
+        uint256 startPrice,
+        uint256 targetPrice,
+        uint256 vestingDuration,
+        uint256 startTimestamp
+    ) internal {
+        require(startPrice <= type(uint88).max, Overflow());
+        require(targetPrice <= type(uint88).max, Overflow());
+        require(vestingDuration <= type(uint40).max, Overflow());
+        require(startTimestamp <= type(uint40).max, Overflow());
+
+        uint64 nonce = ++broadcastNonce;
+
+        PriceSyncMessage memory psm = PriceSyncMessage({
+            nonce: nonce,
+            startPrice: uint88(startPrice),
+            targetPrice: uint88(targetPrice),
+            vestingDuration: uint40(vestingDuration),
+            startTimestamp: uint40(startTimestamp)
+        });
+        bytes memory payload = PriceSyncMessageLib.encode(psm);
+
+        uint256 len = destinationSelectors.length;
+        for (uint256 i; i < len; ++i) {
+            uint64 selector = destinationSelectors[i];
+            Destination memory dest = destinations[selector];
+            if (!dest.active) continue;
+
+            // No try/catch: any send failure reverts the whole tx (all-or-nothing).
+            _ccipSendTo(selector, dest, payload, nonce);
         }
     }
 
-    ///////////////////
-    // Oracle Update //
-    ///////////////////
+    function _ccipSendTo(
+        uint64 selector,
+        Destination memory dest,
+        bytes memory payload,
+        uint64 nonce
+    ) internal {
+        Client.EVM2AnyMessage memory ccipMsg = Client.EVM2AnyMessage({
+            receiver: abi.encode(dest.receiver),
+            data: payload,
+            tokenAmounts: new Client.EVMTokenAmount[](0),
+            extraArgs: Client._argsToBytes(Client.EVMExtraArgsV1({ gasLimit: dest.gasLimit })),
+            feeToken: address(linkToken)
+        });
 
-    /// @notice Set oracle address
-    /// @param _newOracle new oracle address
-    function setOracle(
-        address _newOracle
-    ) external onlyOwner {
-        if (address(oracle) != _newOracle) {
-            emit OracleUpdated(address(oracle), _newOracle);
-            oracle = IUltraVaultOracle(_newOracle);
-        }
-    }
-
-    //////////////////////
-    // Admin Role Logic //
-    //////////////////////
-
-    /// @notice Set vault admin
-    /// @param _vault Vault address
-    /// @param _admin Admin address
-    /// @param _isAdmin Whether to add or remove admin
-    function setAdmin(
-        address _vault,
-        address _admin,
-        bool _isAdmin
-    ) external onlyOwner {
-        if (isAdmin[_vault][_admin] != _isAdmin) {
-            emit AdminUpdated(_vault, _admin, _isAdmin);
-            isAdmin[_vault][_admin] = _isAdmin;
-        }
-    }
-
-    /// @notice Modifier for admin/owner access
-    /// @param _vault Vault to check access for
-    modifier onlyAdminOrOwner(address _vault) {
-        require(msg.sender == owner() || isAdmin[_vault][msg.sender], NotAdminOrOwner());
-        _;
-    }
-
-    ///////////////////
-    // Limits Update //
-    ///////////////////
-
-    /// @notice Set vault price limits
-    /// @param _vault Vault address
-    /// @param _limit Price limits to set
-    function setLimits(address _vault, Limit memory _limit) external onlyOwner {
-        _setLimits(_vault, _limit);
-    }
-
-    /// @notice Set price limits for multiple vaults
-    /// @param _vaults Array of vault addresses
-    /// @param _limits Array of price limits
-    function setLimits(
-        address[] memory _vaults,
-        Limit[] memory _limits
-    ) external onlyOwner {
-        require(_vaults.length == _limits.length, InputLengthMismatch());
-        for (uint256 i; i < _vaults.length; i++) {
-            _setLimits(_vaults[i], _limits[i]);
-        }
-    }
-
-    function _setLimits(address _vault, Limit memory _limit) internal {
-        require(_limit.jump <= MAX_JUMP_LIMIT && _limit.drawdown <= MAX_DRAWDOWN_LIMIT, InvalidLimit());
-
-        Limit memory oldLimit = limits[_vault];
-        if (
-            _limit.jump != oldLimit.jump || 
-            _limit.drawdown != oldLimit.drawdown
-        ) {
-            emit LimitsUpdated(_vault, oldLimit, _limit);
-            limits[_vault] = _limit;
-        }
-    }
-
-    ///////////
-    // Utils //
-    ///////////
-
-    /// @notice Claim oracle ownership
-    function claimOracleOwnership() external onlyOwner {
-        IOwnable(address(oracle)).acceptOwnership();
+        bytes32 messageId = ccipRouter.ccipSend(selector, ccipMsg);
+        emit Broadcast(selector, nonce, messageId);
     }
 }

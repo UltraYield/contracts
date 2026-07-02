@@ -1,24 +1,26 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity >=0.8.0;
 
-import { IPausable } from "src/interfaces/IPausable.sol";
-import { IERC7540Operator } from "ERC-7540/interfaces/IERC7540.sol";
-import { IRedeemAccounting } from "src/interfaces/IRedeemAccounting.sol";
-import { IUltraVaultRateProvider } from "src/interfaces/IUltraVaultRateProvider.sol";
-import { IAccessControlDefaultAdminRules } from "@openzeppelin/contracts/access/extensions/IAccessControlDefaultAdminRules.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { IERC4626 } from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import { IERC165 } from "@openzeppelin/contracts/interfaces/IERC165.sol";
-import { AddressUpdateProposal } from "src/utils/AddressUpdates.sol";
+import { IAccessControlDefaultAdminRules } from "@openzeppelin/contracts/access/extensions/IAccessControlDefaultAdminRules.sol";
+import { IPausable } from "src/interfaces/IPausable.sol";
+import { IERC7540Operator } from "ERC-7540/interfaces/IERC7540.sol";
+import { IRedeemAccounting } from "src/interfaces/IRedeemAccounting.sol";
+import { IAddressUpdatableErrors } from "src/interfaces/IAddressUpdatableErrors.sol";
+import { IUltraVaultRateProvider } from "src/interfaces/IUltraVaultRateProvider.sol";
+import { Adjustment } from "src/interfaces/Types.sol";
+import { IAccessControl } from "@openzeppelin/contracts/access/IAccessControl.sol";
+import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import { IERC4626 } from "@openzeppelin/contracts/interfaces/IERC4626.sol";
+import { IERC165 } from "@openzeppelin/contracts/interfaces/IERC165.sol";
 
-interface IBaseVaultErrors {
+interface IBaseVaultErrors is IAddressUpdatableErrors {
     error NotOwner();
     error AccessDenied();
     error ZeroAssetAddress();
-    error ZeroRateProviderAddress();
     error InputLengthMismatch();
-    error CannotPreviewWithdrawInAsyncVault();
-    error CannotPreviewRedeemInAsyncVault();
     error EmptyDeposit();
     error NothingToMint();
     error NothingToRedeem();
@@ -26,16 +28,12 @@ interface IBaseVaultErrors {
     error NoPendingRedeem();
     error InsufficientBalance();
     error AssetNotSupported();
-    error MissingRateProvider();
-    error NoRateProviderProposed();
-    error ProposedRateProviderMismatch();
-    error CannotAcceptRateProviderYet();
-    error RateProviderUpdateExpired();
+    error CannotSetSelfAsOperator();
 }
 
 interface IBaseVaultEvents {
-    event RateProviderProposed(address indexed proposedProvider);
-    event RateProviderUpdated(address indexed oldProvider, address indexed newProvider);
+    event AddressUpdateProposed(bytes32 indexed key, address indexed newAddress);
+    event AddressUpdated(bytes32 indexed key, address indexed oldAddress, address indexed newAddress);
     event RedeemRequestFulfilled(
         address indexed controller,
         address indexed fulfiller,
@@ -58,14 +56,14 @@ interface IBaseVaultEvents {
 }
 
 /// @title IBaseVault
-/// @notice An interface of basic vault functionality for both UltraVault and UltraFeeder contracts
+/// @notice An interface of basic vault functionality for UltraVault contracts
 interface IBaseVault is 
   IBaseVaultEvents,
   IBaseVaultErrors,
   IERC20,
   IERC165,
   IERC4626,
-  IAccessControlDefaultAdminRules,
+  IAccessControl,
   IPausable,
   IERC7540Operator,
   IRedeemAccounting 
@@ -82,26 +80,35 @@ interface IBaseVault is
     /// @return rateProvider The address of the rate provider
     function rateProvider() external view returns (IUltraVaultRateProvider);
 
-    /// @notice Returns the proposed rate provider
-    /// @return proposedRateProvider The proposed rate provider
-    function proposedRateProvider() external view returns (AddressUpdateProposal memory);
+    /// @notice Returns the address of the upgrade module
+    /// @return upgradeModule The address of the upgrade module
+    function upgradeModule() external view returns (address);
+
+    /// @notice Returns the proposed address for a given key
+    /// @param key The address key (see contract NatSpec for precomputed hashes)
+    /// @return proposedAddress The proposed address and proposal timestamp
+    function proposedAddress(bytes32 key) external view returns (address, uint256);
 
     /// @notice Converts assets to underlying
-    /// @param _asset The asset to convert
+    /// @param asset The asset to convert
     /// @param assets The amount of assets to convert
+    /// @param adjustment The adjustment to apply
     /// @return baseAssets The amount of underlying received
     function convertToUnderlying(
-        address _asset,
-        uint256 assets
+        address asset,
+        uint256 assets,
+        Adjustment adjustment
     ) external view returns (uint256 baseAssets);
 
     /// @notice Converts underlying to assets
     /// @param asset The asset to convert
     /// @param baseAssets The amount of underlying to convert
+    /// @param adjustment The adjustment to apply
     /// @return assets The amount of assets received
     function convertFromUnderlying(
         address asset,
-        uint256 baseAssets
+        uint256 baseAssets,
+        Adjustment adjustment
     ) external view returns (uint256 assets);
 
     /////////////
@@ -130,30 +137,6 @@ interface IBaseVault is
         uint256 assets
     ) external view returns (uint256);
 
-    /// @notice Helper to deposit assets for msg.sender upon referral specifying receiver
-    /// @param assets Amount to deposit
-    /// @param receiver receiver of deposit
-    /// @param referralId id of referral
-    /// @return shares Amount of shares received
-    function depositWithReferral(
-        uint256 assets,
-        address receiver,
-        string calldata referralId
-    ) external returns (uint256);
-
-    /// @notice Helper to deposit particular asset for msg.sender upon referral
-    /// @param asset Asset to deposit
-    /// @param assets Amount to deposit
-    /// @param receiver receiver of deposit
-    /// @param referralId id of referral
-    /// @return shares Amount of shares received
-    function depositAssetWithReferral(
-        address asset,
-        uint256 assets,
-        address receiver,
-        string calldata referralId
-    ) external returns (uint256);
-
     /// @notice Deposit exact number of assets in base asset and mint shares to receiver
     /// @param assets Amount of assets to deposit
     /// @param receiver Share receiver
@@ -173,6 +156,30 @@ interface IBaseVault is
         uint256 assets,
         address receiver
     ) external returns (uint256 shares);
+
+    /// @notice Helper to deposit assets for msg.sender upon referral specifying receiver
+    /// @param assets Amount to deposit
+    /// @param receiver receiver of deposit
+    /// @param referralId id of referral
+    /// @return shares Amount of shares received
+    function depositWithReferral(
+        uint256 assets,
+        address receiver,
+        string memory referralId
+    ) external returns (uint256);
+
+    /// @notice Helper to deposit particular asset for msg.sender upon referral
+    /// @param asset Asset to deposit
+    /// @param assets Amount to deposit
+    /// @param receiver receiver of deposit
+    /// @param referralId id of referral
+    /// @return shares Amount of shares received
+    function depositAssetWithReferral(
+        address asset,
+        uint256 assets,
+        address receiver,
+        string memory referralId
+    ) external returns (uint256);
 
     //////////
     // Mint //
@@ -309,49 +316,24 @@ interface IBaseVault is
     // Redeem requests //
     /////////////////////
 
-    /// @notice Request redeem for msg.sender
-    /// @param shares Amount to redeem
-    /// @return requestId Request identifier
-    function requestRedeem(uint256 shares) external returns (uint256 requestId);
-
-    /// @notice Request redeem of shares
-    /// @param shares Amount to redeem
-    /// @param controller Share recipient
-    /// @param owner Share owner
-    /// @return requestId Request identifier
-    function requestRedeem(
-        uint256 shares,
-        address controller,
-        address owner
-    ) external returns (uint256 requestId);
-
     /// @notice Request redeem of shares
     /// @param asset Asset
     /// @param shares Amount to redeem
     /// @param controller Share recipient
     /// @param owner Share owner
+    /// @param autoClaim If true, fulfilling this request auto-delivers assets to controller
     /// @return requestId Request identifier
-    function requestRedeemOfAsset(
+    function requestRedeem(
         address asset,
         uint256 shares,
         address controller,
-        address owner
+        address owner,
+        bool autoClaim
     ) external returns (uint256 requestId);
 
     ////////////////////////
     // Redeem Fulfillment //
     ////////////////////////
-
-    /// @notice Fulfill redeem request
-    /// @param asset Asset
-    /// @param shares Amount to redeem
-    /// @param controller Controller address
-    /// @return assets Amount of claimable assets
-    function fulfillRedeem(
-        address asset,
-        uint256 shares,
-        address controller
-    ) external returns (uint256);
 
     /// @notice Fulfill multiple redeem requests
     /// @param assets Array of assets
@@ -369,51 +351,28 @@ interface IBaseVault is
     ////////////////////////
 
     /// @notice Cancel redeem request for controller
-    /// @param controller Controller address
-    /// @return shares Amount of shares canceled
-    function cancelRedeemRequest(address controller) external returns (uint256 shares);
-
-    /// @notice Cancel redeem request for controller
+    /// @param asset Asset
     /// @param controller Controller address
     /// @param receiver Share recipient
     /// @return shares Amount of shares canceled
     function cancelRedeemRequest(
-        address controller,
-        address receiver
-    ) external returns (uint256 shares);
-
-    /// @notice Cancel redeem request for controller
-    /// @param asset Asset
-    /// @param controller Controller address
-    /// @param receiver Share recipient
-    /// @return shares Amount of shares canceled
-    function cancelRedeemRequestOfAsset(
         address asset,
         address controller,
         address receiver
     ) external returns (uint256 shares);
-
-    /// @notice Cancel redeem request for controller partially, for a specific amount of shares
-    /// @param asset Asset
-    /// @param shares Amount of shares to cancel
-    /// @param controller Controller address
-    /// @param receiver Share recipient
-    function cancelRedeemRequestPartially(
-        address asset,
-        uint256 shares,
-        address controller,
-        address receiver
-    ) external;
 
     /////////////////////
     // Admin Functions //
     /////////////////////
 
-    /// @notice Propose new rate provider for owner acceptance after delay
-    /// @param newRateProvider Address of the new rate provider
-    function proposeRateProvider(address newRateProvider) external;
+    /// @notice Propose an address update for the given key
+    /// @param key The address key (see contract NatSpec for precomputed hashes)
+    /// @param newAddress The new address being proposed
+    function proposeAddressUpdate(bytes32 key, address newAddress) external;
 
-    /// @notice Accept proposed rate provider
-    /// @param newRateProvider Address of the new rate provider
-    function acceptProposedRateProvider(address newRateProvider) external;
-} 
+    /// @notice Accept a previously proposed address update for the given key
+    /// @param key The address key (see contract NatSpec for precomputed hashes)
+    /// @param newAddress The new address to confirm
+    /// @dev Pauses the vault on success
+    function acceptAddressUpdate(bytes32 key, address newAddress) external;
+}

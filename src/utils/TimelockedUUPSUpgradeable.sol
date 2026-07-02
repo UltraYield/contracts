@@ -93,7 +93,7 @@ abstract contract TimelockedUUPSUpgradeable is UUPSUpgradeable {
     /// @return dataHash The hash of call data for the upgrade
     /// @return executionTime The earliest time the upgrade can be executed (0 if none pending)
     function getPendingUpgrade() external view returns (address implementation, bytes32 dataHash, uint256 executionTime) {
-        PendingUpgrade memory pendingUpgrade = _getTimelockedUUPSStorage().pendingUpgrade;
+        PendingUpgrade storage pendingUpgrade = _getTimelockedUUPSStorage().pendingUpgrade;
         return (
             pendingUpgrade.implementation,
             pendingUpgrade.dataHash,
@@ -109,7 +109,7 @@ abstract contract TimelockedUUPSUpgradeable is UUPSUpgradeable {
         address implementation,
         bytes memory data
     ) public view returns (bool) {
-        PendingUpgrade memory pending = _getTimelockedUUPSStorage()
+        PendingUpgrade storage pending = _getTimelockedUUPSStorage()
             .pendingUpgrade;
         require(pending.executionTime != 0, NoUpgradeProposed());
         require(pending.implementation == implementation, UpgradeImplementationMismatch());
@@ -153,7 +153,7 @@ abstract contract TimelockedUUPSUpgradeable is UUPSUpgradeable {
     }
 
     function _cancelUpgrade() internal {
-        PendingUpgrade memory pending = _getTimelockedUUPSStorage().pendingUpgrade;
+        PendingUpgrade storage pending = _getTimelockedUUPSStorage().pendingUpgrade;
         require(pending.executionTime != 0, NoUpgradeProposed());
 
         emit UpgradeCancelled(pending.implementation, pending.dataHash);

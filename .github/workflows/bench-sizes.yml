@@ -1,0 +1,191 @@
+name: Bytecode Size Benchmark
+
+on:
+  pull_request:
+    branches: ['**']
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout PR branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Setup Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: nightly
+
+      # `forge build --sizes` exits non-zero when a contract exceeds the EIP-170
+      # limit. Swallow that here so the job still parses sizes, posts the comment,
+      # and fails (if needed) via our own gate below with a clear message. A real
+      # compile error prints no size table, so the parse step still fails the job.
+      - name: Build contracts (release profile)
+        run: FOUNDRY_PROFILE=release forge build --sizes src/vaults/AllowlistUltraVault.sol src/vaults/CompliantUltraVault.sol > build-output.txt 2>&1 || true
+
+      - name: Benchmark and compare
+        id: bench
+        shell: bash
+        run: |
+          CONTRACTS=(AllowlistUltraVault CompliantUltraVault)
+          LIMIT=24576
+          MARKER="<!-- ultravault-size-bench -->"
+
+          # Base benchmark from the target branch (per-contract; missing key => initial).
+          git fetch origin "${{ github.base_ref }}" --quiet || true
+          BASE_CONTENT=""
+          if git show "origin/${{ github.base_ref }}:benches/sizes" > /dev/null 2>&1; then
+            BASE_CONTENT=$(git show "origin/${{ github.base_ref }}:benches/sizes")
+          fi
+
+          # Comment header.
+          {
+            echo "$MARKER"
+            echo "## 📊 UltraVault Variants Bytecode Size"
+            echo ""
+            echo "EVM limit: **${LIMIT} bytes**"
+            echo ""
+            echo "| Contract | Current | Previous | Change | Margin | Status |"
+            echo "|----------|---------|----------|--------|--------|--------|"
+          } > comment-body.md
+
+          # Fresh benchmark file (two keyed lines, drops the stale UltraVault key).
+          mkdir -p benches
+          : > benches/sizes
+
+          FAIL=false
+          OFFENDERS=""
+
+          for c in "${CONTRACTS[@]}"; do
+            CUR=$(grep -E "^\|\s*${c}\s*\|" build-output.txt | head -n1 | awk -F '|' '{print $3}' | tr -d ', ' | xargs)
+            if [[ -z "$CUR" ]]; then
+              echo "Failed to parse ${c} size from forge output:"
+              cat build-output.txt
+              exit 1
+            fi
+            echo "Current ${c} size: ${CUR} bytes"
+
+            MARGIN=$((LIMIT - CUR))
+            MARGIN_PCT=$(awk "BEGIN {printf \"%.2f\", (($MARGIN / $LIMIT) * 100)}")
+
+            if [ "$CUR" -gt "$LIMIT" ]; then
+              STATUS="🔴 EXCEEDS LIMIT"
+              FAIL=true
+              OFFENDERS="${OFFENDERS}${c} (${CUR} bytes) "
+            elif [ "$MARGIN" -lt 500 ]; then
+              STATUS="⚠️ CRITICAL"
+            elif [ "$MARGIN" -lt 2000 ]; then
+              STATUS="⚠️ WARNING"
+            else
+              STATUS="✅ HEALTHY"
+            fi
+
+            BASE=$(echo "$BASE_CONTENT" | awk -F'=' -v k="$c" '$1==k {print $2}' | tr -d '[:space:]')
+            if [[ -n "$BASE" ]]; then
+              DIFF=$((CUR - BASE))
+              if [ "$DIFF" -gt 0 ]; then
+                EMOJI="📈"; SIGN="+"
+              elif [ "$DIFF" -lt 0 ]; then
+                EMOJI="📉"; SIGN=""
+              else
+                EMOJI="➡️"; SIGN=""
+              fi
+              if [ "$BASE" -gt 0 ]; then
+                PERCENT=$(awk "BEGIN {printf \"%.2f\", (($DIFF / $BASE) * 100)}")
+              else
+                PERCENT="0.00"
+              fi
+              PREV_CELL="${BASE} bytes"
+              CHANGE_CELL="${EMOJI} ${SIGN}${DIFF} (${SIGN}${PERCENT}%)"
+            else
+              PREV_CELL="—"
+              CHANGE_CELL="— (initial)"
+            fi
+
+            echo "| ${c} | ${CUR} bytes | ${PREV_CELL} | ${CHANGE_CELL} | ${MARGIN} bytes (${MARGIN_PCT}%) | ${STATUS} |" >> comment-body.md
+            printf "%s=%s\n" "$c" "$CUR" >> benches/sizes
+          done
+
+          {
+            echo ""
+            echo "---"
+            echo "*This comment is automatically updated on each push.*"
+          } >> comment-body.md
+
+          echo "fail=${FAIL}" >> "$GITHUB_OUTPUT"
+          echo "offenders=${OFFENDERS}" >> "$GITHUB_OUTPUT"
+
+          rm -f build-output.txt
+
+      - name: Create or update PR comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const body = fs.readFileSync('comment-body.md', 'utf8');
+            const MARKER = '<!-- ultravault-size-bench -->';
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+
+            const botComment = comments.find(c =>
+              c.user.type === 'Bot' &&
+              c.body.includes(MARKER)
+            );
+
+            if (botComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body
+              });
+            }
+
+      # Only commit back when the PR is from the same repository (not a fork),
+      # and avoid looping when the actor is the bot.
+      - name: Commit benchmark update
+        if: ${{ github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'github-actions[bot]' }}
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Ensure we are on the PR head branch (safety belt)
+          git checkout "${{ github.head_ref }}"
+
+          git add benches/sizes
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "Update bytecode size benchmark"
+            # Push explicitly to the PR branch to avoid detached HEAD issues
+            git push origin HEAD:"${{ github.head_ref }}"
+          fi
+
+      - name: Check size limit
+        run: |
+          if [ "${{ steps.bench.outputs.fail }}" = "true" ]; then
+            echo "❌ ERROR: bytecode size exceeds the EVM limit (24576 bytes): ${{ steps.bench.outputs.offenders }}"
+            exit 1
+          fi

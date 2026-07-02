@@ -5,15 +5,15 @@ import { IERC165, IERC7575 } from "ERC-7540/interfaces/IERC7575.sol";
 import { IERC7540Redeem, IERC7540Operator } from "ERC-7540/interfaces/IERC7540.sol";
 import { PausableUpgradeable } from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import { ERC4626Upgradeable } from "@openzeppelin/contracts-upgradeable/token/ERC20/extensions/ERC4626Upgradeable.sol";
-import { TimelockedUUPSUpgradeable } from "src/utils/TimelockedUUPSUpgradeable.sol";
+import { UUPSUpgradeable } from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import { SafeERC20, IERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
-import { PendingRedeem, ClaimableRedeem } from "src/interfaces/IRedeemQueue.sol";
+import { PendingRedeem, ClaimableRedeem } from "src/interfaces/Types.sol";
 import { IRedeemAccounting } from "src/interfaces/IRedeemAccounting.sol";
-import { IUltraVaultRateProvider } from "src/interfaces/IUltraVaultRateProvider.sol";
-import { OPERATOR_ROLE, PAUSER_ROLE, UPGRADER_ROLE } from "src/utils/Roles.sol";
+import { IUltraVaultRateProvider, Adjustment } from "src/interfaces/IUltraVaultRateProvider.sol";
+import { OPERATOR_ROLE, PAUSER_ROLE, UNPAUSER_ROLE } from "src/utils/Roles.sol";
 import { AccessControlUpgradeable } from "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol";
-import { AddressUpdateProposal } from "src/utils/AddressUpdates.sol";
+import { AddressUpdateProposal, AddressUpdatable } from "src/utils/AddressUpdates.sol";
+import { RATE_PROVIDER_KEY, UPGRADE_MODULE_KEY } from "src/utils/AddressKeys.sol";
 import { RedeemQueue } from "src/vaults/accounting/RedeemQueue.sol";
 import { IBaseVaultErrors, IBaseVaultEvents } from "src/interfaces/IBaseVault.sol";
 
@@ -32,6 +32,8 @@ struct BaseControlledAsyncRedeemInitParams {
     string symbol;
     // Oracle for assets exchange rate
     address rateProvider;
+    // External timelocked upgrade module
+    address upgradeModule;
 }
 
 /// @title BaseControlledAsyncRedeem
@@ -41,14 +43,14 @@ abstract contract BaseControlledAsyncRedeem is
     AccessControlUpgradeable,
     ERC4626Upgradeable,
     PausableUpgradeable,
-    TimelockedUUPSUpgradeable,
+    AddressUpdatable,
+    UUPSUpgradeable,
     RedeemQueue,
     IERC7540Operator,
     IRedeemAccounting,
     IBaseVaultErrors,
     IBaseVaultEvents
 {
-    using Math for uint256;
     using SafeERC20 for IERC20;
 
     ///////////////
@@ -56,8 +58,8 @@ abstract contract BaseControlledAsyncRedeem is
     ///////////////
 
     uint256 internal constant REQUEST_ID = 0;
-    uint256 internal constant ADDRESS_UPDATE_TIMELOCK = 3 days;
-    uint256 internal constant MAX_ADDRESS_UPDATE_WAIT = 7 days;
+    uint256 internal constant RATE_PROVIDER_TIMELOCK = 3 days;
+    uint256 internal constant UPGRADE_MODULE_TIMELOCK = 7 days;
 
     /////////////
     // Storage //
@@ -66,14 +68,21 @@ abstract contract BaseControlledAsyncRedeem is
     /// @custom:storage-location erc7201:ultrayield.storage.BaseControlledAsyncRedeem
     struct BaseAsyncRedeemStorage {
         mapping(address => mapping(address => bool)) isOperator;
-        IUltraVaultRateProvider rateProvider;
-        AddressUpdateProposal proposedRateProvider;
+        IUltraVaultRateProvider _rateProvider; // Deprecated in V2
+        AddressUpdateProposal _proposedRateProvider; // Deprecated in V2
     }
 
+    /// @dev Returns the namespaced ERC-7201 storage struct for BaseControlledAsyncRedeem
     function _getBaseAsyncRedeemStorage() private pure returns (BaseAsyncRedeemStorage storage $) {
         assembly {
             $.slot := BASE_ASYNC_REDEEM_STORAGE_LOCATION
         }
+    }
+
+    /// @dev Copies the legacy V1 rate provider address into V2 address-update storage
+    function _migrateBaseControlledAsyncRedeemStateFromV1() internal {
+        BaseAsyncRedeemStorage storage $ = _getBaseAsyncRedeemStorage();
+        _migrateAddress(RATE_PROVIDER_KEY, address($._rateProvider));
     }
 
     //////////
@@ -86,23 +95,20 @@ abstract contract BaseControlledAsyncRedeem is
         BaseControlledAsyncRedeemInitParams memory params
     ) public virtual onlyInitializing {
         require(params.asset != address(0), ZeroAssetAddress());
-        require(params.rateProvider != address(0), ZeroRateProviderAddress());
 
         // Init parents
-        __TimelockedUUPSUpgradeable_init();
+        __UUPSUpgradeable_init();
         __AccessControl_init();
         __Pausable_init();
         __ERC20_init(params.name, params.symbol);
         __ERC4626_init(IERC20(params.asset));
 
         // Init self
-        _getBaseAsyncRedeemStorage().rateProvider = IUltraVaultRateProvider(params.rateProvider);
+        _initAddress(RATE_PROVIDER_KEY, params.rateProvider);
+        _initAddress(UPGRADE_MODULE_KEY, params.upgradeModule);
 
-        // Grant roles to owner
+        // Grant default admin role to owner
         _grantRole(DEFAULT_ADMIN_ROLE, params.owner);
-        _grantRole(OPERATOR_ROLE, params.owner);
-        _grantRole(PAUSER_ROLE, params.owner);
-        _grantRole(UPGRADER_ROLE, params.owner);
     }
 
     /////////////////
@@ -112,13 +118,20 @@ abstract contract BaseControlledAsyncRedeem is
     /// @notice Returns the address of the rate provider
     /// @return rateProvider The address of the rate provider
     function rateProvider() public view returns (IUltraVaultRateProvider) {
-        return _getBaseAsyncRedeemStorage().rateProvider;
+        return IUltraVaultRateProvider(_getCurrentAddress(RATE_PROVIDER_KEY));
     }
 
-    /// @notice Returns the proposed rate provider
-    /// @return proposedRateProvider The proposed rate provider
-    function proposedRateProvider() public view returns (AddressUpdateProposal memory) {
-        return _getBaseAsyncRedeemStorage().proposedRateProvider;
+    /// @notice Returns the upgrade module address
+    /// @return upgradeModule The address of the upgrade module
+    function upgradeModule() public view returns (address) {
+        return _getCurrentAddress(UPGRADE_MODULE_KEY);
+    }
+
+    /// @notice Returns the proposed address for a given key
+    /// @param key The address key (see contract constants)
+    /// @return proposedAddress The proposed address and proposal timestamp
+    function proposedAddress(bytes32 key) external view returns (address, uint256) {
+        return _getAddressUpdateProposal(key);
     }
 
     //////////////
@@ -145,7 +158,7 @@ abstract contract BaseControlledAsyncRedeem is
         address operator,
         bool approved
     ) external returns (bool success) {
-        require(msg.sender != operator, "ERC7540Vault/cannot-set-self-as-operator");
+        require(msg.sender != operator, CannotSetSelfAsOperator());
         if (isOperator(msg.sender, operator) != approved) {
             _getBaseAsyncRedeemStorage().isOperator[msg.sender][operator] = approved;
             emit OperatorSet(msg.sender, operator, approved);
@@ -160,69 +173,37 @@ abstract contract BaseControlledAsyncRedeem is
     /// @notice Converts assets to underlying
     /// @param _asset The asset to convert
     /// @param assets The amount of assets to convert
+    /// @param adjustment The adjustment to apply
     /// @return baseAssets The amount of underlying received
     function convertToUnderlying(
         address _asset,
-        uint256 assets
-    ) external view returns (uint256 baseAssets) {
-        return _convertToUnderlying(_asset, assets);
-    }
-
-    /// @notice Converts underlying to assets
-    /// @param _asset The asset to convert
-    /// @param baseAssets The amount of underlying to convert
-    /// @return assets The amount of assets received
-    function convertFromUnderlying(
-        address _asset,
-        uint256 baseAssets
-    ) external view returns (uint256 assets) {
-        return _convertFromUnderlying(_asset, baseAssets);
-    }
-
-    /// @dev Internal function to convert assets to underlying
-    function _convertToUnderlying(
-        address _asset,
-        uint256 assets
-    ) internal view returns (uint256 baseAssets) {
+        uint256 assets,
+        Adjustment adjustment
+    ) public view returns (uint256 baseAssets) {
         // If asset is the same as base asset, no conversion needed
         if (_asset == this.asset()) {
             return assets;
         }
         // Call reverts if asset not supported
-        return rateProvider().convertToUnderlying(_asset, assets);
+        return rateProvider().convertToUnderlying(_asset, assets, adjustment);
     }
 
-    /// @dev Internal function to convert underlying to assets
-    function _convertFromUnderlying(
+    /// @notice Converts underlying to assets
+    /// @param _asset The asset to convert
+    /// @param baseAssets The amount of underlying to convert
+    /// @param adjustment The adjustment to apply
+    /// @return assets The amount of assets received
+    function convertFromUnderlying(
         address _asset,
-        uint256 baseAssets
-    ) internal view returns (uint256 assets) {
+        uint256 baseAssets,
+        Adjustment adjustment
+    ) public view returns (uint256 assets) {
         // If asset is the same as base asset, no conversion needed
         if (_asset == this.asset()) {
             return baseAssets;
         }
         // Call reverts if asset not supported
-        return rateProvider().convertFromUnderlying(_asset, baseAssets);
-    }
-
-    /// @dev Optimized function mirroring `convertToAssets` in OZ ERC4626 v5.4.0
-    /// @dev Uses pre-fetched totals. Always rounds down like `convertToAssets` does in the OZ implementation
-    function _optimizedConvertToAssets(
-        uint256 shares,
-        uint256 _totalAssets,
-        uint256 _totalSupply
-    ) internal view returns (uint256 assets) {
-        return shares.mulDiv(_totalAssets + 1, _totalSupply + 10 ** _decimalsOffset(), Math.Rounding.Floor);
-    }
-
-    /// @dev Optimized function mirroring `convertToShares` in OZ ERC4626 v5.4.0
-    /// @dev Uses pre-fetched totals. Always rounds down like `convertToShares` does in the OZ implementation
-    function _optimizedConvertToShares(
-        uint256 assets,
-        uint256 _totalAssets,
-        uint256 _totalSupply
-    ) internal view returns (uint256 shares) {
-        return assets.mulDiv(_totalSupply + 10 ** _decimalsOffset(), _totalAssets + 1, Math.Rounding.Floor);
+        return rateProvider().convertFromUnderlying(_asset, baseAssets, adjustment);
     }
 
     ////////////////////
@@ -237,7 +218,7 @@ abstract contract BaseControlledAsyncRedeem is
     function depositWithReferral(
         uint256 assets,
         address receiver,
-        string calldata referralId
+        string memory referralId
     ) external returns (uint256) {
         return _depositAssetWithReferral(asset(), assets, receiver, referralId);
     }
@@ -252,7 +233,7 @@ abstract contract BaseControlledAsyncRedeem is
         address _asset,
         uint256 assets,
         address receiver,
-        string calldata referralId
+        string memory referralId
     ) external returns (uint256) {
         return _depositAssetWithReferral(_asset, assets, receiver, referralId);
     }
@@ -289,7 +270,7 @@ abstract contract BaseControlledAsyncRedeem is
         address _asset,
         uint256 assets,
         address receiver,
-        string calldata referralId
+        string memory referralId
     ) internal returns (uint256 shares) {
         shares = _depositAsset(_asset, assets, receiver);
         emit Referral(referralId, msg.sender, shares);
@@ -352,17 +333,17 @@ abstract contract BaseControlledAsyncRedeem is
         uint256 shares,
         address receiver
     ) internal {
+        // Call before-deposit hook - use the actual asset amount to be transferred
+        _beforeDeposit(_asset, assets, shares, receiver);
+
         // Checks
         require(assets != 0, EmptyDeposit());
         require(shares != 0, NothingToMint());
 
-        // Pre-deposit hook - use the actual asset amount being transferred
-        beforeDeposit(_asset, assets, shares);
-
-        // Transfer assets from sender to the vault
+        // Transfer assets from sender to the deposit recipient
         IERC20(_asset).safeTransferFrom(
             msg.sender,
-            address(this),
+            _depositRecipient(),
             assets
         );
 
@@ -371,9 +352,6 @@ abstract contract BaseControlledAsyncRedeem is
 
         // Emit event
         emit Deposit(msg.sender, receiver, assets, shares);
-
-        // After-deposit hook - use the actual asset amount that was transferred
-        afterDeposit(_asset, assets, shares);
     }
 
     ///////////////////////
@@ -491,9 +469,9 @@ abstract contract BaseControlledAsyncRedeem is
         uint256 shares,
         address receiver,
         address controller
-    ) internal {
-        // Before-withdrawal hook - use asset units for the hook
-        beforeWithdraw(_asset, assets, shares);
+    ) internal virtual {
+        // Call before-withdrawal hook - use asset units for the hook
+        _beforeWithdraw(_asset, assets, shares, receiver, controller);
 
         // Update claimable redeem
         _consumeClaimableRedeem(controller, _asset, assets, shares);
@@ -501,9 +479,6 @@ abstract contract BaseControlledAsyncRedeem is
         // Transfer assets to the receiver
         IERC20(_asset).safeTransfer(receiver, assets);
         emit Withdraw(msg.sender, receiver, controller, assets, shares);
-        
-        // After-withdrawal hook - use asset units for the hook
-        afterWithdraw(_asset, assets, shares);
     }
 
     ////////////////
@@ -512,13 +487,6 @@ abstract contract BaseControlledAsyncRedeem is
 
     /// @inheritdoc IRedeemAccounting
     function getPendingRedeem(
-        address controller
-    ) external view returns (PendingRedeem memory) {
-        return _getPendingRedeem(controller, asset());
-    }
-
-    /// @inheritdoc IRedeemAccounting
-    function getPendingRedeemForAsset(
         address _asset,
         address _controller
     ) external view returns (PendingRedeem memory) {
@@ -527,17 +495,18 @@ abstract contract BaseControlledAsyncRedeem is
 
     /// @inheritdoc IRedeemAccounting
     function getClaimableRedeem(
-        address _controller
-    ) external view returns (ClaimableRedeem memory) {
-        return _getClaimableRedeem(_controller, asset());
-    }
-
-    /// @inheritdoc IRedeemAccounting
-    function getClaimableRedeemForAsset(
         address _asset,
         address _controller
     ) external view returns (ClaimableRedeem memory) {
         return _getClaimableRedeem(_controller, _asset);
+    }
+
+    /// @inheritdoc IRedeemAccounting
+    function getAutoClaim(
+        address _asset,
+        address _controller
+    ) external view returns (bool) {
+        return _getAutoClaim(_controller, _asset);
     }
 
     /// @inheritdoc IRedeemAccounting
@@ -549,15 +518,6 @@ abstract contract BaseControlledAsyncRedeem is
     }
 
     /// @inheritdoc IRedeemAccounting
-    function pendingRedeemRequestForAsset(
-        address _asset,
-        uint256, // requestId
-        address _controller
-    ) external view returns (uint256) {
-        return _getPendingRedeem(_controller, _asset).shares;
-    }
-
-    /// @inheritdoc IRedeemAccounting
     function claimableRedeemRequest(
         uint256, // requestId
         address _controller
@@ -565,56 +525,47 @@ abstract contract BaseControlledAsyncRedeem is
         return _getClaimableRedeem(_controller, asset()).shares;
     }
 
-    /// @inheritdoc IRedeemAccounting
-    function claimableRedeemRequestForAsset(
-        address _asset,
-        uint256, // requestId
-        address _controller
-    ) external view returns (uint256) {
-        return _getClaimableRedeem(_controller, _asset).shares;
-    }
-
     /////////////////////////////////
     // Preview Functions Overrides //
     /////////////////////////////////
 
     /// @notice Preview shares for deposit
-    /// @param assets Amount to deposit
-    /// @return shares Amount of shares received
+    /// @param assets Amount of assets to deposit
+    /// @return shares Amount of shares to be received
     /// @dev Returns 0 if vault is paused
     function previewDeposit(
         uint256 assets
     ) public view virtual override returns (uint256) {
-        return paused() ? 0 : super.previewDeposit(assets);
+        return previewDepositForAsset(asset(), assets);
     }
 
     /// @notice Preview shares for deposit
     /// @param _asset Asset
-    /// @param assets Amount to deposit
-    /// @return shares Amount of shares received
+    /// @param assets Amount of assets to deposit
+    /// @return shares Amount of shares to be received
     /// @dev Returns 0 if vault is paused
     function previewDepositForAsset(
         address _asset,
         uint256 assets
     ) public view virtual returns (uint256) {
         // Convert to underlying for share calculation
-        uint256 baseAssets = _convertToUnderlying(_asset, assets);
+        uint256 baseAssets = convertToUnderlying(_asset, assets, Adjustment.DOWN);
         return paused() ? 0 : super.previewDeposit(baseAssets);
     }
 
     /// @notice Preview assets for mint
-    /// @param shares Amount to mint
+    /// @param shares Amount of shares to mint
     /// @return assets Amount of assets required
     /// @dev Returns 0 if vault is paused
     function previewMint(
         uint256 shares
     ) public view virtual override returns (uint256) {
-        return paused() ? 0 : super.previewMint(shares);
+        return previewMintForAsset(asset(), shares);
     }
 
     /// @notice Preview assets for mint
     /// @param _asset Asset to deposit in
-    /// @param shares Amount to mint
+    /// @param shares Amount of shares to mint
     /// @return assets Amount of assets required
     /// @dev Returns 0 if vault is paused
     function previewMintForAsset(
@@ -623,41 +574,47 @@ abstract contract BaseControlledAsyncRedeem is
     ) public view virtual returns (uint256) {
         // Calculate assets needed in underlying units, then convert to asset units
         uint256 baseAssets = super.previewMint(shares);
-        return paused() ? 0 : _convertFromUnderlying(_asset, baseAssets);
+        return paused() ? 0 : convertFromUnderlying(_asset, baseAssets, Adjustment.UP);
     }
 
     /// @dev Preview withdraw not supported for async flows
     function previewWithdraw(
         uint256
     ) public pure override returns (uint256) {
-        revert CannotPreviewWithdrawInAsyncVault();
+        revert();
     }
 
     /// @dev Preview redeem not supported for async flows
     function previewRedeem(
         uint256
     ) public pure override returns (uint256) {
-        revert CannotPreviewRedeemInAsyncVault();
+        revert();
     }
 
     ///////////////////////////////
     // Deposti & Withdraw Limits //
     ///////////////////////////////
 
+    /// @dev Whether `receiver` may receive freshly minted shares; mirrors the `_update` receiver gate.
+    ///      Gating variants override this so the deposit/mint limits don't over-advertise.
+    function _canReceiveShares(address /* receiver */) internal view virtual returns (bool) {
+        return true;
+    }
+
     /// @notice Get max assets for deposit
     /// @return assets Maximum deposit amount
     function maxDeposit(
-        address // receiver
+        address receiver
     ) public view virtual override returns (uint256) {
-        return paused() ? 0 : type(uint256).max;
+        return (paused() || !_canReceiveShares(receiver)) ? 0 : type(uint256).max;
     }
 
     /// @notice Get max shares for mint
     /// @return shares Maximum mint amount
     function maxMint(
-        address // receiver
+        address receiver
     ) public view virtual override returns (uint256) {
-        return paused() ? 0 : type(uint256).max;
+        return (paused() || !_canReceiveShares(receiver)) ? 0 : type(uint256).max;
     }
 
     /// @notice Get max assets for withdraw
@@ -666,7 +623,7 @@ abstract contract BaseControlledAsyncRedeem is
     function maxWithdraw(
         address controller
     ) public view override returns (uint256) {
-        return _getClaimableRedeem(controller, asset()).assets;
+        return maxWithdrawForAsset(asset(), controller);
     }
 
     /// @notice Get max assets for withdraw
@@ -676,7 +633,7 @@ abstract contract BaseControlledAsyncRedeem is
     function maxWithdrawForAsset(
         address _asset,
         address controller
-    ) external view returns (uint256) {
+    ) public view returns (uint256) {
         return _getClaimableRedeem(controller, _asset).assets;
     }
 
@@ -685,7 +642,7 @@ abstract contract BaseControlledAsyncRedeem is
     function maxRedeem(
         address controller
     ) public view override returns (uint256) {
-        return _getClaimableRedeem(controller, asset()).shares;
+        return maxRedeemForAsset(asset(), controller);
     }
 
     /// @notice Get max shares for redeem
@@ -695,7 +652,7 @@ abstract contract BaseControlledAsyncRedeem is
     function maxRedeemForAsset(
         address _asset,
         address controller
-    ) external view returns (uint256) {
+    ) public view returns (uint256) {
         return _getClaimableRedeem(controller, _asset).shares;
     }
 
@@ -703,41 +660,22 @@ abstract contract BaseControlledAsyncRedeem is
     // Request Redeem //
     ////////////////////
 
-    /// @notice Request redeem for msg.sender
-    /// @param shares Amount to redeem
-    /// @return requestId Request identifier
-    function requestRedeem(uint256 shares) external returns (uint256 requestId) {
-        return _requestRedeemOfAsset(asset(), shares, msg.sender, msg.sender);
-    }
-
-    /// @notice Request redeem of shares
-    /// @param shares Amount to redeem
-    /// @param controller Share recipient
-    /// @param owner Share owner
-    /// @return requestId Request identifier
-    function requestRedeem(
-        uint256 shares,
-        address controller,
-        address owner
-    ) external returns (uint256 requestId) {
-        return _requestRedeemOfAsset(asset(), shares, controller, owner);
-    }
-
     /// @notice Request redeem of shares
     /// @param _asset Asset
     /// @param shares Amount to redeem
-    /// @param controller Share recipient
+    /// @param controller Account that controls/claims this request; must be msg.sender or have approved msg.sender as operator
     /// @param owner Share owner
+    /// @param autoClaim If true, fulfilling this request auto-delivers assets to controller in the same tx
     /// @return requestId Request identifier
-    function requestRedeemOfAsset(
+    function requestRedeem(
         address _asset,
         uint256 shares,
         address controller,
-        address owner
+        address owner,
+        bool autoClaim
     ) external returns (uint256 requestId) {
-        // Validate that the asset is supported by the rate provider
-        require(rateProvider().isSupported(_asset), AssetNotSupported());
-        return _requestRedeemOfAsset(_asset, shares, controller, owner);
+        _ensureIsSupported(_asset);
+        return _requestRedeemOfAsset(_asset, shares, controller, owner, autoClaim);
     }
 
     /// @dev Internal function for processing redeem requests
@@ -745,17 +683,15 @@ abstract contract BaseControlledAsyncRedeem is
         address _asset,
         uint256 shares,
         address controller,
-        address owner
-    ) internal checkAccess(owner) returns (uint256 requestId) {
+        address owner,
+        bool autoClaim
+    ) internal checkAccess(owner) checkAccess(controller) returns (uint256 requestId) {
         // Checks
         require(shares != 0, NothingToRedeem());
         require(balanceOf(owner) >= shares, InsufficientBalance());
 
-        // Call beforeRequestRedeem hook
-        beforeRequestRedeem(_asset, shares, controller, owner);
-
-        // Update pending redeem
-        _increasePendingRedeem(controller, _asset, shares);
+        // Update pending redeem and persist autoClaim preference (last-writer-wins)
+        _increasePendingRedeem(controller, _asset, shares, autoClaim);
 
         // Spend user's shares allowance
         _spendAllowance(owner, address(this), shares);
@@ -764,7 +700,7 @@ abstract contract BaseControlledAsyncRedeem is
 
         // Emit event
         emit RedeemRequest(controller, owner, REQUEST_ID, msg.sender, shares);
-        
+
         return REQUEST_ID;
     }
 
@@ -773,52 +709,17 @@ abstract contract BaseControlledAsyncRedeem is
     ////////////////////////
 
     /// @notice Cancel redeem request for controller
-    /// @param controller Controller address
-    /// @return shares Amount of shares canceled
-    /// @dev Transfers pending shares back to receiver
-    function cancelRedeemRequest(address controller) external returns (uint256 shares) {
-        shares = _cancelRedeemForAllPendingShares(asset(), controller, msg.sender);
-    }
-
-    /// @notice Cancel redeem request for controller
     /// @param _asset Asset
-    /// @param controller Controller address
-    /// @param receiver Share recipient
-    /// @return shares Amount of shares canceled
-    /// @dev Transfers pending shares back to receiver
-    function cancelRedeemRequestOfAsset(
-        address _asset,
-        address controller,
-        address receiver
-    ) external returns (uint256 shares) {
-        shares = _cancelRedeemForAllPendingShares(_asset, controller, receiver);
-    }
-
-    /// @notice Cancel redeem request for controller
     /// @param controller Controller address
     /// @param receiver Share recipient
     /// @return shares Amount of shares canceled
     /// @dev Transfers pending shares back to receiver
     function cancelRedeemRequest(
+        address _asset,
         address controller,
         address receiver
     ) external returns (uint256 shares) {
-        shares = _cancelRedeemForAllPendingShares(asset(), controller, receiver);
-    }
-
-    /// @notice Cancel redeem request for controller partially, for a specific amount of shares
-    /// @param _asset Asset
-    /// @param shares Amount of shares to cancel
-    /// @param controller Controller address
-    /// @param receiver Share recipient
-    /// @dev Transfers pending shares back to receiver
-    function cancelRedeemRequestPartially(
-        address _asset,
-        uint256 shares,
-        address controller,
-        address receiver
-    ) external {
-        _handleRedeemRequestCancelation(_asset, shares, controller, receiver);
+        shares = _cancelRedeemForAllPendingShares(_asset, controller, receiver);
     }
 
     /// @dev Internal function for canceling redeem requests for all pending shares for a user
@@ -853,22 +754,6 @@ abstract contract BaseControlledAsyncRedeem is
     // Redeem Fulfillment //
     ////////////////////////
 
-    /// @notice Fulfill redeem request
-    /// @param _asset Asset
-    /// @param shares Amount to redeem
-    /// @param controller Controller address
-    /// @return assets Amount of claimable assets
-    function fulfillRedeem(
-        address _asset,
-        uint256 shares,
-        address controller
-    ) external virtual onlyRole(OPERATOR_ROLE) returns (uint256 assets) {
-        // Convert shares to underlying assets, then to asset units
-        uint256 underlyingAssets = convertToAssets(shares);
-        assets = _fulfillRedeem(_asset, _convertFromUnderlying(_asset, underlyingAssets), shares, controller);
-        _burn(address(this), shares);
-    }
-
     /// @notice Fulfill multiple redeem requests
     /// @param assets Array of assets
     /// @param shares Array of share amounts
@@ -885,19 +770,18 @@ abstract contract BaseControlledAsyncRedeem is
         require(length == shares.length && length == controllers.length, InputLengthMismatch());
 
         uint256 totalShares;
-        uint256 _totalAssets = totalAssets();
-        uint256 _totalSupply = totalSupply();
         uint256[] memory result = new uint256[](length);
         for (uint256 i; i < length; ) {
             // Fulfill redeem
             address _asset = assets[i];
             uint256 _shares = shares[i];
             address _controller = controllers[i];
-            uint256 underlyingAssets = _optimizedConvertToAssets(_shares, _totalAssets, _totalSupply);
+            uint256 underlyingAssets = convertToAssets(_shares);
+            uint256 convertedAssets = convertFromUnderlying(_asset, underlyingAssets, Adjustment.DOWN);
             uint256 assetsFulfilled = _fulfillRedeem(
-                _asset, 
-                _convertFromUnderlying(_asset, underlyingAssets), 
-                _shares, 
+                _asset,
+                convertedAssets,
+                _shares,
                 _controller
             );
 
@@ -925,8 +809,11 @@ abstract contract BaseControlledAsyncRedeem is
         require(shares != 0, NothingToRedeem());
         require(assets != 0, NothingToWithdraw());
 
-        // Before fulfill redeem hook
-        beforeFulfillRedeem(_asset, assets, shares);
+        // Call before-fulfill redeem hook
+        _beforeFulfillRedeem(_asset, assets, shares);
+
+        // Snapshot autoClaim BEFORE consuming pending — the consume clears the flag when shares hit 0
+        bool autoClaim = _getAutoClaim(controller, _asset);
 
         // Update pending and claimable redeems
         _consumePendingRedeem(controller, _asset, shares);
@@ -935,74 +822,71 @@ abstract contract BaseControlledAsyncRedeem is
         // Emit event
         emit RedeemRequestFulfilled(controller, msg.sender, shares, assets);
 
-        // After fulfill redeem hook
-        afterFulfillRedeem(_asset, assets, shares, controller);
+        // Auto-claim path: equivalent to the controller invoking `redeem` immediately after fulfillment.
+        if (autoClaim) {
+            uint256 deliverable = _calculateClaimableAssetsForShares(controller, _asset, shares);
+            require(deliverable != 0, NothingToWithdraw());
+            _performWithdraw(_asset, deliverable, shares, controller, controller);
+        }
 
         return assets;
     }
 
-    ///////////////////////////
-    // Rate Provider Updates //
-    ///////////////////////////
-
-    /// @notice Propose new rate provider for owner acceptance after delay
-    /// @param newRateProvider Address of the new rate provider
-    function proposeRateProvider(address newRateProvider) external onlyOwner {
-        require(newRateProvider != address(0), MissingRateProvider());
-
-        _getBaseAsyncRedeemStorage().proposedRateProvider = AddressUpdateProposal({
-            addr: newRateProvider,
-            timestamp: uint96(block.timestamp)
-        });
-
-        emit RateProviderProposed(newRateProvider);
+    /// @dev Internal helper to check that `_asset` is supported in rateProvider
+    function _ensureIsSupported(address _asset) internal view {
+        require(rateProvider().isSupported(_asset), AssetNotSupported());
     }
 
-    /// @notice Accept proposed rate provider
-    /// @dev Pauses vault to ensure provider setup and prevent deposits with faulty prices
-    /// @dev Oracle must be switched before unpausing
-    function acceptProposedRateProvider(address newRateProvider) external onlyOwner {
-        BaseAsyncRedeemStorage storage $ = _getBaseAsyncRedeemStorage();
-        AddressUpdateProposal memory proposal = $.proposedRateProvider;
+    /////////////////////
+    // Address Updates //
+    /////////////////////
 
-        require(proposal.addr != address(0), NoRateProviderProposed());
-        require(proposal.addr == newRateProvider, ProposedRateProviderMismatch());
-        require(block.timestamp >= proposal.timestamp + ADDRESS_UPDATE_TIMELOCK, CannotAcceptRateProviderYet());
-        require(block.timestamp <= proposal.timestamp + MAX_ADDRESS_UPDATE_WAIT, RateProviderUpdateExpired());
+    /// @notice Propose an address update for the given key
+    /// @param key The address key (see contract constants)
+    /// @param newAddress The new address being proposed
+    function proposeAddressUpdate(bytes32 key, address newAddress) external onlyOwner {
+        _timelockForKey(key);
+        _proposeAddressUpdate(key, newAddress);
+        emit AddressUpdateProposed(key, newAddress);
+    }
 
-        address oldRateProvider = address($.rateProvider);
-        $.rateProvider = IUltraVaultRateProvider(newRateProvider);
-        delete $.proposedRateProvider;
-        emit RateProviderUpdated(oldRateProvider, newRateProvider);
+    /// @notice Accept a previously proposed address update for the given key
+    /// @param key The address key (see contract constants)
+    /// @param newAddress The address being confirmed (must match the proposal)
+    /// @dev Ensures the vault is paused so operators can verify the setup before resuming
+    function acceptAddressUpdate(bytes32 key, address newAddress) external onlyOwner {
+        uint256 timelock = _timelockForKey(key);
+        address oldAddress = _acceptAddressUpdate(key, newAddress, timelock);
+        emit AddressUpdated(key, oldAddress, newAddress);
 
-        // Pause to manually check the setup by operators
-        _pause();
+        if (!paused()) _pause();
+    }
+
+    /// @dev Resolve the per-key timelock duration. Reverts UnknownAddressKey for unsupported keys.
+    /// @dev Overrides extend this with additional supported keys and must fall back to `super`.
+    function _timelockForKey(bytes32 key) internal pure virtual returns (uint256) {
+        if (key == RATE_PROVIDER_KEY) return RATE_PROVIDER_TIMELOCK;
+        if (key == UPGRADE_MODULE_KEY) return UPGRADE_MODULE_TIMELOCK;
+        revert UnknownAddressKey(key);
     }
 
     ///////////
     // Hooks //
     ///////////
 
-    /// @dev Hook for executing custom logic right before deposit/mint
-    function beforeDeposit(address _asset, uint256 assets, uint256 shares) internal virtual {}
+    /// @dev Hook for executing custom logic right before deposit/mint (e.g. gating the depositor)
+    function _beforeDeposit(address _asset, uint256 assets, uint256 shares, address receiver) internal virtual {}
 
-    /// @dev Hook for executing custom logic right after deposit/mint
-    function afterDeposit(address _asset, uint256 assets, uint256 shares) internal virtual {}
+    /// @dev Address that receives the deposited assets. Defaults to the vault itself.
+    function _depositRecipient() internal view virtual returns (address) {
+        return address(this);
+    }
 
     /// @dev Hook for executing custom logic right before withdraw/redeem
-    function beforeWithdraw(address _asset, uint256 assets, uint256 shares) internal virtual {}
-
-    /// @dev Hook for executing custom logic right after withdraw/redeem
-    function afterWithdraw(address _asset, uint256 assets, uint256 shares) internal virtual {}
-
-    /// @dev Hook for inheriting contracts after request redeem
-    function beforeRequestRedeem(address _asset, uint256 shares, address controller, address owner) internal virtual {}
+    function _beforeWithdraw(address _asset, uint256 assets, uint256 shares, address receiver, address controller) internal virtual {}
 
     /// @dev Hook for inheriting contracts before fulfill
-    function beforeFulfillRedeem(address _asset, uint256 assets, uint256 shares) internal virtual {}
-
-    /// @dev Hook for inheriting contracts after fulfill
-    function afterFulfillRedeem(address _asset, uint256 assets, uint256 shares, address controller) internal virtual {}
+    function _beforeFulfillRedeem(address _asset, uint256 assets, uint256 shares) internal virtual {}
 
     //////////////
     // Pausable //
@@ -1015,14 +899,14 @@ abstract contract BaseControlledAsyncRedeem is
     }
 
     /// @notice Pause vault operations
-    /// @dev Caller must be owner or have PAUSER_ROLE
+    /// @dev Caller must have PAUSER_ROLE
     function pause() external onlyRole(PAUSER_ROLE) {
         _pause();
     }
 
     /// @notice Unpause vault operations
-    /// @dev Caller must be owner or have PAUSER_ROLE
-    function unpause() external onlyRole(PAUSER_ROLE) {
+    /// @dev Caller must have UNPAUSER_ROLE
+    function unpause() external onlyRole(UNPAUSER_ROLE) {
         _unpause();
     }
 
@@ -1044,14 +928,11 @@ abstract contract BaseControlledAsyncRedeem is
         _;
     }
 
-    /// @dev Checks that caller has the UPGRADER_ROLE required to execute an upgrade
-    function _authorizeUpgrade(address newImplementation) internal override onlyRole(UPGRADER_ROLE) {}
-
-    /// @dev Checks that caller has the UPGRADER_ROLE required to propose an upgrade
-    function _authorizeUpgradeProposal() internal override onlyRole(UPGRADER_ROLE) {}
-
-    /// @dev Checks that caller has the UPGRADER_ROLE required to cancel a pending upgrade
-    function _authorizeUpgradeCancellation() internal override onlyRole(UPGRADER_ROLE) {}
+    /// @dev Restricts upgrades to the registered upgrade module
+    /// @dev Timelock and UPGRADER_ROLE checks are enforced by the module before it calls back here
+    function _authorizeUpgrade(address) internal view override {
+        require(msg.sender == upgradeModule(), AccessDenied());
+    }
 
     ////////////
     // ERC165 //
