@@ -5,7 +5,7 @@ import { IUltraVault } from "src/interfaces/IUltraVault.sol";
 import { IUltraVaultEthAdapter } from "src/interfaces/IUltraVaultEthAdapter.sol";
 import { IWETH9 } from "src/interfaces/IWETH9.sol";
 import { Ownable2StepUpgradeable } from "@openzeppelin/contracts-upgradeable/access/Ownable2StepUpgradeable.sol";
-import { UUPSUpgradeable } from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
+import { TimelockedUUPSUpgradeable } from "src/utils/TimelockedUUPSUpgradeable.sol";
 import { PausableUpgradeable } from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 
 /// @title UltraVaultEthAdapter
@@ -14,7 +14,7 @@ import { PausableUpgradeable } from "@openzeppelin/contracts-upgradeable/utils/P
 contract UltraVaultEthAdapter is
     Ownable2StepUpgradeable,
     PausableUpgradeable,
-    UUPSUpgradeable,
+    TimelockedUUPSUpgradeable,
     IUltraVaultEthAdapter
 {
     /////////////
@@ -48,7 +48,7 @@ contract UltraVaultEthAdapter is
     function initialize(address _owner) external initializer {
         __Ownable_init(_owner);
         __Ownable2Step_init();
-        __UUPSUpgradeable_init();
+        __TimelockedUUPSUpgradeable_init();
 
         // Approve vault to spend unlimited WETH from this adapter
         weth.approve(address(vault), type(uint256).max);
@@ -168,4 +168,10 @@ contract UltraVaultEthAdapter is
 
     /// @dev Internal function to authorize upgrades
     function _authorizeUpgrade(address newImplementation) internal override onlyOwner {}
+
+    /// @dev Checks that caller is the owner, required to propose an upgrade
+    function _authorizeUpgradeProposal() internal override onlyOwner {}
+
+    /// @dev Checks that caller is the owner, required to cancel a pending upgrade
+    function _authorizeUpgradeCancellation() internal override onlyOwner {}
 }

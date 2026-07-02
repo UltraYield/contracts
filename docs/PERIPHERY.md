@@ -6,11 +6,12 @@ Periphery contracts sit outside the core vault accounting and are not required f
 
 `UltraVaultEthAdapter` lets users deposit and redeem **native ETH** against an `UltraVault` whose underlying asset is **WETH**. The vault itself only understands ERC-20 WETH; the adapter is the thin wrap/unwrap layer that bridges native ETH to it, so wallets and dapps can offer a one-click ETH flow without the user manually wrapping.
 
-It is upgradeable: `Ownable2StepUpgradeable`, `PausableUpgradeable`, and `UUPSUpgradeable`, deployed behind a proxy.
+It is upgradeable: `Ownable2StepUpgradeable`, `PausableUpgradeable`, and `TimelockedUUPSUpgradeable`, deployed behind a proxy.
 
 - `vault` and `weth` are `immutable`, fixed in the implementation `constructor`. The constructor rejects zero addresses (`ZeroAddress`) and enforces `weth == vault.asset()` (`AssetMismatch`), so an adapter can never be paired with a vault whose asset is not its WETH.
 - `initialize(owner)` sets the `owner` (2-step transfer) and grants the vault a **one-time unlimited WETH approval**, so per-deposit approvals are never needed.
-- The `owner` is the only role: it can `pause()` / `unpause()` and is the sole authority for `_authorizeUpgrade`.
+- The `owner` is the only role: it can `pause()` / `unpause()` and is the sole authority over upgrades.
+- Upgrades are **timelocked**: the owner must `proposeUpgrade(impl, data)`, wait the 7-day `MIN_UPGRADE_DELAY`, then call `upgradeToAndCall` with the exact same pair; `cancelUpgrade` drops a pending proposal. See [Upgrades](UPGRADES.md#periphery-self-upgrades).
 
 ### Deposit flow
 
