@@ -64,6 +64,7 @@ contract UltraVaultFactory is AccessControlUpgradeable, UUPSUpgradeable, IUltraV
     //////////
 
     /// @notice Disable implementation's initializer
+    /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
         _disableInitializers();
     }
@@ -93,6 +94,7 @@ contract UltraVaultFactory is AccessControlUpgradeable, UUPSUpgradeable, IUltraV
 
         UltraVaultFactoryStorage storage $ = _getUltraVaultFactoryStorage();
         bytes32 key = _getVersionKey(version);
+        require(key != bytes32(0), ZeroVersionKey());
         require($.versions[key].implementation == address(0), VersionAlreadyRegistered(key));
         require($.versionKeyByImpl[implementation] == bytes32(0), ImplementationAlreadyRegistered());
 

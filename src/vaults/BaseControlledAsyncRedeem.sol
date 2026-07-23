@@ -218,7 +218,7 @@ abstract contract BaseControlledAsyncRedeem is
     function depositWithReferral(
         uint256 assets,
         address receiver,
-        string memory referralId
+        bytes32 referralId
     ) external returns (uint256) {
         return _depositAssetWithReferral(asset(), assets, receiver, referralId);
     }
@@ -233,7 +233,7 @@ abstract contract BaseControlledAsyncRedeem is
         address _asset,
         uint256 assets,
         address receiver,
-        string memory referralId
+        bytes32 referralId
     ) external returns (uint256) {
         return _depositAssetWithReferral(_asset, assets, receiver, referralId);
     }
@@ -270,7 +270,7 @@ abstract contract BaseControlledAsyncRedeem is
         address _asset,
         uint256 assets,
         address receiver,
-        string memory referralId
+        bytes32 referralId
     ) internal returns (uint256 shares) {
         shares = _depositAsset(_asset, assets, receiver);
         emit Referral(referralId, msg.sender, shares);
@@ -400,12 +400,14 @@ abstract contract BaseControlledAsyncRedeem is
         address controller
     ) internal checkAccess(controller) returns (uint256 shares) {
         require(assets != 0, NothingToWithdraw());
-        
+
         // Calculate shares to burn based on the claimable redeem ratio
         shares = _calculateClaimableSharesForAssets(controller, _asset, assets);
         require(shares != 0, NothingToRedeem());
 
-        // Execute withdraw
+        // Execute withdraw. If burning `shares` exhausts the controller's claimable shares,
+        // `consumeClaimableRedeem` clears any rounding remainder so nothing is stranded and
+        // maxWithdraw/maxRedeem cannot advertise an unclaimable balance (see BCA-03M).
         _performWithdraw(_asset, assets, shares, receiver, controller);
     }
 
@@ -592,7 +594,7 @@ abstract contract BaseControlledAsyncRedeem is
     }
 
     ///////////////////////////////
-    // Deposti & Withdraw Limits //
+    // Deposit & Withdraw Limits //
     ///////////////////////////////
 
     /// @dev Whether `receiver` may receive freshly minted shares; mirrors the `_update` receiver gate.
@@ -704,9 +706,9 @@ abstract contract BaseControlledAsyncRedeem is
         return REQUEST_ID;
     }
 
-    ////////////////////////
-    // Redeem Cancelation //
-    ////////////////////////
+    /////////////////////////
+    // Redeem Cancellation //
+    /////////////////////////
 
     /// @notice Cancel redeem request for controller
     /// @param _asset Asset
@@ -729,11 +731,11 @@ abstract contract BaseControlledAsyncRedeem is
         address receiver
     ) internal returns (uint256 shares) {
         shares = _getPendingRedeem(controller, _asset).shares;
-        _handleRedeemRequestCancelation(_asset, shares, controller, receiver);
+        _handleRedeemRequestCancellation(_asset, shares, controller, receiver);
     }
 
     /// @dev Internal function for canceling redeem requests
-    function _handleRedeemRequestCancelation(
+    function _handleRedeemRequestCancellation(
         address _asset,
         uint256 shares,
         address controller,

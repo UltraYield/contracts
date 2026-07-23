@@ -22,9 +22,11 @@ contract UltraVaultEthAdapter is
     /////////////
 
     /// @notice The UltraVault instance to deposit into
+    /// @custom:oz-upgrades-unsafe-allow state-variable-immutable
     IUltraVault public immutable vault;
 
     /// @notice The WETH token address
+    /// @custom:oz-upgrades-unsafe-allow state-variable-immutable
     IWETH9 public immutable weth;
 
     /////////////////
@@ -34,6 +36,7 @@ contract UltraVaultEthAdapter is
     /// @notice Initialize the adapter with vault and WETH addresses
     /// @param _vault Address of the UltraVault contract
     /// @param _weth Address of the WETH token
+    /// @custom:oz-upgrades-unsafe-allow constructor
     constructor(address _vault, address _weth) {
         require(_vault != address(0), ZeroAddress());
         require(_weth != address(0), ZeroAddress());
@@ -94,7 +97,7 @@ contract UltraVaultEthAdapter is
     /// @param referralId Referral identifier
     /// @return shares Amount of shares minted
     function depositEthWithReferral(
-        string calldata referralId
+        bytes32 referralId
     ) external payable returns (uint256 shares) {
         return depositEthWithReferral(msg.sender, referralId);
     }
@@ -105,7 +108,7 @@ contract UltraVaultEthAdapter is
     /// @return shares Amount of shares minted
     function depositEthWithReferral(
         address receiver,
-        string calldata referralId
+        bytes32 referralId
     ) public payable returns (uint256 shares) {
         shares = depositEth(receiver);
         emit Referral(referralId, msg.sender, shares);
@@ -136,14 +139,14 @@ contract UltraVaultEthAdapter is
         // Redeem WETH from vault to this adapter
         address controller = msg.sender;
         ethAmount = vault.redeemAsset(address(weth), shares, address(this), controller);
-        
+
+        emit EthWithdraw(msg.sender, receiver, controller, ethAmount, shares);
+
         // Unwrap WETH to ETH
         weth.withdraw(ethAmount);
         // Send ETH to receiver
         (bool success, ) = receiver.call{value: ethAmount}("");
         require(success, EthTransferFailed());
-        
-        emit EthWithdraw(msg.sender, receiver, controller, ethAmount, shares);
     }
 
     //////////////

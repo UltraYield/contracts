@@ -29,7 +29,7 @@ interface IUltraVaultEthAdapter {
         uint256 assets,
         uint256 shares
     );
-    event Referral(string indexed referralId, address indexed user, uint256 shares);
+    event Referral(bytes32 indexed referralId, address indexed user, uint256 shares);
 
     ////////////////
     // Immutables //
@@ -62,7 +62,7 @@ interface IUltraVaultEthAdapter {
     /// @notice Deposit native ETH with referral tracking to msg.sender
     /// @param referralId Referral identifier
     /// @return shares Amount of shares minted
-    function depositEthWithReferral(string calldata referralId) external payable returns (uint256 shares);
+    function depositEthWithReferral(bytes32 referralId) external payable returns (uint256 shares);
 
     /// @notice Deposit native ETH with referral tracking
     /// @param receiver Address to receive the shares
@@ -70,7 +70,7 @@ interface IUltraVaultEthAdapter {
     /// @return shares Amount of shares minted
     function depositEthWithReferral(
         address receiver,
-        string calldata referralId
+        bytes32 referralId
     ) external payable returns (uint256 shares);
 
     ////////////

@@ -5,6 +5,7 @@ import { CCIPReceiver } from "@chainlink/contracts-ccip/src/v0.8/ccip/applicatio
 import { Client } from "@chainlink/contracts-ccip/src/v0.8/ccip/libraries/Client.sol";
 import { BaseVaultPriceManager } from "src/crosschain/BaseVaultPriceManager.sol";
 import { PriceSyncMessage, PriceSyncMessageLib } from "src/crosschain/PriceSyncMessage.sol";
+import { IPausable } from "src/interfaces/IPausable.sol";
 
 /// @title RemoteVaultPriceManager
 /// @notice Destination-chain manager: applies price updates broadcast over CCIP into its
@@ -23,13 +24,18 @@ contract RemoteVaultPriceManager is BaseVaultPriceManager, CCIPReceiver {
         uint256 vestingDuration,
         uint256 startTimestamp
     );
+    /// @notice Emitted when a broadcast's pause flag pauses the local vault. `nonce` is the
+    ///         carrying message's nonce (may be stale — pause is processed out of order).
+    event PauseSynced(uint64 nonce);
+    /// @notice Emitted when a delivered price curve is dropped as stale/out-of-order. The
+    ///         message is still accepted (not reverted) so any pause flag it carries applies.
+    event StaleUpdateSkipped(uint64 received, uint64 lastSeen);
 
     ////////////
     // Errors //
     ////////////
 
     error UntrustedSource(uint64 sourceChainSelector, address sender);
-    error StaleNonce(uint64 received, uint64 lastSeen);
 
     /////////////
     // Storage //
@@ -76,6 +82,15 @@ contract RemoteVaultPriceManager is BaseVaultPriceManager, CCIPReceiver {
     //////////////////
 
     /// @inheritdoc CCIPReceiver
+    /// @dev The pause flag and the price curve are handled with different ordering rules:
+    ///
+    ///      - **Pause** is honored regardless of nonce. An earlier breaching broadcast can be
+    ///        delivered after a newer one (CCIP does not guarantee ordering); processing the
+    ///        pause before the nonce gate — and never reverting a stale message — guarantees a
+    ///        propagated pause is never dropped. It is idempotent (no-op if already paused).
+    ///      - **Price curve** is strictly nonce-ordered. A stale/duplicate/out-of-order curve
+    ///        is skipped (not reverted) so the array stays monotonic and no update is
+    ///        double-applied, while any pause the same message carried still lands.
     function _ccipReceive(Client.Any2EVMMessage memory message) internal override {
         address sender = abi.decode(message.sender, (address));
         if (message.sourceChainSelector != trustedSourceChainSelector || sender != trustedSender) {
@@ -83,8 +98,18 @@ contract RemoteVaultPriceManager is BaseVaultPriceManager, CCIPReceiver {
         }
 
         PriceSyncMessage memory psm = PriceSyncMessageLib.decode(message.data);
+
+        // Pause first, independent of nonce ordering. Idempotent.
+        if (psm.pauseRequired && !IPausable(vault).paused()) {
+            IPausable(vault).pause();
+            emit PauseSynced(psm.nonce);
+        }
+
+        // Nonce-ordered price curve. Stale/out-of-order curves are dropped without reverting,
+        // so the pause above (which may ride a stale message) persists.
         if (psm.nonce <= lastNonce) {
-            revert StaleNonce(psm.nonce, lastNonce);
+            emit StaleUpdateSkipped(psm.nonce, lastNonce);
+            return;
         }
         lastNonce = psm.nonce;
 

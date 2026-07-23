@@ -63,6 +63,7 @@ interface IUltraVaultFactory {
     error ZeroImplementation();
     error ImplementationNotContract(address implementation);
     error ZeroInitSelector();
+    error ZeroVersionKey();
     error VersionAlreadyRegistered(bytes32 versionKey);
     error ImplementationAlreadyRegistered();
     error UnknownVersion();

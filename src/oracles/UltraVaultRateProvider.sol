@@ -53,9 +53,25 @@ contract UltraVaultRateProvider is Ownable2Step, IUltraVaultRateProvider {
     //////////
 
     constructor(address _owner, address _baseAsset) Ownable(_owner) {
+        // Ensure decimals within allowed range
+        uint8 decimals = IERC20Metadata(_baseAsset).decimals();
+        require(decimals >= MIN_DECIMALS && decimals <= MAX_DECIMALS, InvalidDecimals());
+
         baseAsset = _baseAsset;
-        baseDecimals = IERC20Metadata(_baseAsset).decimals();
-        _addAsset(_baseAsset, true, address(0), 0);
+        baseDecimals = decimals;
+
+        // Add the base asset directly; state is empty and it is pegged with no
+        // rate provider and no adjustment, so the checks in _addAsset are redundant
+        supportedAssets[_baseAsset] = AssetSlot({
+            decimals: decimals,
+            rateProvider: address(0),
+            adjustmentRate: 0,
+            __padding: 0
+        });
+        assetList.push(_baseAsset);
+
+        // Emit event
+        emit AssetAdded(_baseAsset, true, address(0), 0);
     }
 
     /////////////////////////////
@@ -95,13 +111,17 @@ contract UltraVaultRateProvider is Ownable2Step, IUltraVaultRateProvider {
 
         // Update storage
         delete supportedAssets[asset];
-        for (uint256 i = 0; i < assetList.length; i++) {
+        // The asset is guaranteed to be present, so only scan up to the last
+        // entry: if it is not found earlier it must be the last one, which the
+        // trailing pop removes without a redundant self-assignment
+        uint256 lastIndex = assetList.length - 1;
+        for (uint256 i = 0; i < lastIndex; i++) {
             if (assetList[i] == asset) {
-                assetList[i] = assetList[assetList.length - 1];
-                assetList.pop();
+                assetList[i] = assetList[lastIndex];
                 break;
             }
         }
+        assetList.pop();
 
         // Emit event
         emit AssetRemoved(asset);
@@ -119,11 +139,10 @@ contract UltraVaultRateProvider is Ownable2Step, IUltraVaultRateProvider {
 
         // Update storage
         AssetSlot storage slot = supportedAssets[asset];
-        address oldRateProvider = slot.rateProvider;
-        slot.rateProvider = newRateProvider;
 
-        // Emit event
-        emit RateProviderUpdated(asset, oldRateProvider, newRateProvider);
+        // Emit event before mutation, reading the old value directly from storage
+        emit RateProviderUpdated(asset, slot.rateProvider, newRateProvider);
+        slot.rateProvider = newRateProvider;
     }
 
     /// @inheritdoc IUltraVaultRateProvider
@@ -135,11 +154,10 @@ contract UltraVaultRateProvider is Ownable2Step, IUltraVaultRateProvider {
 
         // Update storage
         AssetSlot storage slot = supportedAssets[asset];
-        uint56 oldAdjustmentRate = slot.adjustmentRate;
-        slot.adjustmentRate = newAdjustmentRate;
 
-        // Emit event
-        emit AdjustmentRateUpdated(asset, oldAdjustmentRate, newAdjustmentRate);
+        // Emit event before mutation, reading the old value directly from storage
+        emit AdjustmentRateUpdated(asset, slot.adjustmentRate, newAdjustmentRate);
+        slot.adjustmentRate = newAdjustmentRate;
     }
 
     /// @inheritdoc IUltraVaultRateProvider
@@ -236,12 +254,17 @@ contract UltraVaultRateProvider is Ownable2Step, IUltraVaultRateProvider {
         if (adjustmentRate == 0) {
             return amount;
         }
+        // adjustmentRate <= MAX_ADJUSTMENT_RATE < SCALE, so SCALE - adjustmentRate never underflows
         if (adjustment == Adjustment.DOWN) {
-            return Math.mulDiv(amount, SCALE - uint256(adjustmentRate), SCALE, Math.Rounding.Floor);
+            unchecked {
+                return Math.mulDiv(amount, SCALE - uint256(adjustmentRate), SCALE, Math.Rounding.Floor);
+            }
         }
         if (adjustment == Adjustment.UP) {
             // Inverse of DOWN: ceil(amount * SCALE / (SCALE - adjustmentRate))
-            return Math.mulDiv(amount, SCALE, SCALE - uint256(adjustmentRate), Math.Rounding.Ceil);
+            unchecked {
+                return Math.mulDiv(amount, SCALE, SCALE - uint256(adjustmentRate), Math.Rounding.Ceil);
+            }
         }
         revert UnknownAdjustment();
     }

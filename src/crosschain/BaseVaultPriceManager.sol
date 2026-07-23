@@ -150,14 +150,18 @@ abstract contract BaseVaultPriceManager is Ownable2Step {
 
     /// @dev Shared pause-then-write path. On a limit breach: reverts with `UpdateWouldPause`
     ///      if `failOnPause`, else pauses (unless already paused). Then writes the update verbatim.
+    /// @return pauseRequired True if the update breached the local limits (i.e. it paused,
+    ///         or would have but the vault was already paused). The main chain propagates
+    ///         this flag to remotes so they pause even when their own limits don't breach.
     function _applyUpdate(
         uint256 startPrice,
         uint256 targetPrice,
         uint256 vestingDuration,
         uint256 startTimestamp,
         bool failOnPause
-    ) internal {
-        if (wouldTriggerPause(targetPrice)) {
+    ) internal returns (bool pauseRequired) {
+        pauseRequired = wouldTriggerPause(targetPrice);
+        if (pauseRequired) {
             require(!failOnPause, UpdateWouldPause());
             if (!IPausable(vault).paused()) {
                 IPausable(vault).pause();

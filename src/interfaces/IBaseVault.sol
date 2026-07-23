@@ -52,7 +52,7 @@ interface IBaseVaultEvents {
         address indexed receiver,
         uint256 shares
     );
-    event Referral(string indexed referralId, address indexed user, uint256 shares);
+    event Referral(bytes32 indexed referralId, address indexed user, uint256 shares);
 }
 
 /// @title IBaseVault
@@ -165,7 +165,7 @@ interface IBaseVault is
     function depositWithReferral(
         uint256 assets,
         address receiver,
-        string memory referralId
+        bytes32 referralId
     ) external returns (uint256);
 
     /// @notice Helper to deposit particular asset for msg.sender upon referral
@@ -178,7 +178,7 @@ interface IBaseVault is
         address asset,
         uint256 assets,
         address receiver,
-        string memory referralId
+        bytes32 referralId
     ) external returns (uint256);
 
     //////////
@@ -346,9 +346,9 @@ interface IBaseVault is
         address[] memory controllers
     ) external returns (uint256[] memory);
 
-    ////////////////////////
-    // Redeem Cancelation //
-    ////////////////////////
+    /////////////////////////
+    // Redeem Cancellation //
+    /////////////////////////
 
     /// @notice Cancel redeem request for controller
     /// @param asset Asset

@@ -59,10 +59,10 @@ abstract contract TimelockedUUPSUpgradeable is UUPSUpgradeable {
     struct PendingUpgrade {
         // The proposed implementation address
         address implementation;
+        // Earliest when the upgrade can be executed (0 if not proposed)
+        uint96 executionTime;
         // Hash of the data to execute a call after the upgrade
         bytes32 dataHash;
-        // Earliest when the upgrade can be executed (0 if not proposed)
-        uint256 executionTime;
     }
 
     /// @custom:storage-location erc7201:ultrayield.storage.TimelockedUUPSUpgradeable
@@ -138,7 +138,7 @@ abstract contract TimelockedUUPSUpgradeable is UUPSUpgradeable {
     ) internal {
         PendingUpgrade storage pending = _getTimelockedUUPSStorage().pendingUpgrade;
         require(pending.executionTime == 0, PendingUpgradeAlreadyProposed());
-        uint256 executionTime = block.timestamp + MIN_UPGRADE_DELAY;
+        uint96 executionTime = uint96(block.timestamp + MIN_UPGRADE_DELAY);
         pending.implementation = newImplementation;
         pending.dataHash = keccak256(data);
         pending.executionTime = executionTime;

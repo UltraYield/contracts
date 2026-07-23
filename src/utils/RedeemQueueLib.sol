@@ -141,7 +141,10 @@ library RedeemQueueLib {
         Storage storage $ = _getStorage();
         PendingRedeemSlot storage pending = $.pendingRedeems[user][token];
         require(amount <= pending.shares, IRedeemQueueErrors.InsufficientPendingShares(pending.shares, amount));
-        pending.shares -= uint128(amount);
+        // Safe: the require above guarantees amount <= pending.shares
+        unchecked {
+            pending.shares -= uint128(amount);
+        }
         if (pending.shares == 0) {
             pending.requestTime = 0;
             // Clears the flag so future redeem requests start from a clean state
@@ -177,7 +180,21 @@ library RedeemQueueLib {
         ClaimableRedeemSlot storage redeem = _getStorage().claimableRedeems[user][token];
         require(assets <= redeem.assets, IRedeemQueueErrors.InsufficientClaimableAssets(redeem.assets, assets));
         require(shares <= redeem.shares, IRedeemQueueErrors.InsufficientClaimableShares(redeem.shares, shares));
-        redeem.assets -= uint128(assets);
-        redeem.shares -= uint128(shares);
+        // Safe: the requires above guarantee assets <= redeem.assets and shares <= redeem.shares
+        uint128 remainingAssets;
+        uint128 remainingShares;
+        unchecked {
+            remainingAssets = redeem.assets - uint128(assets);
+            remainingShares = redeem.shares - uint128(shares);
+        }
+        // Defense-in-depth: never leave a one-sided remainder. If either dimension is fully
+        // consumed, clear both so a slot can neither strand value nor advertise an
+        // unclaimable balance via maxWithdraw/maxRedeem (see BCA-03M).
+        if (remainingAssets == 0 || remainingShares == 0) {
+            remainingAssets = 0;
+            remainingShares = 0;
+        }
+        redeem.assets = remainingAssets;
+        redeem.shares = remainingShares;
     }
 }

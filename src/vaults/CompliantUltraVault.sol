@@ -108,14 +108,14 @@ contract CompliantUltraVault is UltraVault, IComplianceEvents, IComplianceErrors
 
     /// @dev Block frozen addresses from cancelling pending redeems
     /// @dev Receiver is gated by `_update` on the share transfer back from the vault.
-    function _handleRedeemRequestCancelation(
+    function _handleRedeemRequestCancellation(
         address _asset,
         uint256 shares,
         address controller,
         address receiver
     ) internal override {
         _ensureNotFrozen(controller);
-        super._handleRedeemRequestCancelation(_asset, shares, controller, receiver);
+        super._handleRedeemRequestCancellation(_asset, shares, controller, receiver);
     }
 
     /// @dev Gates share transfers and mints.

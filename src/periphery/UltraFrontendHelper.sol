@@ -54,7 +54,10 @@ contract UltraFrontendHelper is IUltraFrontendHelper {
         uint256 baseAssets = vault.convertToAssets(shares);
         uint256 assets = vault.convertFromUnderlying(asset, baseAssets, Adjustment.DOWN);
         uint256 withdrawalFee = vault.calculateWithdrawalFee(assets);
-        return assets - withdrawalFee;
+        // withdrawalFee is capped at MAX_WITHDRAWAL_FEE (< 100%) in the vault, so it can never exceed assets
+        unchecked {
+            return assets - withdrawalFee;
+        }
     }
 
     /// @inheritdoc IUltraFrontendHelper
@@ -64,38 +67,28 @@ contract UltraFrontendHelper is IUltraFrontendHelper {
         for (uint256 i = 0; i < assets.length; i++) {
             require(rateProvider.isSupported(assets[i]), "UNSUPPORTED_ASSET");
         }
-        // 2. Count number of redeems
+        // 2. Allocate the maximum possible size and populate in a single pass
+        redeems = new Redeem[](users.length * assets.length);
         uint256 totalRedeems = 0;
-        for (uint256 i = 0; i < users.length; i++) {
-            address user = users[i];
-            for (uint256 j = 0; j < assets.length; j++) {
-                uint256 shares = vault.getPendingRedeem(assets[j], user).shares;
-                if (shares > 0) {
-                    totalRedeems++;
-                }
-            }
-        }
-        if (totalRedeems == 0) {
-            return redeems;
-        }
-        // 3. Build the response with redeems
-        redeems = new Redeem[](totalRedeems);
-        uint256 index = 0;
         for (uint256 i = 0; i < users.length; i++) {
             address user = users[i];
             for (uint256 j = 0; j < assets.length; j++) {
                 address asset = assets[j];
                 PendingRedeem memory redeem = vault.getPendingRedeem(asset, user);
                 if (redeem.shares > 0) {
-                    redeems[index] = Redeem({
+                    redeems[totalRedeems] = Redeem({
                         user: user,
                         asset: asset,
                         shares: redeem.shares,
                         requestTime: redeem.requestTime
                     });
-                    index++;
+                    totalRedeems++;
                 }
             }
+        }
+        // 3. Shrink the array to the actual number of redeems
+        assembly {
+            mstore(redeems, totalRedeems)
         }
         return redeems;
     }

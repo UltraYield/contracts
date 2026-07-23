@@ -13,6 +13,11 @@ import { IERC4626 } from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 ///      base asset. This is a building block: compose it inside another rate provider to add
 ///      any underlying->base conversion (e.g. USDe->USDC). Do NOT register it directly in
 ///      UltraVaultRateProvider unless the vault's underlying == the UltraVault base asset.
+/// @dev SECURITY: convertToAssets/convertToShares reflect the wrapped vault's SPOT exchange
+///      rate. If that vault derives its share price from on-chain spot balances, the rate is
+///      manipulable within a single transaction (e.g. flash loans, asset donations). Only wrap
+///      ERC-4626 vaults whose share price is manipulation-resistant, and account for this when
+///      configuring assets in the UltraYield system.
 contract AnyERC4626VaultRateProvider is IRateProvider {
     ////////////////
     // Immutables //
@@ -48,6 +53,7 @@ contract AnyERC4626VaultRateProvider is IRateProvider {
     /// @param asset The asset to convert (must be the wrapped vault)
     /// @param assets Amount of shares to convert
     /// @return Amount in the vault's underlying asset
+    /// @dev Returns the wrapped vault's spot rate; see contract-level SECURITY note on manipulability.
     function convertToUnderlying(address asset, uint256 assets) external view returns (uint256) {
         require(asset == address(ASSET), InvalidAsset());
         return ASSET.convertToAssets(assets);
@@ -58,6 +64,7 @@ contract AnyERC4626VaultRateProvider is IRateProvider {
     /// @param asset The asset to convert to (must be the wrapped vault)
     /// @param underlyingAssets Amount of the vault's underlying asset to convert
     /// @return Amount of shares
+    /// @dev Returns the wrapped vault's spot rate; see contract-level SECURITY note on manipulability.
     function convertFromUnderlying(address asset, uint256 underlyingAssets) external view returns (uint256) {
         require(asset == address(ASSET), InvalidAsset());
         return ASSET.convertToShares(underlyingAssets);

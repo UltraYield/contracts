@@ -101,6 +101,7 @@ abstract contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IU
     //////////
 
     /// @notice Disable implementation's initializer
+    /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
         _disableInitializers();
     }
@@ -136,6 +137,13 @@ abstract contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IU
     /// @notice V1 -> V2 migration hook
     /// @dev Copies only the live V1 contract addresses into the V2 address registry
     /// @dev Pending V1 address-update proposals are intentionally not migrated
+    /// @dev Transaction-ordering sensitive: intentionally has no caller authorization and MUST be
+    ///      invoked atomically as the `data` payload of the V1->V2 `upgradeToAndCall`. That path is
+    ///      already gated by V1's timelocked, `UPGRADER_ROLE`-only upgrade flow, which commits
+    ///      `keccak256(data)` at propose time, so the arguments here cannot be front-run or tampered
+    ///      with. Do NOT switch the implementation to V2 and call `initializeV2` in separate
+    ///      transactions: the gap would let a third party front-run it with attacker-controlled
+    ///      `_instantRedeemExitpoint` / `_upgradeModule` / `_freezeRegistry`.
     /// @param _instantRedeemExitpoint Address for the new instant redeem exitpoint (not present in V1)
     /// @param _upgradeModule Address of the external timelocked upgrade module (not present in V1)
     /// @param _freezeRegistry Address of the shared freeze registry (optional; address(0) keeps local-only freezing)
@@ -460,7 +468,12 @@ abstract contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IU
             _transferWithdrawalFeeInAsset(_asset, withdrawalFee);
 
             // Fulfill redeem
-            uint256 assetsFulfilled = _fulfillRedeem(_asset, convertedAssets - withdrawalFee, _shares, _controller);
+            // withdrawalFee is capped below SCALE, so it can never exceed convertedAssets
+            uint256 netAssets;
+            unchecked {
+                netAssets = convertedAssets - withdrawalFee;
+            }
+            uint256 assetsFulfilled = _fulfillRedeem(_asset, netAssets, _shares, _controller);
             result[i] = assetsFulfilled;
             totalShares += _shares;
 
@@ -623,7 +636,12 @@ abstract contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IU
             // Convert fees to shares
             uint256 feesInShares = _optimizedConvertToShares(totalFeesInAssets, totals.sharePrice);
 
-            // Mint shares to fee recipient
+            // Mint shares to fee recipient.
+            // TRUST ASSUMPTION: the fee recipient must never be frozen (locally or in the shared
+            // freeze registry) nor de-allowlisted. Fee shares are minted through the gated `_update`,
+            // so a restricted recipient would revert `_collectFees` and DoS every deposit/redeem/
+            // fulfill path, and deadlock `setFeeRecipient` (which collects to the old recipient
+            // first). See docs/COMPLIANCE.md.
             _mint(feeRecipient(), feesInShares);
 
             emit FeesCollected(
@@ -673,7 +691,11 @@ abstract contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IU
         if (managementFee == 0) {
             return 0;
         }
-        uint256 timePassed = block.timestamp - fees.lastUpdateTimestamp;
+        // lastUpdateTimestamp is always a past block.timestamp, so this can never underflow
+        uint256 timePassed;
+        unchecked {
+            timePassed = block.timestamp - fees.lastUpdateTimestamp;
+        }
         return managementFee.mulDivDown(totals.totalAssets * timePassed, ONE_YEAR) / SCALE;
     }
 
@@ -695,7 +717,10 @@ abstract contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IU
         grossAssets = convertFromUnderlying(_asset, underlyingAssets, Adjustment.DOWN);
         Fees memory fees = getFees();
         fee = grossAssets.mulDivDown(fees.withdrawalFee + fees.instantRedeemPremium, SCALE);
-        netAssets = grossAssets - fee;
+        // Combined fee rate is capped below SCALE, so fee can never exceed grossAssets
+        unchecked {
+            netAssets = grossAssets - fee;
+        }
     }
 
     /// @notice Transfer withdrawal fee to fee recipient

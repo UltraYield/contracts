@@ -71,9 +71,12 @@ contract StableChainlinkRateProvider is ChainlinkRateProvider, Ownable2Step {
 
     /// @dev Reverts when the two feed prices deviate from parity by more than `maxDeviationBps`.
     function _validateRate(uint256 underlyingPrice, uint256 assetPrice) internal view override {
-        uint256 diff = assetPrice > underlyingPrice
-            ? assetPrice - underlyingPrice
-            : underlyingPrice - assetPrice;
+        uint256 diff;
+        unchecked {
+            diff = assetPrice > underlyingPrice
+                ? assetPrice - underlyingPrice
+                : underlyingPrice - assetPrice;
+        }
         require(diff * BPS_DENOMINATOR <= underlyingPrice * maxDeviationBps, RateDeviationTooHigh());
     }
 
@@ -82,8 +85,7 @@ contract StableChainlinkRateProvider is ChainlinkRateProvider, Ownable2Step {
             newMaxDeviationBps != 0 && newMaxDeviationBps <= MAX_DEVIATION_BPS,
             InvalidMaxDeviationBps()
         );
-        uint256 oldValue = maxDeviationBps;
+        emit MaxDeviationBpsUpdated(maxDeviationBps, newMaxDeviationBps);
         maxDeviationBps = newMaxDeviationBps;
-        emit MaxDeviationBpsUpdated(oldValue, newMaxDeviationBps);
     }
 }

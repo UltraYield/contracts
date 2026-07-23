@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity 0.8.28;
 
-import { UUPSUpgradeable } from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import { PendingRedeem, ClaimableRedeem } from "src/interfaces/Types.sol";
 import { IRedeemQueueErrors } from "src/interfaces/IRedeemAccounting.sol";
 import { RedeemQueueLib } from "src/utils/RedeemQueueLib.sol";

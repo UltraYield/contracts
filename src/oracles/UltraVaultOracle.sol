@@ -72,7 +72,10 @@ contract UltraVaultOracle is Ownable2Step, IUltraVaultOracle {
     function sharePriceAt(uint256 timestamp) public view returns (uint256) {
         uint208 indexPlusOne = _index.upperLookupRecent(uint48(timestamp));
         require(indexPlusOne != 0, NoPriceData());
-        return _interpolate(_updates[uint256(indexPlusOne) - 1], timestamp);
+        // `indexPlusOne != 0` is enforced above, so the subtraction cannot underflow.
+        unchecked {
+            return _interpolate(_updates[uint256(indexPlusOne) - 1], timestamp);
+        }
     }
 
     /// @notice Share price at `timestamp`.
@@ -188,8 +191,12 @@ contract UltraVaultOracle is Ownable2Step, IUltraVaultOracle {
         if (atTime >= endsAt) {
             return uint256(u.targetPrice);
         }
-        uint256 diff = uint256(u.targetPrice) - uint256(u.startPrice);
-        uint256 elapsed = atTime - uint256(u.startTimestamp);
-        return uint256(u.startPrice) + (diff * elapsed) / uint256(u.vestingDuration);
+        // Vesting is up-only (`targetPrice > startPrice` enforced on write) and this branch
+        // is only reached when `atTime > startTimestamp`, so both subtractions are safe.
+        unchecked {
+            uint256 diff = uint256(u.targetPrice) - uint256(u.startPrice);
+            uint256 elapsed = atTime - uint256(u.startTimestamp);
+            return uint256(u.startPrice) + (diff * elapsed) / uint256(u.vestingDuration);
+        }
     }
 }

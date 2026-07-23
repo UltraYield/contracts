@@ -136,7 +136,10 @@ contract ChainlinkRateProvider is IRateProvider {
         require(answer > 0, InvalidFeedAnswer());
         require(updatedAt != 0, InvalidFeedAnswer());
         require(updatedAt <= block.timestamp, InvalidFeedAnswer());
-        require(block.timestamp - updatedAt <= maxStaleness, StaleFeed());
+        unchecked {
+            // Safe: preceding require guarantees updatedAt <= block.timestamp
+            require(block.timestamp - updatedAt <= maxStaleness, StaleFeed());
+        }
         require(answeredInRound >= roundId, IncompleteRound());
     }
 

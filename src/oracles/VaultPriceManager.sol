@@ -8,6 +8,7 @@ import { Client } from "@chainlink/contracts-ccip/src/v0.8/ccip/libraries/Client
 import { BaseVaultPriceManager } from "src/crosschain/BaseVaultPriceManager.sol";
 import { PriceSyncMessage, PriceSyncMessageLib } from "src/crosschain/PriceSyncMessage.sol";
 import { PriceUpdate } from "src/interfaces/IUltraVaultOracle.sol";
+import { IPausable } from "src/interfaces/IPausable.sol";
 
 /// @title VaultPriceManager
 /// @notice Main-chain price manager: applies updates locally and broadcasts them over
@@ -106,8 +107,8 @@ contract VaultPriceManager is BaseVaultPriceManager {
     function instantPriceUpdate(uint256 newPrice, bool failOnPause) external onlyAdminOrOwner {
         uint256 startTimestamp = block.timestamp + delay;
         // startPrice is unused for an instant update; reuse newPrice.
-        _applyUpdate(newPrice, newPrice, 0, startTimestamp, failOnPause);
-        _broadcastUpdate(newPrice, newPrice, 0, startTimestamp);
+        bool pauseRequired = _applyUpdate(newPrice, newPrice, 0, startTimestamp, failOnPause);
+        _broadcastUpdate(newPrice, newPrice, 0, startTimestamp, pauseRequired);
     }
 
     /// @notice Schedule a linear-vested update and broadcast it. Vesting begins at
@@ -116,8 +117,8 @@ contract VaultPriceManager is BaseVaultPriceManager {
     function linearPriceUpdate(uint256 newPrice, uint256 duration, bool failOnPause) external onlyAdminOrOwner {
         uint256 startTimestamp = block.timestamp + delay;
         uint256 startPrice = oracle.sharePriceAt(startTimestamp);
-        _applyUpdate(startPrice, newPrice, duration, startTimestamp, failOnPause);
-        _broadcastUpdate(startPrice, newPrice, duration, startTimestamp);
+        bool pauseRequired = _applyUpdate(startPrice, newPrice, duration, startTimestamp, failOnPause);
+        _broadcastUpdate(startPrice, newPrice, duration, startTimestamp, pauseRequired);
     }
 
     /// @notice Re-broadcast the oracle's latest stored update to a single destination under
@@ -140,7 +141,11 @@ contract VaultPriceManager is BaseVaultPriceManager {
             startPrice: u.startPrice,
             targetPrice: u.targetPrice,
             vestingDuration: u.vestingDuration,
-            startTimestamp: u.startTimestamp
+            startTimestamp: u.startTimestamp,
+            // Heal the destination to the main vault's *current* pause state (honored
+            // regardless of nonce). If main is paused, a destination that missed the
+            // pausing broadcast pauses too; if main is healthy, no stale pause is forced.
+            pauseRequired: IPausable(vault).paused()
         });
         _ccipSendTo(selector, dest, PriceSyncMessageLib.encode(psm), nonce);
     }
@@ -148,9 +153,8 @@ contract VaultPriceManager is BaseVaultPriceManager {
     /// @notice Update the activation lead time (bounded).
     function setDelay(uint256 newDelay) external onlyOwner {
         require(newDelay >= MIN_DELAY && newDelay <= MAX_DELAY, InvalidDelay());
-        uint256 oldDelay = delay;
+        emit DelayUpdated(delay, newDelay);
         delay = newDelay;
-        emit DelayUpdated(oldDelay, newDelay);
     }
 
     ///////////////////////////
@@ -174,14 +178,14 @@ contract VaultPriceManager is BaseVaultPriceManager {
     function removeDestination(uint64 selector) external onlyOwner {
         require(destinations[selector].exists, DestinationNotFound());
         delete destinations[selector];
-        uint256 len = destinationSelectors.length;
-        for (uint256 i; i < len; ++i) {
+        uint256 last = destinationSelectors.length - 1;
+        for (uint256 i; i < last; ++i) {
             if (destinationSelectors[i] == selector) {
-                destinationSelectors[i] = destinationSelectors[len - 1];
-                destinationSelectors.pop();
+                destinationSelectors[i] = destinationSelectors[last];
                 break;
             }
         }
+        destinationSelectors.pop();
         emit DestinationRemoved(selector);
     }
 
@@ -189,18 +193,20 @@ contract VaultPriceManager is BaseVaultPriceManager {
         external
         onlyOwner
     {
-        require(destinations[selector].exists, DestinationNotFound());
+        Destination storage dest = destinations[selector];
+        require(dest.exists, DestinationNotFound());
         require(receiver != address(0), ZeroAddress());
         require(gasLimit != 0, InvalidGasLimit());
-        destinations[selector].receiver = receiver;
-        destinations[selector].gasLimit = gasLimit;
+        dest.receiver = receiver;
+        dest.gasLimit = gasLimit;
         emit DestinationConfigUpdated(selector, receiver, gasLimit);
     }
 
     /// @notice Flip a destination's active flag (escape hatch for a stuck destination).
     function setDestinationActive(uint64 selector, bool active_) external onlyAdminOrOwner {
-        require(destinations[selector].exists, DestinationNotFound());
-        destinations[selector].active = active_;
+        Destination storage dest = destinations[selector];
+        require(dest.exists, DestinationNotFound());
+        dest.active = active_;
         emit DestinationActiveSet(selector, active_);
     }
 
@@ -222,7 +228,8 @@ contract VaultPriceManager is BaseVaultPriceManager {
         uint256 startPrice,
         uint256 targetPrice,
         uint256 vestingDuration,
-        uint256 startTimestamp
+        uint256 startTimestamp,
+        bool pauseRequired
     ) internal {
         require(startPrice <= type(uint88).max, Overflow());
         require(targetPrice <= type(uint88).max, Overflow());
@@ -236,7 +243,8 @@ contract VaultPriceManager is BaseVaultPriceManager {
             startPrice: uint88(startPrice),
             targetPrice: uint88(targetPrice),
             vestingDuration: uint40(vestingDuration),
-            startTimestamp: uint40(startTimestamp)
+            startTimestamp: uint40(startTimestamp),
+            pauseRequired: pauseRequired
         });
         bytes memory payload = PriceSyncMessageLib.encode(psm);
 
