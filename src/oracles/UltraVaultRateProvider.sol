@@ -19,7 +19,7 @@ contract UltraVaultRateProvider is Ownable2Step, IUltraVaultRateProvider {
     uint8 internal constant MIN_DECIMALS = 6;
     uint8 internal constant MAX_DECIMALS = 18;
     uint256 internal constant SCALE = 1e18; // 100%
-    uint56 internal constant MAX_ADJUSTMENT_RATE = 1e16; // 1%
+    uint56 internal constant MAX_ADJUSTMENT_RATE = 0.01e18; // 1%
 
     ///////////
     // Types //

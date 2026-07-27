@@ -13,8 +13,8 @@ contract StableChainlinkRateProvider is ChainlinkRateProvider, Ownable2Step {
     // Constants //
     ///////////////
 
-    uint256 internal constant BPS_DENOMINATOR = 10_000;
-    uint256 internal constant MAX_DEVIATION_BPS = 300;
+    uint256 internal constant BPS_DENOMINATOR = 100_00;
+    uint256 internal constant MAX_DEVIATION_BPS = 3_00;
 
     /////////////
     // Storage //
