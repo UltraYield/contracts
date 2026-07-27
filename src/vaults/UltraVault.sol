@@ -336,6 +336,14 @@ abstract contract UltraVault is BaseControlledAsyncRedeem, IUltraVaultEvents, IU
     /// @dev Considers both the controller's share balance and available liquidity.
     ///      Liquidity bounds the gross payout (netAssets + fee are both pulled from the exitpoint),
     ///      so the shares are derived from liquidity directly and capped at controller balance.
+    /// @dev CAVEAT: the returned value is an approximate upper bound, not a guaranteed-redeemable
+    ///      amount. `liquidity` is converted back through `convertToUnderlying(..., Adjustment.UP)`,
+    ///      which rounds the intermediate underlying amount upward to correctly invert the spread.
+    ///      When the asset has MORE decimals than the underlying, this upward rounding is not fully
+    ///      offset by the flooring in the decimals step, so `shares` can exceed the exact redeemable
+    ///      maximum by up to one rounding unit. Calling `instantRedeem` with exactly this value may
+    ///      then revert with `InsufficientLiquidity`. Integrators should treat the result as a ceiling
+    ///      (e.g. redeem slightly below it, or handle the boundary revert) rather than a precise limit.
     /// @param _asset The asset address to redeem for
     /// @param controller The address whose shares would be redeemed
     /// @return shares The maximum redeemable shares

@@ -78,6 +78,11 @@ interface IUltraVault is IBaseVault {
 
     /// @notice Returns the maximum shares a controller can instant-redeem for a given asset
     /// @dev Considers both the controller's share balance and available liquidity (min of exitpoint balance and allowance)
+    /// @dev CAVEAT: the returned value is an approximate upper bound, not a guaranteed-redeemable amount.
+    ///      When the asset has more decimals than the underlying, rounding while inverting liquidity back
+    ///      into shares can make the result exceed the exact redeemable maximum by up to one rounding unit,
+    ///      so redeeming exactly this amount may revert with `InsufficientLiquidity`. Treat it as a ceiling
+    ///      (redeem slightly below it, or handle the boundary revert) rather than a precise limit.
     /// @param asset The asset address to redeem for
     /// @param controller The address whose shares would be redeemed
     /// @return shares The maximum redeemable shares
