@@ -366,6 +366,11 @@ abstract contract BaseControlledAsyncRedeem is
     /// @dev Asynchronous function, works when paused
     /// @dev Caller must be controller or operator
     /// @dev Requires sufficient claimable assets
+    /// @dev For an exact claim, withdraw the full claimable balance via
+    ///      `withdraw(maxWithdraw(controller), ...)`, which settles both legs together. A partial
+    ///      withdrawal within one share unit of the balance may retain a negligible sub-share
+    ///      remainder (at most one share's worth, and none when the share price is at or below one).
+    ///      See `_withdrawAsset` for details.
     function withdraw(
         uint256 assets,
         address receiver,
@@ -383,6 +388,11 @@ abstract contract BaseControlledAsyncRedeem is
     /// @dev Asynchronous function, works when paused
     /// @dev Caller must be controller or operator
     /// @dev Requires sufficient claimable assets
+    /// @dev For an exact claim, withdraw the full claimable balance via
+    ///      `withdrawAsset(_asset, maxWithdrawForAsset(_asset, controller), ...)`, which settles both
+    ///      legs together. A partial withdrawal within one share unit of the balance may retain a
+    ///      negligible sub-share remainder (at most one share's worth, and none when the share price
+    ///      is at or below one). See `_withdrawAsset` for details.
     function withdrawAsset(
         address _asset,
         uint256 assets,
@@ -393,6 +403,18 @@ abstract contract BaseControlledAsyncRedeem is
     }
 
     /// @dev Internal function for withdrawing exact number of `assets` in `_asset`
+    /// @dev Rounding note: the shares burned for a partial withdrawal are rounded up
+    ///      (`calculateClaimableSharesForAssets`), so any partial `withdraw` always burns at least
+    ///      one whole share. Claiming a controller's full claimable balance is always exact because it
+    ///      hits the exact-match short-circuit (shares == claimable shares) and settles both legs
+    ///      together. Only a partial withdrawal that lands within one share unit of the full balance
+    ///      can burn the last share while a tiny amount of assets is still owed; `consumeClaimableRedeem`
+    ///      then clears the entry so nothing is stranded or advertised as unclaimable, and that
+    ///      sub-share remainder is retained by the vault for the benefit of the remaining holders. The
+    ///      effect is very limited: at most one share's worth of assets per call, zero when the share
+    ///      price is at or below one, and always avoidable by claiming the full balance via
+    ///      `withdraw(maxWithdraw(...))`, `withdrawAsset(_asset, maxWithdrawForAsset(...))`, or the
+    ///      shares-denominated `redeem(maxRedeem(...))` path.
     function _withdrawAsset(
         address _asset,
         uint256 assets,
@@ -407,7 +429,7 @@ abstract contract BaseControlledAsyncRedeem is
 
         // Execute withdraw. If burning `shares` exhausts the controller's claimable shares,
         // `consumeClaimableRedeem` clears any rounding remainder so nothing is stranded and
-        // maxWithdraw/maxRedeem cannot advertise an unclaimable balance (see BCA-03M).
+        // maxWithdraw/maxRedeem cannot advertise an unclaimable balance.
         _performWithdraw(_asset, assets, shares, receiver, controller);
     }
 
@@ -632,6 +654,10 @@ abstract contract BaseControlledAsyncRedeem is
     /// @param _asset Asset
     /// @param controller Controller address
     /// @return assets Maximum withdraw amount
+    /// @dev Returns the assets leg of the claimable balance verbatim. Passing this value to
+    ///      `withdrawAsset` settles the position exactly; any strictly smaller partial withdrawal may
+    ///      round shares up and, only within one share unit of the full balance, retain a negligible
+    ///      sub-share remainder.
     function maxWithdrawForAsset(
         address _asset,
         address controller
@@ -651,6 +677,9 @@ abstract contract BaseControlledAsyncRedeem is
     /// @param _asset Asset
     /// @param controller Controller address
     /// @return shares Maximum redeem amount
+    /// @dev Returns the shares leg of the claimable balance verbatim. Passing this value to
+    ///      `redeemAsset` settles the position exactly. The shares-denominated redeem path rounds
+    ///      assets down and never retains a remainder, so it is always a safe way to fully exit.
     function maxRedeemForAsset(
         address _asset,
         address controller

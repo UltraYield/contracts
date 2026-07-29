@@ -85,6 +85,9 @@ library RedeemQueueLib {
     // Calculations //
     //////////////////
 
+    /// @dev Shares are rounded UP for partial claims, so a partial `withdraw` always burns at least
+    ///      one whole share. Requesting the full claimable assets hits the exact-match short-circuit
+    ///      and returns the full claimable shares exactly. See `_withdrawAsset`.
     function calculateClaimableSharesForAssets(
         address user,
         address token,
@@ -99,6 +102,9 @@ library RedeemQueueLib {
         }
     }
 
+    /// @dev Assets are rounded DOWN for partial claims and the shares-denominated path never retains a
+    ///      remainder. Requesting the full claimable shares hits the exact-match short-circuit and
+    ///      returns the full claimable assets exactly.
     function calculateClaimableAssetsForShares(
         address user,
         address token,
@@ -189,7 +195,7 @@ library RedeemQueueLib {
         }
         // Defense-in-depth: never leave a one-sided remainder. If either dimension is fully
         // consumed, clear both so a slot can neither strand value nor advertise an
-        // unclaimable balance via maxWithdraw/maxRedeem (see BCA-03M).
+        // unclaimable balance via maxWithdraw/maxRedeem.
         if (remainingAssets == 0 || remainingShares == 0) {
             remainingAssets = 0;
             remainingShares = 0;
