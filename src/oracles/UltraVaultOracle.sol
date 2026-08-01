@@ -193,10 +193,13 @@ contract UltraVaultOracle is Ownable2Step, IUltraVaultOracle {
         }
         // Vesting is up-only (`targetPrice > startPrice` enforced on write) and this branch
         // is only reached when `atTime > startTimestamp`, so both subtractions are safe.
+        // The multiplication stays checked to guard against overflow.
+        uint256 diff;
+        uint256 elapsed;
         unchecked {
-            uint256 diff = uint256(u.targetPrice) - uint256(u.startPrice);
-            uint256 elapsed = atTime - uint256(u.startTimestamp);
-            return uint256(u.startPrice) + (diff * elapsed) / uint256(u.vestingDuration);
+            diff = uint256(u.targetPrice) - uint256(u.startPrice);
+            elapsed = atTime - uint256(u.startTimestamp);
         }
+        return uint256(u.startPrice) + (diff * elapsed) / uint256(u.vestingDuration);
     }
 }
